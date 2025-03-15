@@ -42,10 +42,10 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. �
 # 功能
 
 - 剪切板历史, 支持文字也支持图片, 可以单选某一条复制也支持一次性复制剪切板历史里的所有内容
-    - ![alt text](/img/README/image-1.png)
+    - ![alt text](/img/image-1.png)
 - 自动切换输入法: 
     - 每次切换软件都会自动提示当前所用的输入法状态
-        - ![alt text](/img/README/image-2.png)
+        - ![alt text](/img/image-2.png)
     - 记忆每个软件上一次使用的输入法, 根据软件自动切换输入法, 比如你在A软件里切换为了从中文切到英文输入法之后, 然后转到B使用中文输入法, 当你转到A软件里会自动切为英文输入法
 - 自动最大化窗口, 设置好软件列表之后, 当这些软件被打开的时候会自动最大化窗口
 - 实现文本输入增强, 你可以通过 Capslock 键配合以下辅助按键实现大部分文本操作需求，不再需要在鼠标和键盘间来回切换, 可以类似vim一样的, 各种光标移动都十分方便
