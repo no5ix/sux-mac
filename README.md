@@ -5,8 +5,12 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. �
 
 # features
 
-- Clipboard history, support radio and copy all the content in the clipboard history at one time
-- Remember the input method used by each software last time, and automatically switch the input method according to the software. For example, after you switch from Chinese to English input method in software A, then go to B to use Chinese input method. When you go to software A, it will automatically switch to English input method. 
+- Clipboard history supports both text and images. You can select a single item for copying, and it also allows you to copy all the contents in the clipboard history at once. 
+    - ![alt text](/img/image-1.png)
+- Automatically switch input method:
+    - Every time you switch software, it will automatically prompt the current input method status.
+        - ![alt text](/img/image-2.png)
+    - Remember the input method used by each software last time, and automatically switch the input method according to the software. For example, after you switch from Chinese to English input method in software A, then go to B to use Chinese input method. When you go to software A, it will automatically switch to English input method. 
 - Automatically maximize the window. After setting the software list, it will automatically maximize the window when these software are opened.
 - Implement text input enhancement, you can use the Capslock key with the following auxiliary keys to achieve most of the text operation requirements, no longer need to switch back and forth between the mouse and keyboard, can be similar to vim, various cursor movements are very convenient
     - You can fully customize
@@ -19,28 +23,30 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. �
 - Detect corners and edges and use Hammerspoon to set custom actions, and dual monitors are also supported.
     - You can fully customize
     - default HotEdges settings:
-        - Quickly touch the top ** left ** half edge of the screen twice to maximize the window
-        - Quickly touch the top of the screen twice ** right ** half the edge, you can slide to the top of the window
-        - Quickly touch the bottom of the screen twice ** right ** half the edge, you can slide to the bottom of the window
-        - Quickly touch the left edge of the screen twice with the mouse, you can turn the window into half the size of the screen and paste it on the left edge of the screen
-        - Quickly touch the ** right ** edge of the screen twice to turn the window into half the size of the screen and stick it to the ** right ** edge of the screen
-        - When you have two monitors, right-click on the top left half edge of the screen to move the window to the left side of the monitor and maximize it
-        - When you have two monitors, right-click on the top ** right ** half edge of the screen to move the window to the monitor on the ** right ** side and maximize it
+        - Quickly touch the top  **left**  half edge of the screen twice to maximize the window
+        - Quickly touch the top of the screen twice  **right**  half the edge, you can slide to the top of the window
+        - Quickly touch the bottom of the screen twice  **right**  half the edge, you can slide to the bottom of the window
+        - Quickly touch the **left** edge of the screen twice with the mouse, you can turn the window into half the size of the screen and paste it on the **left** edge of the screen
+        - Quickly touch the  **right**  edge of the screen twice to turn the window into half the size of the screen and stick it to the  **right**  edge of the screen
+        - When you have two monitors, right-click on the top **left** half edge of the screen to move the window to the **left** side of the monitor and maximize it
+        - When you have two monitors, right-click on the top  **right**  half edge of the screen to move the window to the monitor on the  **right**  side and maximize it
         - ...
     - default HotCorners settings:
-        - Mouse touch upper left corner: previous page (such as the previous tab of the webpage, the previous tab of vscode)
-        - Mouse the upper right corner: next page (e.g. the next tab of the web page, the next tab of vscode)
-        - Mouse touch in the lower left corner: Switch to the previous software
-        - Mouse the upper right corner: next page (e.g. the next tab of the web page, the next tab of vscode)
+        - Mouse touch upper **left** corner: previous page (such as the previous tab of the webpage, the previous tab of vscode)
+        - Mouse the upper **right** corner: next page (e.g. the next tab of the web page, the next tab of vscode)
+        - Mouse touch in the lower **left** corner: Switch to the previous software
+        - Mouse the upper **right** corner: next page (e.g. the next tab of the web page, the next tab of vscode)
         - ...
-
-
 
 
 # 功能
 
-- 剪切板历史, 支持单选也支持一次性复制剪切板历史里的所有内容
-- 记忆每个软件上一次使用的输入法, 根据软件自动切换输入法, 比如你在A软件里切换为了从中文切到英文输入法之后, 然后转到B使用中文输入法, 当你转到A软件里会自动切为英文输入法
+- 剪切板历史, 支持文字也支持图片, 可以单选某一条复制也支持一次性复制剪切板历史里的所有内容
+    - ![alt text](/img/README/image-1.png)
+- 自动切换输入法: 
+    - 每次切换软件都会自动提示当前所用的输入法状态
+        - ![alt text](/img/README/image-2.png)
+    - 记忆每个软件上一次使用的输入法, 根据软件自动切换输入法, 比如你在A软件里切换为了从中文切到英文输入法之后, 然后转到B使用中文输入法, 当你转到A软件里会自动切为英文输入法
 - 自动最大化窗口, 设置好软件列表之后, 当这些软件被打开的时候会自动最大化窗口
 - 实现文本输入增强, 你可以通过 Capslock 键配合以下辅助按键实现大部分文本操作需求，不再需要在鼠标和键盘间来回切换, 可以类似vim一样的, 各种光标移动都十分方便
     - 你可以完全自定义
