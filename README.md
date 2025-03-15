@@ -1,6 +1,6 @@
 # sux-mac
 
-A powerful sux-like productivity tool on Mac. 一个 Mac 端的类似 sux 的强大效率工具.
+A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. 一个 Mac 端的类似 [sux](https://github.com/no5ix/sux) 的强大效率工具.
 
 
 # features
