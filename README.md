@@ -39,6 +39,14 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. �
         - ...
 
 
+# Usage
+
+1.	Install the Hammerspoon software: https://www.hammerspoon.org
+2.	Place the .hammerspoon folder in your user home directory.
+3.	Launch Hammerspoon and reload the configuration:
+    - ![alt text](/img/image-3.png)
+
+
 # 功能
 
 - 剪切板历史, 支持文字也支持图片, 可以单选某一条复制也支持一次性复制剪切板历史里的所有内容
@@ -74,13 +82,6 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. �
         - 鼠标触碰右上角: 下一个页面(比如网页的下一个tab, vscode的下一个tab)
         - ...
 
-
-# Usage
-
-1.	Install the Hammerspoon software: https://www.hammerspoon.org
-2.	Place the .hammerspoon folder in your user home directory.
-3.	Launch Hammerspoon and reload the configuration:
-    - ![alt text](/img/image-3.png)
 
 
 # 用法
