@@ -489,7 +489,8 @@ function applicationWatcher(appName, eventType, appObject)
     -- print(appName)
     -- print(eventType)
     -- print("mmms")
-    if (eventType == application.watcher.activated or eventType == application.watcher.launched) then
+    -- if (eventType == application.watcher.activated or eventType == application.watcher.launched) then
+    if (eventType == application.watcher.launched) then
         if SHOULD_MAXIMIZE_APPS[appName] then
             hs.timer.doAfter(0.4, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
                 winresize("max")

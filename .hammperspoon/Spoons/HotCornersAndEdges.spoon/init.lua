@@ -12,7 +12,7 @@ pkg.cornerDelta = 18 -- Delta is in pixels, area to be considered as a corner
 pkg.edgeDeltaLong = 88 -- Delta is in pixels, area to be considered as a edge
 pkg.edgeDeltaShort = 8 -- Delta is in pixels, area to be considered as a edge
 pkg.hotEdgeDoubleHitInterval = 1388 -- ms, 毫秒内连续触碰到屏幕边缘两次视为双击热边缘, 因为hs本身的原因这个值应该不能小于1300
-pkg.isStageManagerEnabled = true  -- please turn it on when u enable stage manager
+pkg.isStageManagerEnabled = false  -- please turn it on when u enable stage manager
 
 -- Local variables
 local curTs = 0  -- ms
@@ -247,7 +247,9 @@ end
 function handleMouseClickOnEdge(event, whichMouseClick)
 	--print("handleMouseClickOnEdge", whichMouseClick)
     local flags = event:getFlags()
+	-- 记录点击位置
     p = event:location()
+
 	--p = hs.mouse.absolutePosition()
     local curFrame
     for _, _frame in pairs(sFrameList) do
@@ -379,6 +381,33 @@ function handleMouseClickOnEdge(event, whichMouseClick)
     else
         -- 处理普通鼠标单击事件
     end
+
+	-- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为
+	-- if whichMouseClick == 'leftMouse' then
+	-- 	local mousePos = hs.mouse.getAbsolutePosition()  -- 获取鼠标点击位置
+	-- 	local win = hs.window.frontmostWindow()         -- 当前前置窗口
+	-- 	-- 获取鼠标所在窗口
+	-- 	local clickedWin = nil
+	-- 	for _, w in ipairs(hs.window.orderedWindows()) do
+	-- 		local f = w:frame()
+	-- 		if mousePos.x >= f.x and mousePos.x <= f.x + f.w and
+	-- 		mousePos.y >= f.y and mousePos.y <= f.y + f.h then
+	-- 			clickedWin = w
+	-- 			break
+	-- 		end
+	-- 	end
+	-- 	-- 确保点击的是后台窗口
+	-- 	if clickedWin and win ~= clickedWin then
+	-- 		clickedWin:focus()
+	-- 		-- 等待窗口激活后，重新发送鼠标点击
+	-- 		hs.timer.doAfter(0.1, function()
+	-- 			hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseDown, mousePos):post()
+	-- 			hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseUp, mousePos):post()
+	-- 		end)
+	-- 		return true  -- 阻止原始点击，避免重复触发
+	-- 	end
+	-- 	return false  -- 允许正常点击
+	-- end
 end
 
 function updateScreen()
