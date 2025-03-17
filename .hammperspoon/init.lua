@@ -7,7 +7,6 @@
 -- - double tap with 2 fingers: middle click
 
 local lastRotateGestureEvents = {}
-local lastTriggerTime = 0
 
 gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(event)
     local gestureType = event:getType(true)
@@ -50,20 +49,18 @@ gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(eve
             end
             -- print("sum=" .. tostring(#lastRotateGestureEvents))
             -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
-            if #lastRotateGestureEvents > 15 then
-                local rotationSum = 0
-                for _, v in ipairs(lastRotateGestureEvents) do
-                    rotationSum = v.rot + rotationSum
-                end
+            local rotationSum = 0
+            for _, v in ipairs(lastRotateGestureEvents) do
+                rotationSum = v.rot + rotationSum
+            end
+            -- print("rotationSum=" .. tostring(rotationSum))
+            if rotationSum > 60 then  -- counter-clockwise rotation
+                hs.eventtap.keyStroke({"cmd"}, "q")
+                lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
+            elseif rotationSum < -60 then  -- Clockwise rotation
                 local win = hs.window.focusedWindow()
                 if win then
-                    if rotationSum > 0 then  -- counter-clockwise rotation
-                        hs.eventtap.keyStroke({"cmd"}, "q")
-                    else  -- Clockwise rotation
-                        win:close()
-                        -- print("cccccccclosseeeec")
-                    end
-                    lastTriggerTime = now -- 记录触发时间，避免短时间内重复触发
+                    win:close()
                 end
                 lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
             end
