@@ -1,47 +1,74 @@
 
+
+
+------------------------ Trackpad gestures: ------------------------
+-- - clockwise rotation: close current window 
+-- - counter-clockwise rotation: quit current App
+-- - double tap with 2 fingers: middle click
+
 local lastRotateGestureEvents = {}
 local lastTriggerTime = 0
 
 gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(event)
--- gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event)
-    local res = event:getTouchDetails()
-    -- for k, v in pairs(res) do
-    --     print("k=" .. k)
-    --     print("v=" .. v)
-    -- end
+    local gestureType = event:getType(true)
+    if gestureType == hs.eventtap.event.types.gesture then
+        -- print("-- they are touching the trackpad, but it's not for a gesture")
+        return false
+    end
 
-    local rotation = res["rotation"]
-    if rotation then
-        local now = hs.timer.secondsSinceEpoch()
-
-        -- 记录最近的滚动事件
-        table.insert(lastRotateGestureEvents, {rot = rotation, time = now})
-        
-        -- 仅保留最近 xs 秒内的事件，防止因滑动速度问题导致检测失败
-        local xs = 0.5
-        while #lastRotateGestureEvents > 0 and now - lastRotateGestureEvents[1].time > xs do
-            table.remove(lastRotateGestureEvents, 1)
-        end
-
-        -- print("sum=" .. tostring(#lastRotateGestureEvents))
-        -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
-        if #lastRotateGestureEvents > 35 then
-            local rotationSum = 0
-            for _, v in ipairs(lastRotateGestureEvents) do
-                rotationSum = v.rot + rotationSum
+    -- if gestureType == hs.eventtap.event.types.gesture then
+    --     print("-- they are touching the trackpad, but it's not for a gesture")
+    -- elseif gestureType == hs.eventtap.event.types.magnify then
+    --     print("-- they're preforming a magnify gesture")
+    
+    if gestureType == hs.eventtap.event.types.smartMagnify then
+        -- print("-- they're preforming a smartMagnify gesture")
+        local mousePos = hs.mouse.absolutePosition()
+        hs.eventtap.middleClick(mousePos)
+        -- -- minimize
+        -- local win = hs.window.focusedWindow()
+        -- if win then
+        --     win:minimize()
+        -- end
+        return true
+    elseif gestureType == hs.eventtap.event.types.rotate then
+        -- print("-- they're preforming a rotate gesture")
+        local res = event:getTouchDetails()
+        -- for k, v in pairs(res) do
+        --     print("k=" .. k)
+        --     print("v=" .. v)
+        -- end
+        local rotation = res["rotation"]
+        if rotation then
+            local now = hs.timer.secondsSinceEpoch()
+            -- 记录最近的滚动事件
+            table.insert(lastRotateGestureEvents, {rot = rotation, time = now})
+            -- 仅保留最近 xs 秒内的事件，防止因滑动速度问题导致检测失败
+            local xs = 1
+            while #lastRotateGestureEvents > 0 and now - lastRotateGestureEvents[1].time > xs do
+                table.remove(lastRotateGestureEvents, 1)
             end
-            local win = hs.window.focusedWindow()
-            if win then
-                if rotationSum > 0 then  -- counter-clockwise rotation
-                    hs.eventtap.keyStroke({"cmd"}, "q")
-                else  -- Clockwise rotation
-                    win:close()
-                    -- print("cccccccclosseeeec")
+            -- print("sum=" .. tostring(#lastRotateGestureEvents))
+            -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
+            if #lastRotateGestureEvents > 15 then
+                local rotationSum = 0
+                for _, v in ipairs(lastRotateGestureEvents) do
+                    rotationSum = v.rot + rotationSum
                 end
-                lastTriggerTime = now -- 记录触发时间，避免短时间内重复触发
+                local win = hs.window.focusedWindow()
+                if win then
+                    if rotationSum > 0 then  -- counter-clockwise rotation
+                        hs.eventtap.keyStroke({"cmd"}, "q")
+                    else  -- Clockwise rotation
+                        win:close()
+                        -- print("cccccccclosseeeec")
+                    end
+                    lastTriggerTime = now -- 记录触发时间，避免短时间内重复触发
+                end
+                lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
             end
-            lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
         end
+        return true
     end
 end)
 

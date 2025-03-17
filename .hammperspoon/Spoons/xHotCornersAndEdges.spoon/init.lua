@@ -12,7 +12,7 @@ pkg.cornerDelta = 18 -- Delta is in pixels, area to be considered as a corner
 pkg.edgeDeltaLong = 88 -- Delta is in pixels, area to be considered as a edge
 pkg.edgeDeltaShort = 8 -- Delta is in pixels, area to be considered as a edge
 pkg.hotEdgeDoubleHitInterval = 1388 -- ms, 毫秒内连续触碰到屏幕边缘两次视为双击热边缘, 因为hs本身的原因这个值应该不能小于1300
-pkg.isStageManagerEnabled = false  -- please turn it on when u enable stage manager
+pkg.isStageManagerEnabled = true  -- please turn it on when u enable stage manager
 
 -- Local variables
 local curTs = 0  -- ms

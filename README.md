@@ -7,6 +7,7 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 # features
 
 - Trackpad gestures:  
+    - double tap with 2 fingers: middle click
     - clockwise rotation: close current window 
     - counter-clockwise rotation: quit current App
 - Clipboard history supports both text and images. You can select a single item for copying, and it also allows you to copy all the contents in the clipboard history at once. 
@@ -53,6 +54,10 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 
 # 功能
 
+-触控板手势：
+    -用2个手指双击：中键单击
+    -顺时针旋转：关闭当前窗口
+    -逆时针旋转：退出当前应用
 - 剪切板历史, 支持文字也支持图片, 可以单选某一条复制也支持一次性复制剪切板历史里的所有内容
     - ![alt text](/img/image-1.png)
 - 自动切换输入法: 
