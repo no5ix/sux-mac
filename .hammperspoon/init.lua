@@ -1,4 +1,52 @@
 
+local lastRotateGestureEvents = {}
+local lastTriggerTime = 0
+
+-- gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(event)
+gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event)
+    local res = event:getTouchDetails()
+    for k, v in pairs(res) do
+        print("k=" .. k)
+        print("v=" .. v)
+    end
+
+    local rotation = res["rotation"]
+    if rotation then
+        local now = hs.timer.secondsSinceEpoch()
+
+        -- 记录最近的滚动事件
+        table.insert(lastRotateGestureEvents, {rot = rotation, time = now})
+        
+        -- 仅保留最近 xs 秒内的事件，防止因滑动速度问题导致检测失败
+        local xs = 0.5
+        while #lastRotateGestureEvents > 0 and now - lastRotateGestureEvents[1].time > xs do
+            table.remove(lastRotateGestureEvents, 1)
+        end
+
+        print("sum=" .. tostring(#lastRotateGestureEvents))
+        -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
+        if #lastRotateGestureEvents > 40 then
+            local rotationSum = 0
+            for _, v in ipairs(lastRotateGestureEvents) do
+                rotationSum = v.rot + rotationSum
+            end
+            local win = hs.window.focusedWindow()
+            if win then
+                if rotationSum > 0 then  -- counter-clockwise rotation
+                    hs.eventtap.keyStroke({"cmd"}, "q")
+                else  -- Clockwise rotation
+                    win:close()
+                    print("cccccccclosseeeec")
+                end
+                lastTriggerTime = now -- 记录触发时间，避免短时间内重复触发
+            end
+            lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
+        end
+    end
+end)
+
+gestureWatcher:start()
+
 
 
 ------------------------ when your mac is fully charged, make some noise to notify ------------------------
