@@ -2,13 +2,13 @@
 local lastRotateGestureEvents = {}
 local lastTriggerTime = 0
 
--- gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(event)
-gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event)
+gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(event)
+-- gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event)
     local res = event:getTouchDetails()
-    for k, v in pairs(res) do
-        print("k=" .. k)
-        print("v=" .. v)
-    end
+    -- for k, v in pairs(res) do
+    --     print("k=" .. k)
+    --     print("v=" .. v)
+    -- end
 
     local rotation = res["rotation"]
     if rotation then
@@ -23,7 +23,7 @@ gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event
             table.remove(lastRotateGestureEvents, 1)
         end
 
-        print("sum=" .. tostring(#lastRotateGestureEvents))
+        -- print("sum=" .. tostring(#lastRotateGestureEvents))
         -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
         if #lastRotateGestureEvents > 40 then
             local rotationSum = 0
@@ -36,7 +36,7 @@ gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.swipe}, function(event
                     hs.eventtap.keyStroke({"cmd"}, "q")
                 else  -- Clockwise rotation
                     win:close()
-                    print("cccccccclosseeeec")
+                    -- print("cccccccclosseeeec")
                 end
                 lastTriggerTime = now -- 记录触发时间，避免短时间内重复触发
             end
