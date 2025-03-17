@@ -1,10 +1,14 @@
 # sux-mac
 
-A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac. 一个 Mac 端的类似 [sux](https://github.com/no5ix/sux) 的强大效率工具.
+A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.  
+一个 Mac 端的类似 [sux](https://github.com/no5ix/sux) 的强大效率工具.
 
 
 # features
 
+- Trackpad gestures:  
+    - clockwise rotation: close current window 
+    - counter-clockwise rotation: quit current App
 - Clipboard history supports both text and images. You can select a single item for copying, and it also allows you to copy all the contents in the clipboard history at once. 
     - ![alt text](/img/image-1.png)
 - Automatically switch input method:

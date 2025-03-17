@@ -25,7 +25,7 @@ gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(eve
 
         -- print("sum=" .. tostring(#lastRotateGestureEvents))
         -- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
-        if #lastRotateGestureEvents > 40 then
+        if #lastRotateGestureEvents > 35 then
             local rotationSum = 0
             for _, v in ipairs(lastRotateGestureEvents) do
                 rotationSum = v.rot + rotationSum
