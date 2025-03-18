@@ -95,12 +95,26 @@ clipboard_chooser = chooser.new(function(choice)
         pasteboard_watcher:stop()
         if choice.type == "text" then
             pasteboard.setContents(choice.data)
-            hs.eventtap.keyStroke({"cmd"}, "v")
-            restoreNewestClipContent()
+            hs.timer.doAfter(0.6, function()
+                hs.eventtap.keyStroke({"cmd"}, "v")
+                hs.timer.doAfter(0.6, function()
+                    restoreNewestClipContent()
+                    -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
+                    pasteboard_watcher:start()
+                    menuData = nil
+                end)
+            end)
         elseif choice.type == "image" then 
             pasteboard.writeObjects(choice.data)
-            hs.eventtap.keyStroke({"cmd"}, "v")
-            restoreNewestClipContent()
+            hs.timer.doAfter(0.6, function()
+                hs.eventtap.keyStroke({"cmd"}, "v")
+                hs.timer.doAfter(0.6, function()
+                    restoreNewestClipContent()
+                    -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
+                    pasteboard_watcher:start()
+                    menuData = nil
+                end)
+            end)
         elseif choice.type == "paste_all" then 
             pasteSomeWithDelimiterFromStartRow(#menuData)
         elseif choice.type == "clear_all" then 
@@ -108,9 +122,7 @@ clipboard_chooser = chooser.new(function(choice)
             text_clipboard_history = {}  -- Array to store the clipboard history for text
             img_clipboard_history = {}  -- Array to store the clipboard history for img
             -- last_change = pasteboard.changeCount()
-        end
-        if choice.type ~= "paste_all" then  -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
-            -- last_change = pasteboard.changeCount()
+            -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
             pasteboard_watcher:start()
             menuData = nil
         end
