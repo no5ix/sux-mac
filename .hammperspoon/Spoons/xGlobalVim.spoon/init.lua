@@ -47,11 +47,19 @@ hs.hotkey.bind({"ctrl"}, "g", hs.fnutils.partial(fn_cb_task, "z", "cmd", "shift"
 hs.hotkey.bind({"ctrl"}, "b", hs.fnutils.partial(fn_cb_task, "/", "cmd"))
 
 hs.hotkey.bind({"ctrl"}, "r", hs.fnutils.partial(fn_cb_task, "return"))
+-- hs.hotkey.bind({"ctrl", "shift"}, "r", function()
+--     hs.eventtap.keyStroke({""}, "up", 0)
+--     hs.eventtap.keyStroke({"ctrl"}, "e", 0)
+--     hs.eventtap.keyStroke({""}, "return", 0)
+-- end)
 
 hs.hotkey.bind({"ctrl"}, "t", function()
     hs.eventtap.keyStroke({"ctrl"}, "a", 0)
     hs.eventtap.keyStroke({}, "tab", 0)
 end)
+
+hs.hotkey.bind({"ctrl"}, "f", hs.fnutils.partial(fn_cb_task, "up"))
+hs.hotkey.bind({"ctrl", "shift"}, "f", hs.fnutils.partial(fn_cb_task, "down"))
 
 -- hs.hotkey.bind({"alt", "shift"}, "s", function()
 --     fn_cb_switch_input_source()
@@ -109,26 +117,26 @@ hs.hotkey.bind({"ctrl", "shift"}, ".",  hs.fnutils.partial(fn_cb_task, "e", "ctr
 hs.hotkey.bind({"ctrl"}, "d", hs.fnutils.partial(fn_cb_task, "forwarddelete"), nil , hs.fnutils.partial(fn_cb_task, "forwarddelete"))
 hs.hotkey.bind({"ctrl", "shift"}, "d",  hs.fnutils.partial(fn_cb_task, "delete"), nil , hs.fnutils.partial(fn_cb_task, "delete"))
 
-hs.hotkey.bind({"ctrl"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "delete", "alt"))
+hs.hotkey.bind({"ctrl", "shift"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "delete", "alt"))
 
-hs.hotkey.bind({"ctrl"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"))
+hs.hotkey.bind({"ctrl", "shift"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"))
 
 ------------- 类似 vi 的键盘设置 2. 下面是特殊字符 ----------
 
-hs.hotkey.bind({"ctrl"}, "p", hs.fnutils.partial(fn_cb_char, "&"), nil , hs.fnutils.partial(fn_cb_char, "&"))
-hs.hotkey.bind({"ctrl", "shift"}, "p",  hs.fnutils.partial(fn_cb_char, "#"), nil , hs.fnutils.partial(fn_cb_char, "#"))
+-- hs.hotkey.bind({"ctrl"}, "p", hs.fnutils.partial(fn_cb_char, "&"), nil , hs.fnutils.partial(fn_cb_char, "&"))
+hs.hotkey.bind({"ctrl", "shift"}, "p",  hs.fnutils.partial(fn_cb_char, "#"), nil , hs.fnutils.partial(fn_cb_char, "&"))
 
 hs.hotkey.bind({"ctrl"}, "u", hs.fnutils.partial(fn_cb_char, "!"), nil , hs.fnutils.partial(fn_cb_char, "!"))
-hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "@"), nil , hs.fnutils.partial(fn_cb_char, "@"))
+hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "~"), nil , hs.fnutils.partial(fn_cb_char, "~"))
 
-hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "*"), nil , hs.fnutils.partial(fn_cb_char, "*"))
-hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "%"), nil , hs.fnutils.partial(fn_cb_char, "%"))
+hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "%"), nil , hs.fnutils.partial(fn_cb_char, "%"))
+hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "*"), nil , hs.fnutils.partial(fn_cb_char, "*"))
 
-hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "_"), nil , hs.fnutils.partial(fn_cb_char, "_"))
-hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "-"), nil , hs.fnutils.partial(fn_cb_char, "-"))
+hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "_"), nil , hs.fnutils.partial(fn_cb_char, "+"))
+hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "-"), nil , hs.fnutils.partial(fn_cb_char, "-"))
 
-hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "="), nil , hs.fnutils.partial(fn_cb_char, "="))
-hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "+"), nil , hs.fnutils.partial(fn_cb_char, "+"))
+hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "="), nil , hs.fnutils.partial(fn_cb_char, "_"))
+hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "+"), nil , hs.fnutils.partial(fn_cb_char, "="))
 
 hs.hotkey.bind({"ctrl"}, "9", hs.fnutils.partial(fn_cb_char, "["), nil , hs.fnutils.partial(fn_cb_char, "["))
 hs.hotkey.bind({"ctrl", "shift"}, "9",  hs.fnutils.partial(fn_cb_char, "{"), nil , hs.fnutils.partial(fn_cb_char, "{"))

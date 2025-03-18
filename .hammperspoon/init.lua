@@ -54,10 +54,10 @@ gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(eve
                 rotationDegreesSum = v.rot + rotationDegreesSum
             end
             -- print("rotationDegreesSum=" .. tostring(rotationDegreesSum))
-            if rotationDegreesSum > 60 then  -- counter-clockwise rotation
+            if rotationDegreesSum > 50 then  -- counter-clockwise rotation
                 hs.eventtap.keyStroke({"cmd"}, "q")
                 lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
-            elseif rotationDegreesSum < -60 then  -- Clockwise rotation
+            elseif rotationDegreesSum < -50 then  -- Clockwise rotation
                 local win = hs.window.focusedWindow()
                 if win then
                     win:close()
