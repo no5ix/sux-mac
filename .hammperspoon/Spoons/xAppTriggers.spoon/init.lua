@@ -317,7 +317,10 @@ function applicationWatcher(appName, eventType, appObject)
                 ["com.apple.keylayout.ABC"] = "English",
                 ["com.sogou.inputmethod.sogou.pinyin"] = "中文",
             }
-            hs.alert.show(tempMap[new_input_source], 1.8);
+            hs.alert.show(tempMap[new_input_source], 0.6); 
+            hs.timer.doAfter(0.8, function()  -- Sometimes it will show only on the screen where the **previous** app **you** clicked, because switching to another app needs **a moment**. 
+                hs.alert.show(tempMap[new_input_source], 1.0);
+            end)
 
             -- changeInputSourceToLastLang(appObject)
             -- hs.alert.show(str, [style], [screen], [seconds]) -> uuid
