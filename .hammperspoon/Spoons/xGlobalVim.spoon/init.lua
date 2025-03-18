@@ -58,8 +58,8 @@ hs.hotkey.bind({"ctrl"}, "t", function()
     hs.eventtap.keyStroke({}, "tab", 0)
 end)
 
-hs.hotkey.bind({"ctrl"}, "f", hs.fnutils.partial(fn_cb_task, "up"))
-hs.hotkey.bind({"ctrl", "shift"}, "f", hs.fnutils.partial(fn_cb_task, "down"))
+hs.hotkey.bind({"ctrl"}, "f", hs.fnutils.partial(fn_cb_task, "down"))
+hs.hotkey.bind({"ctrl", "shift"}, "f", hs.fnutils.partial(fn_cb_task, "up"))
 
 -- hs.hotkey.bind({"alt", "shift"}, "s", function()
 --     fn_cb_switch_input_source()
