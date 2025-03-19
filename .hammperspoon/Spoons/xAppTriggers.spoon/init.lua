@@ -335,7 +335,11 @@ function applicationWatcher(appName, eventType, appObject)
                 hs.timer.doAfter(0.8, function()
                     style.fillColor = {red=0.5, green=0, blue=0.5, alpha=0.9} -- 紫色背景
                     style.atScreenEdge = 0
-                    hs.alert.show(tempMap[new_input_source], style, 1.0) -- 显示 1.0 秒
+                    hs.alert.show(tempMap[new_input_source], style, 0.6) -- 显示 1.0 秒
+                    hs.timer.doAfter(0.8, function()
+                        style.fillColor = { red = 1, green = 0.5, blue = 0, alpha = 1 } -- 橙色
+                        hs.alert.show(tempMap[new_input_source], style, 1) -- 显示 1.0 秒
+                    end)
                 end)
             end)
 
