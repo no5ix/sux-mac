@@ -317,13 +317,26 @@ function applicationWatcher(appName, eventType, appObject)
                 ["com.apple.keylayout.ABC"] = "English",
                 ["com.sogou.inputmethod.sogou.pinyin"] = "中文",
             }
-            hs.alert.show(tempMap[new_input_source], 0.6); 
-            hs.timer.doAfter(0.8, function()  -- Sometimes it will show only on the screen where the **previous** app **you** clicked, because switching to another app needs **a moment**. 
-                hs.alert.show(tempMap[new_input_source], 1.0);
+            local style =
+            {
+                fillColor = {red=0, green=0.5, blue=1, alpha=0.9}, -- 蓝色背景
+                strokeColor = {red=1, green=1, blue=1, alpha=1}, -- 白色边框
+                strokeWidth = 2, -- 边框宽度
+                textColor = {red=1, green=1, blue=1, alpha=1}, -- 白色文字
+                -- textSize = 20, -- 文字大小
+                -- radius = 10 -- 圆角
+            }
+            hs.alert.show(tempMap[new_input_source], style, 0.6)
+            hs.timer.doAfter(0.8, function()  -- Sometimes it will show only on the screen where the previous app you clicked, because switching to another app needs a moment. 
+                style.fillColor = {red=0.5, green=0.5, blue=0.5, alpha=0.9} -- 灰色背景
+                hs.alert.show(tempMap[new_input_source], style, 0.6)
+                hs.timer.doAfter(0.8, function()
+                    style.fillColor = {red=0.5, green=0, blue=0.5, alpha=0.9} -- 紫色背景
+                    hs.alert.show(tempMap[new_input_source], style, 1.0) -- 显示 1.0 秒
+                end)
             end)
 
             -- changeInputSourceToLastLang(appObject)
-            -- hs.alert.show(str, [style], [screen], [seconds]) -> uuid
             -- hs.keycodes.currentSourceID("com.sogou.inputmethod.sogou.pinyin")  -- 永远保证是搜狗输入法
         end)
     end

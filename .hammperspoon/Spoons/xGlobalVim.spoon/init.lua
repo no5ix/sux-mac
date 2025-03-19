@@ -130,13 +130,13 @@ hs.hotkey.bind({"ctrl"}, "u", hs.fnutils.partial(fn_cb_char, "!"), nil , hs.fnut
 hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "~"), nil , hs.fnutils.partial(fn_cb_char, "~"))
 
 hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "%"), nil , hs.fnutils.partial(fn_cb_char, "%"))
-hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "*"), nil , hs.fnutils.partial(fn_cb_char, "*"))
+hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "^"), nil , hs.fnutils.partial(fn_cb_char, "^"))
 
-hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "_"), nil , hs.fnutils.partial(fn_cb_char, "+"))
-hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "-"), nil , hs.fnutils.partial(fn_cb_char, "-"))
+hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "_"), nil , hs.fnutils.partial(fn_cb_char, "_"))
+hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "-"), nil , hs.fnutils.partial(fn_cb_char, "-"))
 
-hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "="), nil , hs.fnutils.partial(fn_cb_char, "_"))
-hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "+"), nil , hs.fnutils.partial(fn_cb_char, "="))
+hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "="), nil , hs.fnutils.partial(fn_cb_char, "="))
+hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "+"), nil , hs.fnutils.partial(fn_cb_char, "+"))
 
 hs.hotkey.bind({"ctrl"}, "9", hs.fnutils.partial(fn_cb_char, "["), nil , hs.fnutils.partial(fn_cb_char, "["))
 hs.hotkey.bind({"ctrl", "shift"}, "9",  hs.fnutils.partial(fn_cb_char, "{"), nil , hs.fnutils.partial(fn_cb_char, "{"))
