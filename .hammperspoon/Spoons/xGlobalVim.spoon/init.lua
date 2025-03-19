@@ -119,6 +119,12 @@ hs.hotkey.bind({"ctrl", "shift"}, "d",  hs.fnutils.partial(fn_cb_task, "delete")
 
 hs.hotkey.bind({"ctrl", "shift"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "delete", "alt"))
 
+hs.hotkey.bind({"ctrl"}, "m", function()
+    hs.eventtap.keyStroke({"ctrl"}, "e", 0)
+    hs.eventtap.keyStroke({"shift"}, "up", 0)
+    hs.eventtap.keyStroke({"ctrl", "shift"}, "e", 0)
+    hs.eventtap.keyStroke({""}, "delete", 0)
+end)
 hs.hotkey.bind({"ctrl", "shift"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"), nil , hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"))
 
 ------------- 类似 vi 的键盘设置 2. 下面是特殊字符 ----------
@@ -129,8 +135,8 @@ hs.hotkey.bind({"ctrl", "shift"}, "p",  hs.fnutils.partial(fn_cb_char, "&"), nil
 hs.hotkey.bind({"ctrl"}, "u", hs.fnutils.partial(fn_cb_char, "!"), nil , hs.fnutils.partial(fn_cb_char, "!"))
 hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "~"), nil , hs.fnutils.partial(fn_cb_char, "~"))
 
-hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "%"), nil , hs.fnutils.partial(fn_cb_char, "%"))
-hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "^"), nil , hs.fnutils.partial(fn_cb_char, "^"))
+hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "*"), nil , hs.fnutils.partial(fn_cb_char, "*"))
+hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "%"), nil , hs.fnutils.partial(fn_cb_char, "%"))
 
 hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "_"), nil , hs.fnutils.partial(fn_cb_char, "_"))
 hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "-"), nil , hs.fnutils.partial(fn_cb_char, "-"))

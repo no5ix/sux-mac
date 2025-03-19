@@ -327,16 +327,16 @@ function applicationWatcher(appName, eventType, appObject)
                 atScreenEdge = 2, -- - 0: screen center (default); 1: top edge; 2: bottom edge .
                 -- radius = 10 -- 圆角
             }
-            hs.alert.show(tempMap[new_input_source], style, 0.6)
-            hs.timer.doAfter(0.8, function()  -- Sometimes it will show only on the screen where the previous app you clicked, because switching to another app needs a moment. 
+            hs.alert.show(tempMap[new_input_source], style, 1)
+            hs.timer.doAfter(0.6, function()  -- Sometimes it will show only on the screen where the previous app you clicked, because switching to another app needs a moment. 
                 style.fillColor = { red = 1, green = 0.5, blue = 0, alpha = 1 } -- 橙色
-                style.atScreenEdge = 2
-                hs.alert.show(tempMap[new_input_source], style, 0.6)
-                hs.timer.doAfter(0.8, function()
+                -- style.atScreenEdge = 0
+                hs.alert.show(tempMap[new_input_source], style, 1)
+                hs.timer.doAfter(0.6, function()
                     style.fillColor = {red=0.5, green=0, blue=0.5, alpha=0.9} -- 紫色背景
-                    style.atScreenEdge = 0
-                    hs.alert.show(tempMap[new_input_source], style, 0.6) -- 显示 1.0 秒
-                    hs.timer.doAfter(0.8, function()
+                    hs.alert.show(tempMap[new_input_source], style, 1) -- 显示 1.0 秒
+                    hs.timer.doAfter(0.6, function()
+                        -- style.atScreenEdge = 2
                         style.fillColor = { red = 1, green = 0.5, blue = 0, alpha = 1 } -- 橙色
                         hs.alert.show(tempMap[new_input_source], style, 1) -- 显示 1.0 秒
                     end)
