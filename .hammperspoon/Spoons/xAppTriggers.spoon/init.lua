@@ -315,7 +315,7 @@ function applicationWatcher(appName, eventType, appObject)
             local new_input_source = changeInputSourceToLastInputSource(appObject)
             local tempMap = {
                 ["com.apple.keylayout.ABC"] = "English",
-                ["com.sogou.inputmethod.sogou.pinyin"] = "中文",
+                ["com.sogou.inputmethod.sogou.pinyin"] = "Chinese",
             }
             local style =
             {
@@ -327,18 +327,19 @@ function applicationWatcher(appName, eventType, appObject)
                 atScreenEdge = 2, -- - 0: screen center (default); 1: top edge; 2: bottom edge .
                 -- radius = 10 -- 圆角
             }
-            hs.alert.show(tempMap[new_input_source], style, 1)
+            local tipsStr = tempMap[new_input_source]
+            hs.alert.show(tipsStr, style, 1)
             hs.timer.doAfter(0.6, function()  -- Sometimes it will show only on the screen where the previous app you clicked, because switching to another app needs a moment. 
                 style.fillColor = { red = 1, green = 0.5, blue = 0, alpha = 1 } -- 橙色
                 -- style.atScreenEdge = 0
-                hs.alert.show(tempMap[new_input_source], style, 1)
+                hs.alert.show(tipsStr, style, 1)
                 hs.timer.doAfter(0.6, function()
                     style.fillColor = {red=0.5, green=0, blue=0.5, alpha=0.9} -- 紫色背景
-                    hs.alert.show(tempMap[new_input_source], style, 1) -- 显示 1.0 秒
+                    hs.alert.show(tipsStr, style, 1) -- 显示 1.0 秒
                     hs.timer.doAfter(0.6, function()
                         -- style.atScreenEdge = 2
                         style.fillColor = { red = 1, green = 0.5, blue = 0, alpha = 1 } -- 橙色
-                        hs.alert.show(tempMap[new_input_source], style, 1) -- 显示 1.0 秒
+                        hs.alert.show(tipsStr, style, 1) -- 显示 1.0 秒
                     end)
                 end)
             end)
