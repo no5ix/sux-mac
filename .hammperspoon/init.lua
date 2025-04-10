@@ -116,8 +116,8 @@ function batteryLevelChanged()
 end
 
 -- Create a battery watcher
-batteryWatcher = hs.battery.watcher.new(batteryLevelChanged)
-batteryWatcher:start() -- Start the watcher
+-- batteryWatcher = hs.battery.watcher.new(batteryLevelChanged)
+-- batteryWatcher:start() -- Start the watcher
 
 
 
