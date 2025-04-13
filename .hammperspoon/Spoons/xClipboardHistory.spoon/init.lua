@@ -92,6 +92,13 @@ end
 
 clipboard_chooser = chooser.new(function(choice)
     if choice then
+        -- print("mmmmpp idx ?" .. tostring(choice.menuItemIdx))
+        -- if choice.menuItemIdx == 3 then
+        --     print("mmmmppx xx ?")
+        --     hs.eventtap.keyStroke({"cmd"}, "v")
+        --     return
+        -- end
+
         pasteboard_watcher:stop()
         if choice.type == "text" then
             pasteboard.setContents(choice.data)
@@ -240,17 +247,23 @@ function showClipboardHistory()
         -- print("unixTs " .. tostring(unixTs))
         local dateTimeStr = "[" .. os.date("%Y-%m-%d %H:%M:%S", unixTs) .. "] "
         if type == "text" then
-            table.insert(menuData, { text = dateTimeStr .. string.sub(v, 0, display_max_text_length),
-                                    type = type,
-                                    rowTs = unixTs,
-                                    data = v})
+            table.insert(menuData, { 
+                menuItemIdx = #menuData + 1,
+                text = dateTimeStr .. string.sub(v, 0, display_max_text_length),
+                type = type,
+                rowTs = unixTs,
+                data = v
+            })
         elseif (type == "image") then
-            table.insert(menuData, { text = dateTimeStr .. "[IMG]",
-                                    type = type,
-                                    rowTs = unixTs,
-                                    data = v,
-                                    --    image = hs.image.imageFromURL(v)})
-                                    image = v})
+            table.insert(menuData, {
+                menuItemIdx = #menuData + 1,
+                text = dateTimeStr .. "[IMG]",
+                type = type,
+                rowTs = unixTs,
+                data = v,
+                --    image = hs.image.imageFromURL(v)})
+                image = v
+            })
         end
     end
 
