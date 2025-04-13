@@ -16,6 +16,7 @@ pkg.isStageManagerEnabled = true  -- please turn it on when u enable stage manag
 
 -- Local variables
 local curTs = 0  -- ms
+local lastMouseClickTs = 0  -- ms
 local lastHitEdgeTs = 0  -- ms
 local lastHitEdgeType = 0 -- 0 是重置, 1 是左上, 2 是左下, 逆时针一直到 上左(8)
 local revisedPos = {}  -- 被局限在当前显示器内的修正了的mouse pos
@@ -382,34 +383,45 @@ function handleMouseClickOnEdge(event, whichMouseClick)
         -- 处理普通鼠标单击事件
     end
 
-	-- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为
-	if whichMouseClick == 'leftMouse' then
-		local mousePos = hs.mouse.absolutePosition()  -- 获取鼠标点击位置
+	-- -- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为, 双击的第2击不处理
+	-- 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。 
+	if whichMouseClick == 'leftMouse' and getMilliseconds() - lastMouseClickTs < 600 then
 		local focusedWin = hs.window.frontmostWindow()         -- 当前前置窗口
-
-		-- 遍历所有可见窗口，从前到后（前面的窗口更可能是鼠标下的）, 获取鼠标所在窗口
 		local mousePos = hs.mouse.absolutePosition()
-        local orderedWindows = hs.window.orderedWindows()
 
+		local clickedWin = nil
+		-- 遍历所有可见窗口，从前到后（前面的窗口更可能是鼠标下的）, 获取鼠标所在窗口
+        local orderedWindows = hs.window.orderedWindows()
         for _, win in ipairs(orderedWindows) do
-            if hs.geometry(mousePos):inside(win:frame()) then
+            if win:isStandard() and hs.geometry(mousePos):inside(win:frame()) then
 				clickedWin = win
                 break
             end
         end
+		-- if clickedWin then
+		-- 	print("click1: " .. clickedWin:title())
+		-- else
+		-- 	print("click1: " .. " null")
+		-- end
 		-- 确保点击的是后台窗口
 		if clickedWin and focusedWin ~= clickedWin then
-			clickedWin:focus()
+			-- clickedWin:focus()
+			-- mouseLeftClickWatcher:stop()
 			-- 等待窗口激活后，重新发送鼠标点击
 			hs.timer.doAfter(0.1, function()
-				hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseDown, mousePos):post()
-				hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseUp, mousePos):post()
+				-- print("click12")
+				hs.eventtap.leftClick(mousePos)
+				-- hs.timer.doAfter(0.6, function()
+				-- 	mouseLeftClickWatcher:start()
+				-- end)
 			end)
 
-			return true  -- 阻止原始点击，避免重复触发
 		end
-		return false  -- 允许正常点击
+		-- return false  -- 允许正常点击
 	end
+
+	lastMouseClickTs = getMilliseconds()
+	return true  -- 阻止原始点击，避免重复触发
 end
 
 function updateScreen()
