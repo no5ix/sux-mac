@@ -6,7 +6,7 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 
 # features
 
-- Directly Click to interact with the window under your mouse pointer (now, you don't need to click the other window first to 'activate' it, before I can interact with it)
+- Directly Click to interact with the window under your mouse pointer (now, you don't need to click the other window first to 'activate' it, before You can interact with it)
 - Trackpad gestures:  
     - double tap with 2 fingers: middle click
     - clockwise rotation: close current window 
