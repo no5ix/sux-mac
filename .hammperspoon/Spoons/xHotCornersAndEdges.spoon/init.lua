@@ -575,7 +575,7 @@ function pkg:init()
 			end
 			middleForDoubleHotEdge = false
 			--end
-		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左触发边
+		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 4) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左1/4触发边
 			if p.y <= lastMouseY then
 				--if #sFrameList == 2 and screenIndex ~= 1 then  -- 容易误触
 				if middleForDoubleHotEdge then
@@ -596,7 +596,7 @@ function pkg:init()
 			end
 			middleForDoubleHotEdge = false
 			--end
-		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x >= (curFrame.w / 2) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 上右触发边
+		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x >= (curFrame.w * 3 / 4) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 上右1/4触发边
 			if p.y <= lastMouseY then
 				--if #sFrameList == 2 and screenIndex ~= 1 then  -- 容易误触
 				if middleForDoubleHotEdge then
