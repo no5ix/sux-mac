@@ -629,7 +629,7 @@ function pkg:init()
 				end
 			end
 			middleForDoubleHotEdge = false
-		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x >= (curFrame.w / 4) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 下右1/4触发边(why 1/4? because we don't wanna trigger the dock)
+		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x >= (curFrame.w * 3 / 4) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 下右1/4触发边(why 1/4? because we don't wanna trigger the dock)
 			if p.y >= lastMouseY then
 				--if #sFrameList == 2 and screenIndex == 1 then  -- 容易误触
 				if middleForDoubleHotEdge then
