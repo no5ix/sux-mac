@@ -12,7 +12,7 @@ pkg.cornerDelta = 18 -- Delta is in pixels, area to be considered as a corner
 pkg.edgeDeltaLong = 88 -- Delta is in pixels, area to be considered as a edge
 pkg.edgeDeltaShort = 8 -- Delta is in pixels, area to be considered as a edge
 pkg.hotEdgeDoubleHitInterval = 1388 -- ms, 毫秒内连续触碰到屏幕边缘两次视为双击热边缘, 因为hs本身的原因这个值应该不能小于1300
-pkg.isStageManagerEnabled = true  -- please turn it on when u enable stage manager
+pkg.isStageManagerEnabled = false  -- please turn it on when u enable stage manager, it will leave some space on the left area of the screen
 
 -- Local variables
 local curTs = 0  -- ms
@@ -383,42 +383,42 @@ function handleMouseClickOnEdge(event, whichMouseClick)
         -- 处理普通鼠标单击事件
     end
 
-	-- -- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为, 双击的第2击不处理
-	-- 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。 
-	if whichMouseClick == 'leftMouse' and getMilliseconds() - lastMouseClickTs < 600 then
-		local focusedWin = hs.window.frontmostWindow()         -- 当前前置窗口
-		local mousePos = hs.mouse.absolutePosition()
+	-- -- -- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为, 双击的第2击不处理
+	-- -- 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。 
+	-- if whichMouseClick == 'leftMouse' and getMilliseconds() - lastMouseClickTs < 600 then
+	-- 	local focusedWin = hs.window.frontmostWindow()         -- 当前前置窗口
+	-- 	local mousePos = hs.mouse.absolutePosition()
 
-		local clickedWin = nil
-		-- 遍历所有可见窗口，从前到后（前面的窗口更可能是鼠标下的）, 获取鼠标所在窗口
-        local orderedWindows = hs.window.orderedWindows()
-        for _, win in ipairs(orderedWindows) do
-            if win:isStandard() and hs.geometry(mousePos):inside(win:frame()) then
-				clickedWin = win
-                break
-            end
-        end
-		-- if clickedWin then
-		-- 	print("click1: " .. clickedWin:title())
-		-- else
-		-- 	print("click1: " .. " null")
-		-- end
-		-- 确保点击的是后台窗口
-		if clickedWin and focusedWin ~= clickedWin then
-			-- clickedWin:focus()
-			-- mouseLeftClickWatcher:stop()
-			-- 等待窗口激活后，重新发送鼠标点击
-			hs.timer.doAfter(0.1, function()
-				-- print("click12")
-				hs.eventtap.leftClick(mousePos)
-				-- hs.timer.doAfter(0.6, function()
-				-- 	mouseLeftClickWatcher:start()
-				-- end)
-			end)
+	-- 	local clickedWin = nil
+	-- 	-- 遍历所有可见窗口，从前到后（前面的窗口更可能是鼠标下的）, 获取鼠标所在窗口
+    --     local orderedWindows = hs.window.orderedWindows()
+    --     for _, win in ipairs(orderedWindows) do
+    --         if win:isStandard() and hs.geometry(mousePos):inside(win:frame()) then
+	-- 			clickedWin = win
+    --             break
+    --         end
+    --     end
+	-- 	-- if clickedWin then
+	-- 	-- 	print("click1: " .. clickedWin:title())
+	-- 	-- else
+	-- 	-- 	print("click1: " .. " null")
+	-- 	-- end
+	-- 	-- 确保点击的是后台窗口
+	-- 	if clickedWin and focusedWin ~= clickedWin then
+	-- 		-- clickedWin:focus()
+	-- 		-- mouseLeftClickWatcher:stop()
+	-- 		-- 等待窗口激活后，重新发送鼠标点击
+	-- 		hs.timer.doAfter(0.1, function()
+	-- 			-- print("click12")
+	-- 			hs.eventtap.leftClick(mousePos)
+	-- 			-- hs.timer.doAfter(0.6, function()
+	-- 			-- 	mouseLeftClickWatcher:start()
+	-- 			-- end)
+	-- 		end)
 
-		end
-		-- return false  -- 允许正常点击
-	end
+	-- 	end
+	-- 	-- return false  -- 允许正常点击
+	-- end
 
 	lastMouseClickTs = getMilliseconds()
 	return true  -- 阻止原始点击，避免重复触发
@@ -634,6 +634,8 @@ function pkg:init()
 						--trigger(ll)
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
+						-- hs.eventtap.event.newKeyEvent({""}, "F12", true):post()
+						-- hs.eventtap.event.newKeyEvent({""}, "F12", false):post()
 					else
 						lastHitEdgeTs = curTs
 						lastHitEdgeType = 3
