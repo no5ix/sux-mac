@@ -58,6 +58,16 @@ hs.hotkey.bind({"ctrl"}, "t", function()
     hs.eventtap.keyStroke({}, "tab", 0)
 end)
 
+hs.hotkey.bind({"ctrl"}, "x", function()
+    hs.eventtap.keyStroke({"ctrl"}, "e", 0)
+    hs.eventtap.keyStroke({"ctrl", "shift"}, "a", 0)
+    hs.eventtap.keyStroke({}, "delete", 0)
+    hs.eventtap.keyStroke({""}, "down", 0)
+    hs.eventtap.keyStroke({"ctrl"}, "a", 0)
+    hs.eventtap.keyStroke({""}, "shift", 0)
+    hs.eventtap.keyStroke({}, "delete", 0)
+end)
+
 hs.hotkey.bind({"ctrl"}, "f", hs.fnutils.partial(fn_cb_task, "down"))
 hs.hotkey.bind({"ctrl", "shift"}, "f", hs.fnutils.partial(fn_cb_task, "up"))
 
