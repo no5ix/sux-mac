@@ -83,10 +83,12 @@ function restoreNewestClipContent()
     if #img_clipboard_history == 0 and #text_clipboard_history == 0 then
         return
     end
-    if menuData[3].type == "text" then
-        pasteboard.setContents(menuData[3].data)
-    else
-        pasteboard.writeObjects(menuData[3].data)
+    if menuData then
+        if menuData[3].type == "text" then
+            pasteboard.setContents(menuData[3].data)
+        else
+            pasteboard.writeObjects(menuData[3].data)
+        end
     end
 end
 
