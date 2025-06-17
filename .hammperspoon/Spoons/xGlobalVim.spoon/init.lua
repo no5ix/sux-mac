@@ -5,6 +5,19 @@ local pkg = {}
 
 
 
+-- 临时测试代码，按下任意键查看 keyCode
+keyDownWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
+    -- 语音键 keyCode
+    local voiceKeyCode = 176
+    if event:getKeyCode() == voiceKeyCode then
+        -- 模拟 Ctrl + Shift + P
+        hs.eventtap.keyStroke({"ctrl", "shift", "alt", "cmd"}, "d")
+        return true  -- 阻止默认行为
+    end
+    return false
+end)
+
+keyDownWatcher:start()
 
 
 -- cd ~/.hammerspoon/ && wget https://raw.githubusercontent.com/hetima/hammerspoon-foundation_remapping/master/foundation_remapping.lua

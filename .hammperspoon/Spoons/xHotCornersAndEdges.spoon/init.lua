@@ -679,6 +679,11 @@ function pkg:start()
 	mouseLeftClickWatcher:start()
 	mouseRightClickWatcher:start()
 	--mouseMiddleClickWatcher:start()
+
+	self:setUpperLeft()
+	self:setLowerLeft()
+	self:setUpperRight()
+	self:setLowerRight()
 	return self
 end
 
@@ -696,11 +701,6 @@ function setCorner(corner, cb)
 	corner.cb = cb
 end
 
-function pkg:setUpperLeft(cb)
-	setCorner(ul, cb)
-	return self
-end
-
 function pkg:getULO()
 	return ul.cb
 end
@@ -711,11 +711,6 @@ end
 
 function pkg:getULH()
 	return ul.hold
-end
-
-function pkg:setLowerLeft(cb)
-	setCorner(ll, cb)
-	return self
 end
 
 function pkg:getLLO()
@@ -730,11 +725,6 @@ function pkg:getLLH()
 	return ll.hold
 end
 
-function pkg:setUpperRight(cb)
-	setCorner(ur, cb)
-	return self
-end
-
 function pkg:getURO()
 	return ur.cb
 end
@@ -745,11 +735,6 @@ end
 
 function pkg:getURH()
 	return ur.hold
-end
-
-function pkg:setLowerRight(cb)
-	setCorner(lr, cb)
-	return self
 end
 
 function pkg:getLRO()
@@ -763,5 +748,224 @@ end
 function pkg:getLRH()
 	return lr.hold
 end
+
+
+-- 触发快捷键 ctrl+shift+tab: 前一个APP
+function pkg:setLowerLeft()
+	local cb = function()
+		-- hs.timer.doAfter(0.16, function()
+		--     -- 模拟释放 Ctrl+Shift 键
+		--     hs.eventtap.keyStroke({}, "ctrl", 0)
+		--     hs.eventtap.keyStroke({}, "shift", 0)
+		-- end)
+		-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 1600)
+		-- toggle_application("Finder")
+		-- application.launchOrFocus("Finder")
+		-- application.launchOrFocus("NetEaseMusic")
+		--application.launchOrFocus("Listen1")
+		-- application.launchOrFocus("WeChat")
+		-- 下面这行代码可以开启一个新的 finder 窗口但是无法聚焦他, 有可能只是后台开启了一个
+		-- hs.osascript.applescript('tell application "Finder" to make new Finder window')
+
+		-- local win = hs.window.focusedWindow()
+		-- win:toggleZoom()
+		
+
+		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+		
+		-- print("low right 1")
+		hs.eventtap.event.newKeyEvent("cmd", true):post()
+		-- print("low right 12")
+		hs.timer.doAfter(0.16, function()
+			-- print("low right 13")
+			hs.eventtap.event.newKeyEvent("tab", true):post()
+			hs.timer.doAfter(0.16, function()
+				-- print("low right 14")
+				hs.eventtap.event.newKeyEvent("tab", false):post()
+				-- print("low right 15")
+				-- print("setLowerRight-tab-false")
+				hs.timer.doAfter(0.16, function()
+					-- print("low right 16")
+					-- print("setLowerRight-cmd-false")
+					-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.cmd, false):post()
+					hs.eventtap.event.newKeyEvent("cmd", false):post()
+					-- print("low right 17")
+				end)
+			end)
+		end)
+	end
+
+	setCorner(ll, cb)
+	return self
+end
+
+
+-- 触发快捷键 ctrl+shift+tab: 前一个标签页
+function pkg:setUpperLeft()
+	local cb = function()
+		-- 模拟按下 Ctrl+Shift 键
+		-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 1600)
+		-- hs.timer.doAfter(0.16, function()
+		--     -- 模拟释放 Ctrl+Shift 键
+		--     hs.eventtap.keyStroke({}, "tab", 0)
+		--     hs.eventtap.keyStroke({}, "shift", 0)
+		--     hs.eventtap.keyStroke({}, "ctrl", 0)
+		-- end)
+		-- hs.eventtap.event.newKeyEvent({"ctrl", "shift"}, "tab", true):post()
+		-- hs.timer.doAfter(0.16, function()
+		--     hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
+		-- end)
+
+
+		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+
+		-- print("up left 1")
+		hs.eventtap.event.newKeyEvent("ctrl", true):post()
+		-- print("up left 12")
+		hs.timer.doAfter(0.01, function()
+			-- print("up left 13")
+			hs.eventtap.event.newKeyEvent("shift", true):post()
+		--    print("up left 14")
+		--    print("setUpperLeft-shift-true")
+			hs.timer.doAfter(0.01, function()
+			-- print("up left 15")
+				hs.eventtap.event.newKeyEvent("tab", true):post()
+			--    print("up left 16")
+				hs.eventtap.event.newKeyEvent("tab", false):post()
+			--    print("up left 17")
+			--    print("setUpperLeft-tab-false")
+				hs.timer.doAfter(0.16, function()
+				-- print("up left 18")
+				--    print("setUpperLeft-shift-false")
+					hs.eventtap.event.newKeyEvent("shift", false):post()
+				--    print("up left 19")
+					hs.timer.doAfter(0.01, function()
+					--    print("setUpperLeft-ctrl-false")
+						-- print("up left 111")
+						hs.eventtap.event.newKeyEvent("ctrl", false):post()
+					--    print("up left 112")
+					end)
+				end)
+			end)
+		end)
+	end
+
+	setCorner(ul, cb)
+	return self
+end
+
+-- 触发快捷键 cmd+tab: 后一个标签页
+function pkg:setLowerRight()
+	local cb = function()
+		--    hs.alert.show('setLowerRight')
+		-- hs.eventtap.keyStroke({"cmd"}, "tab", 1600)
+		-- hs.eventtap.event.newKeyEvent({"cmd"}, "tab", true):post()
+		-- hs.eventtap.event.newKeyEvent({"cmd"}, "tab", false):post()
+
+		-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.cmd, true):post()
+		--application.launchOrFocus("Microsoft Edge")
+		--application.launchOrFocus("NeteaseMusic")
+		--application.launchOrFocus("网易有道翻译")
+
+		-- -- 触发快捷键 ctrl+shift+tab: 前一个标签页
+		-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 0)
+		-- -- 模拟释放 Ctrl+Shift 键
+		-- hs.eventtap.keyStroke({}, "ctrl", 0)
+		-- hs.eventtap.keyStroke({}, "shift", 0)
+
+
+		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+		
+		-- print("low left 1")
+		hs.eventtap.event.newKeyEvent("ctrl", true):post()
+		-- print("low left 12")
+		hs.timer.doAfter(0.02, function()
+			-- print("low left 13")
+			-- hs.eventtap.event.newKeyEvent("shift", true):post()
+			-- print("setUpperLeft-shift-true")
+			-- print("low left 14")
+			hs.timer.doAfter(0.02, function()
+			-- print("low left 15")
+				hs.eventtap.event.newKeyEvent("tab", true):post()
+				-- print("low left 16")
+				hs.eventtap.event.newKeyEvent("tab", false):post()
+				-- print("low left 17")
+				-- print("setUpperLeft-tab-false")
+				hs.timer.doAfter(0.16, function()
+				--    print("setUpperLeft-shift-false")
+					-- print("low left 18")
+					-- hs.eventtap.event.newKeyEvent("shift", false):post()
+					-- print("low left 19")
+					hs.timer.doAfter(0.02, function()
+					-- print("low left 111")
+						-- print("setUpperLeft-ctrl-false")
+						hs.eventtap.event.newKeyEvent("ctrl", false):post()
+						-- print("low left 112")
+					end)
+				end)
+			end)
+		end)
+	end
+	
+	setCorner(lr, cb)
+	return self
+end
+
+-- 触发快捷键 ctrl+tab: 后一个标签页
+function pkg:setUpperRight()
+	local cb = function()
+		--    hs.alert.show('setUpperRight')
+		-- hs.eventtap.keyStroke({"ctrl"}, "tab", 1600)
+		-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", true):post()
+		-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
+		
+		-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
+		-- print("uppppright triggered! 1")
+		--hs.eventtap.event.newKeyEvent("ctrl", true):post()
+		--hs.timer.doAfter(0.68, function()
+		--    print("uppppright triggered! 2")
+		--    hs.eventtap.event.newKeyEvent("tab", true):post()
+		--    -- print("setUpperRight-tab-false")
+		--    hs.timer.doAfter(0.68, function()
+		--        hs.eventtap.event.newKeyEvent("tab", false):post()
+		--        -- print("setUpperRight-tab-false")
+		--        hs.timer.doAfter(0.68, function()
+		--            -- print("setUpperRight-ctrl-false")
+		--            -- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, false):post()
+		--            print("uppppright triggered! 3")
+		--            hs.eventtap.event.newKeyEvent("ctrl", false):post()
+		--        end)
+		--    end)
+		--end)
+
+		-- hs.eventtap.keyStroke({"ctrl"}, "tab", 0)
+		-- hs.eventtap.keyStroke({}, "ctrl", 0)
+
+
+		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+		-- print("up right 1")
+		hs.eventtap.event.newKeyEvent("ctrl", true):post()
+		hs.timer.doAfter(0.01, function()
+			-- print("up right 12")
+			hs.eventtap.event.newKeyEvent("tab", true):post()
+			-- print("up right 13")
+			hs.eventtap.event.newKeyEvent("tab", false):post()
+			-- print("up right 14")
+			-- print("setLowerRight-tab-false")
+			hs.timer.doAfter(0.16, function()
+				-- print("up right 15")
+				-- print("setLowerRight-cmd-false")
+				-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.cmd, false):post()
+				hs.eventtap.event.newKeyEvent("ctrl", false):post()
+				-- print("up right 16")
+			end)
+		end)
+	end
+
+	setCorner(ur, cb)
+	return self
+end
+
+
 
 return pkg
