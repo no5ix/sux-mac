@@ -4,7 +4,7 @@ local application = require "hs.application"
 local pkg = {}
 
 
---------------------- 当聚焦某些app时, 自动切换到上一次离开app时的输入法(已失效) & 科学上网 ---------------------
+--------------------- 当聚焦某些app时, 自动切换到上一次离开app时的输入法 & 科学上网 ---------------------
 
 -- 切换app的时候触发太多了次了, 所以弃用
 -- hs.keycodes.inputSourceChanged(
@@ -25,6 +25,12 @@ local pkg = {}
 --     end
 -- )
 
+-- mac自带的英文输入法
+local firstInputSource = "com.apple.keylayout.US"  -- for American Mac
+if (hs.keycodes.layouts()[1] == "ABC") then
+    firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
+end
+
 -- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 或者 mac自带的简体中文拼音输入法 )
 local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
 if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
@@ -34,14 +40,14 @@ end
 -- 处理切换输入法
 function fn_cb_switch_input_source(from_shift)
     -- 因为 `hs.eventtap.keyStroke({"ctrl", "shift", "cmd"}, "space")`切换输入法是有延时的, 所以这里提前自己算出来写一个输入法名字
-    local curInputSource = "com.apple.keylayout.ABC"
-    if (hs.keycodes.currentSourceID() == "com.apple.keylayout.ABC") then
+    local curInputSource = firstInputSource
+    if (hs.keycodes.currentSourceID() == firstInputSource) then
         curInputSource = secondInputSource
     end
     if from_shift then
         -- 按 shift 的时候用 `hs.keycodes.currentSourceID(curInputSource)`经常输入法没有真正的切换, 不知道原因, 
         -- 所以改为快捷键触发
-        hs.eventtap.keyStroke({"ctrl", "shift", "cmd"}, "space")
+        hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
     else
         hs.keycodes.currentSourceID(curInputSource)
     end
@@ -117,7 +123,7 @@ function autoProxyPac(app)  -- 科学上网自动切换pac
 end
 
 
---------------------- 双击修饰键的逻辑 (模拟切换输入法快捷键, 英文用自带的, 中文用搜狗, 缺点: 两个输入法之间切换得有点慢, 如果打字快的话会导致英文切中文的时候前几个字符打的是英文因为几毫秒之后才从英文切到中文输入法)---------------------
+--------------------- 双击修饰键的逻辑 (模拟切换输入法快捷键, 英文用自带的, 中文用搜狗, 缺点: 两个输入法之间切换得有点慢, 如果打字快的有可能会导致英文切中文的时候前几个字符打的是英文因为几毫秒之后才从英文切到中文输入法) ---------------------
 
 doubleHitMod = {}
 doubleHitMod.lastHitTs = 0
@@ -162,8 +168,8 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             -- hs.eventtap.event.newKeyEvent(hs.keycodes.map.shift, true):post()
             -- hs.eventtap.event.newKeyEvent(hs.keycodes.map.shift, false):post()
             
-            -- -- 模拟 cmd, 因为已经按了两次shift了, 此时需要模拟按一次 cmd 才能干扰让 搜狗输入法 对于第二次的 shift 以为是 shift+cmd, 从而第二次不切输入法了
-            hs.eventtap.keyStroke({}, "cmd", 0) 
+            -- -- 如果只用搜狗输入法打中英文的话, 此处模拟 cmd, 是因为已经按了两次shift了, 此时需要模拟按一次 cmd 才能干扰让 搜狗输入法 对于第二次的 shift 以为是 shift+cmd, 从而第二次不切输入法了
+            -- hs.eventtap.keyStroke({}, "cmd", 0) 
 
             hs.eventtap.keyStroke({"alt"}, 'delete')  -- 模拟往左删除一个词
         else
@@ -171,10 +177,10 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "space")  -- 模拟切换输入法快捷键, 英文用自带的, 中文用搜狗
             fn_cb_switch_input_source(true)
             -- doubleHitMod.lastInputSource = hs.keycodes.currentSourceID()
-            -- if (doubleHitMod.lastInputSource == "com.apple.keylayout.ABC") then
+            -- if (doubleHitMod.lastInputSource == firstInputSource) then
             --     doubleHitMod.lastInputSource = secondInputSource
             -- else
-            --     doubleHitMod.lastInputSource = "com.apple.keylayout.ABC"
+            --     doubleHitMod.lastInputSource = firstInputSource
             -- end
             -- 用这个方式有可能输入法没有真正的切换, 不知道原因
             -- hs.keycodes.currentSourceID(doubleHitMod.lastInputSource)
@@ -212,16 +218,16 @@ CUR_INPUT_LANG = 0  -- 0 for chinese, 1 for english
 APP_NAME_2_LAST_INPUT_LANG = {}
 
 APP_NAME_2_LAST_INPUT_SOURCE = {
-    ["Terminal"] = "com.apple.keylayout.ABC",
-    ["Code"] = "com.apple.keylayout.ABC",  -- vs code
-    ["WebStorm"] = "com.apple.keylayout.ABC",
-    ["PyCharm"] = "com.apple.keylayout.ABC",
-    ["Clion"] = "com.apple.keylayout.ABC",
-    ["IntelliJ IDEA"] = "com.apple.keylayout.ABC",
-    ["IntelliJ IDEA CE"] = "com.apple.keylayout.ABC",
-    ["Rider"] = "com.apple.keylayout.ABC",
-    ["网易有道翻译"] = "com.apple.keylayout.ABC",
-    ["Messages"] = "com.apple.keylayout.ABC",
+    ["Terminal"] = firstInputSource,
+    ["Code"] = firstInputSource,  -- vs code
+    ["WebStorm"] = firstInputSource,
+    ["PyCharm"] = firstInputSource,
+    ["Clion"] = firstInputSource,
+    ["IntelliJ IDEA"] = firstInputSource,
+    ["IntelliJ IDEA CE"] = firstInputSource,
+    ["Rider"] = firstInputSource,
+    ["网易有道翻译"] = firstInputSource,
+    ["Messages"] = firstInputSource,
     
     ["TencentDocs"] = secondInputSource,
     ["腾讯文档"] = secondInputSource,
@@ -320,7 +326,7 @@ function applicationWatcher(appName, eventType, appObject)
             -- print(appObject:bundleID())
             local new_input_source = changeInputSourceToLastInputSource(appObject)
             -- local tempMap = {
-            --     ["com.apple.keylayout.ABC"] = "English",
+            --     [firstInputSource] = "English",
             --     [secondInputSource] = "Chinese",
             -- }
             -- local style =
