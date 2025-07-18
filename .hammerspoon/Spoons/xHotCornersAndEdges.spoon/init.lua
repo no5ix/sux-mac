@@ -29,6 +29,9 @@ local screenWatcher
 local mouseLeftClickWatcher
 local mouseRightClickWatcher
 local mouseMiddleClickWatcher
+local gestureWatcher
+local lastRotateGestureEvents = {}
+
 
 -- Local booleans
 local middle = true  -- 说明鼠标不在触发角的位置
@@ -245,8 +248,48 @@ function TimerLaunchOrFocusApp(appName)
 	end )
 end
 
-function handleMouseClickOnEdge(event, whichMouseClick)
-	--print("handleMouseClickOnEdge", whichMouseClick)
+
+function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
+	local gestureType = event:getType(true)
+	local rotationDegreesSum = 0
+
+	if gestureOrMouseClick == "trackPadGesture" then
+		if gestureType == hs.eventtap.event.types.gesture then
+			-- print("-- they are touching the trackpad, but it's not for a gesture")
+			return false
+		elseif gestureType == hs.eventtap.event.types.rotate then
+			-- print("-- they're preforming a rotate gesture")
+			local res = event:getTouchDetails()
+			-- for k, v in pairs(res) do
+			--     print("k=" .. k)
+			--     print("v=" .. v)
+			-- end
+			local rotation = res["rotation"]
+			if rotation then
+				local now = hs.timer.secondsSinceEpoch()
+				-- 记录最近的滚动事件
+				table.insert(lastRotateGestureEvents, {rot = rotation, time = now})
+				-- 仅保留最近 xs 秒内的事件，防止因滑动速度问题导致检测失败
+				local xs = 1
+				while #lastRotateGestureEvents > 0 and now - lastRotateGestureEvents[1].time > xs do
+					table.remove(lastRotateGestureEvents, 1)
+				end
+				-- print("sum=" .. tostring(#lastRotateGestureEvents))
+				-- hs.alert.show("sum=" .. tostring(#lastRotateGestureEvents), 1.8);
+				for _, v in ipairs(lastRotateGestureEvents) do
+					rotationDegreesSum = v.rot + rotationDegreesSum
+				end
+
+				if rotationDegreesSum <= 38 and rotationDegreesSum >= -38 then
+					return true
+				else
+					lastRotateGestureEvents = {} -- 清空缓存，等待下次手势
+				end
+			end
+		end
+	end
+
+	--print("handleGestureAndMouseClickOnEdge", gestureOrMouseClick)
     local flags = event:getFlags()
 	-- 记录点击位置
     p = event:location()
@@ -263,50 +306,54 @@ function handleMouseClickOnEdge(event, whichMouseClick)
     end
 	if not curFrame then
 		--print("no frame")
-		return
+		return false
 	end
-	--print("checking edge, " .. whichMouseClick .. ", " .. revisedPos.x .. ", " .. curFrame.w)
+	--print("checking edge, " .. gestureOrMouseClick .. ", " .. revisedPos.x .. ", " .. curFrame.w)
 	-- Check edge
 	if revisedPos.x <= pkg.edgeDeltaShort and revisedPos.y <= (curFrame.h / 2) then  -- 左上
-		if whichMouseClick == 'leftMouse' then
-		elseif whichMouseClick == 'rightMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 			--print("ul.cb()")
 			--ul.cb()
 			--print("launchOrFocus NetEaseMusic)")
 			--TimerLaunchOrFocusApp("NetEaseMusic")
+		elseif gestureOrMouseClick == 'trackPadGesture' then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+			elseif gestureType == hs.eventtap.event.types.rotate then
+			end
 		end
 	elseif revisedPos.x >= (curFrame.w - pkg.edgeDeltaShort) and revisedPos.y <= (curFrame.h / 2) then  -- 右上
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 
-		elseif whichMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 			--print("ur.cb()")
 			--ur.cb()
 			--print("launchOrFocus WeChat")
 			--TimerLaunchOrFocusApp("WeChat")
-		elseif whichMouseClick == 'middleMouse' then
-			--print("cmd up handleMouseClickOnEdge")
+		elseif gestureOrMouseClick == 'middleMouse' then
+			--print("cmd up handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
 		end
 	elseif revisedPos.x <= pkg.edgeDeltaShort and revisedPos.y > (curFrame.h / 2) then  -- 左下
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			--print("ul.cb()")
 			--ul.cb()
-		elseif whichMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 
 		end
 	elseif revisedPos.x >= (curFrame.w - pkg.edgeDeltaShort) and revisedPos.y > (curFrame.h / 2) then  -- 右下
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			--print("ur.cb()")
 			--ur.cb()
-		elseif whichMouseClick == 'rightMouse' then
-		elseif whichMouseClick == 'middleMouse' then
-			--print("cmd down handleMouseClickOnEdge")
+		elseif gestureOrMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'middleMouse' then
+			--print("cmd down handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 		end
 	elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			--print("ul.cb()")
 			--ul.cb()
 			-- hs.timer.doAfter(8, function()
@@ -315,8 +362,8 @@ function handleMouseClickOnEdge(event, whichMouseClick)
 				-- print(res)
 				-- hs.wifi.setPower(true)
 			-- end)
-		elseif whichMouseClick == 'rightMouse' then
-			-- print("c s t down handleMouseClickOnEdge")
+		elseif gestureOrMouseClick == 'rightMouse' then
+			-- print("c s t down handleGestureAndMouseClickOnEdge")
 			-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 0)
 			-- -- 模拟释放 Ctrl+Shift 键
 			-- hs.eventtap.keyStroke({}, "ctrl", 0)
@@ -324,17 +371,10 @@ function handleMouseClickOnEdge(event, whichMouseClick)
 			-- print("cmd[")
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
-			local win = hs.window.focusedWindow()
-			if win ~= nil then
-				win:moveOneScreenWest(nil, nil, 0.3)  -- 0.3 是动画时长, move the focused window to the left(west) screen
-				hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-					winresize("max")
-				end)
-			end
-		elseif whichMouseClick == 'middleMouse' then
+		elseif gestureOrMouseClick == 'middleMouse' then
 		end
 	elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x >= (curFrame.w / 2) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 上右
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			-- print("ur.cb()")
 			--ur.cb()
 			-- print(hs.wifi.currentNetwork())
@@ -343,37 +383,75 @@ function handleMouseClickOnEdge(event, whichMouseClick)
 			-- end
 			-- hs.wifi.disassociate()
 			-- hs.wifi.setPower(false)
-		elseif whichMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd]")
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
-			local win = hs.window.focusedWindow()
-			if win ~= nil then
-				win:moveOneScreenEast(nil, nil, 0.3)  -- 0.3 是动画时长, move the focused window to the right(east) screen
-				hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-					winresize("max")
-				end)
-			end
 		end
 	elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 下左
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			--print("launchOrFocus NetEaseMusic)")
 			--TimerLaunchOrFocusApp("NetEaseMusic")
-		elseif whichMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd[")
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
 			--winresize("left")
+		elseif gestureOrMouseClick == 'trackPadGesture' then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+				local win = hs.window.focusedWindow()
+				if win ~= nil then
+					win:moveToScreen(hs.mouse.getCurrentScreen())
+					hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+						winresize("max")
+					end)
+				end
+				return true
+			elseif gestureType == hs.eventtap.event.types.rotate then
+				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+				end
+				return true
+			end
 		end
 	elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x >= (curFrame.w / 2) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 下右
-		if whichMouseClick == 'leftMouse' then
+		if gestureOrMouseClick == 'leftMouse' then
 			--print("launchOrFocus WeChat")
 			--TimerLaunchOrFocusApp("WeChat")
-		elseif whichMouseClick == 'rightMouse' then
+		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd]")
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
 			--winresize("right")
+		end
+	else
+		------------------------ Trackpad gestures: ------------------------
+		-- - clockwise rotation: close current window 
+		-- - counter-clockwise rotation: quit current App
+		-- - double tap with 2 fingers: middle click
+		if gestureOrMouseClick == "trackPadGesture" then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+				-- print("-- they're preforming a smartMagnify gesture")
+				local mousePos = hs.mouse.absolutePosition()
+				hs.eventtap.middleClick(mousePos)
+				-- -- minimize
+				-- local win = hs.window.focusedWindow()
+				-- if win then
+				--     win:minimize()
+				-- end
+				return true
+			elseif gestureType == hs.eventtap.event.types.rotate then
+				-- print("rotationDegreesSum=" .. tostring(rotationDegreesSum))
+				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+					hs.eventtap.keyStroke({"cmd"}, "q")
+				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+					local win = hs.window.focusedWindow()
+					if win then
+						win:close()
+					end
+				end
+				return true
+			end
 		end
 	end
 
@@ -385,7 +463,7 @@ function handleMouseClickOnEdge(event, whichMouseClick)
 
 	-- -- -- 处理当多窗口时候点击, 点击则聚焦并且实施真实的点击行为, 双击的第2击不处理
 	-- -- 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。 
-	-- if whichMouseClick == 'leftMouse' and getMilliseconds() - lastMouseClickTs < 600 then
+	-- if gestureOrMouseClick == 'leftMouse' and getMilliseconds() - lastMouseClickTs < 600 then
 	-- 	local focusedWin = hs.window.frontmostWindow()         -- 当前前置窗口
 	-- 	local mousePos = hs.mouse.absolutePosition()
 
@@ -421,7 +499,7 @@ function handleMouseClickOnEdge(event, whichMouseClick)
 	-- end
 
 	lastMouseClickTs = getMilliseconds()
-	return true  -- 阻止原始点击，避免重复触发
+	return false  -- 阻止原始点击，避免重复触发
 end
 
 function updateScreen()
@@ -439,9 +517,11 @@ function pkg:init()
 	ll = newCorner()
 	lr = newCorner()
 
-	mouseLeftClickWatcher = hs.eventtap.new({hs.eventtap.event.types.leftMouseDown}, function(e) handleMouseClickOnEdge(e, "leftMouse") end)
-	mouseRightClickWatcher = hs.eventtap.new({hs.eventtap.event.types.rightMouseDown}, function(e) handleMouseClickOnEdge(e, "rightMouse") end)
-	--mouseMiddleClickWatcher = hs.eventtap.new({hs.eventtap.event.types.otherMouseDown}, function(e) handleMouseClickOnEdge(e, "middleMouse") end)
+	mouseLeftClickWatcher = hs.eventtap.new({hs.eventtap.event.types.leftMouseDown}, function(e)  return handleGestureAndMouseClickOnEdge(e, "leftMouse") end)
+	mouseRightClickWatcher = hs.eventtap.new({hs.eventtap.event.types.rightMouseDown}, function(e) return handleGestureAndMouseClickOnEdge(e, "rightMouse") end)
+	-- mouseMiddleClickWatcher = hs.eventtap.new({hs.eventtap.event.types.otherMouseDown}, function(e) return handleGestureAndMouseClickOnEdge(e, "middleMouse") end)
+
+	gestureWatcher = hs.eventtap.new({hs.eventtap.event.types.gesture}, function(e) return handleGestureAndMouseClickOnEdge(e, "trackPadGesture") end)
 
 	screenWatcher = hs.screen.watcher.new(updateScreen)
 
@@ -541,7 +621,7 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and (lastHitEdgeType == 1 or lastHitEdgeType == 2) and isMouseInsideFocusedWindowScreen() then
 						--trigger(ll)
 						-- winresize("left")
-						winresize("left")
+						winresize("right")
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -575,7 +655,7 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 5 and isMouseInsideFocusedWindowScreen() then
 						--print("lr hotedge hit?")
 						--trigger(lr)
-						winresize("right")
+						winresize("left")
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -632,6 +712,7 @@ function pkg:init()
 				if middleForDoubleHotEdge then
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 3 and isMouseInsideFocusedWindowScreen() then
 						--trigger(ll)
+						winresize("max")
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 						-- hs.eventtap.event.newKeyEvent({""}, "F12", true):post()
@@ -680,6 +761,8 @@ function pkg:start()
 	mouseRightClickWatcher:start()
 	--mouseMiddleClickWatcher:start()
 
+	gestureWatcher:start()
+
 	self:setUpperLeft()
 	self:setLowerLeft()
 	self:setUpperRight()
@@ -693,6 +776,8 @@ function pkg:stop()
 	mouseLeftClickWatcher:stop()
 	mouseRightClickWatcher:stop()
 	--mouseMiddleClickWatcher:stop()
+
+	gestureWatcher:stop()
 	return self
 end
 
@@ -749,6 +834,103 @@ function pkg:getLRH()
 	return lr.hold
 end
 
+local leftTabCb = function()
+	-- 模拟按下 Ctrl+Shift 键
+	-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 1600)
+	-- hs.timer.doAfter(0.16, function()
+	--     -- 模拟释放 Ctrl+Shift 键
+	--     hs.eventtap.keyStroke({}, "tab", 0)
+	--     hs.eventtap.keyStroke({}, "shift", 0)
+	--     hs.eventtap.keyStroke({}, "ctrl", 0)
+	-- end)
+	-- hs.eventtap.event.newKeyEvent({"ctrl", "shift"}, "tab", true):post()
+	-- hs.timer.doAfter(0.16, function()
+	--     hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
+	-- end)
+
+
+	hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+
+	-- print("up left 1")
+	hs.eventtap.event.newKeyEvent("ctrl", true):post()
+	-- print("up left 12")
+	hs.timer.doAfter(0.01, function()
+		-- print("up left 13")
+		hs.eventtap.event.newKeyEvent("shift", true):post()
+	--    print("up left 14")
+	--    print("setUpperLeft-shift-true")
+		hs.timer.doAfter(0.01, function()
+		-- print("up left 15")
+			hs.eventtap.event.newKeyEvent("tab", true):post()
+		--    print("up left 16")
+			hs.eventtap.event.newKeyEvent("tab", false):post()
+		--    print("up left 17")
+		--    print("setUpperLeft-tab-false")
+			hs.timer.doAfter(0.16, function()
+			-- print("up left 18")
+			--    print("setUpperLeft-shift-false")
+				hs.eventtap.event.newKeyEvent("shift", false):post()
+			--    print("up left 19")
+				hs.timer.doAfter(0.01, function()
+				--    print("setUpperLeft-ctrl-false")
+					-- print("up left 111")
+					hs.eventtap.event.newKeyEvent("ctrl", false):post()
+				--    print("up left 112")
+				end)
+			end)
+		end)
+	end)
+end
+
+
+local rightTabCb = function()
+	--    hs.alert.show('setUpperRight')
+	-- hs.eventtap.keyStroke({"ctrl"}, "tab", 1600)
+	-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", true):post()
+	-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
+	
+	-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
+	-- print("uppppright triggered! 1")
+	--hs.eventtap.event.newKeyEvent("ctrl", true):post()
+	--hs.timer.doAfter(0.68, function()
+	--    print("uppppright triggered! 2")
+	--    hs.eventtap.event.newKeyEvent("tab", true):post()
+	--    -- print("setUpperRight-tab-false")
+	--    hs.timer.doAfter(0.68, function()
+	--        hs.eventtap.event.newKeyEvent("tab", false):post()
+	--        -- print("setUpperRight-tab-false")
+	--        hs.timer.doAfter(0.68, function()
+	--            -- print("setUpperRight-ctrl-false")
+	--            -- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, false):post()
+	--            print("uppppright triggered! 3")
+	--            hs.eventtap.event.newKeyEvent("ctrl", false):post()
+	--        end)
+	--    end)
+	--end)
+
+	-- hs.eventtap.keyStroke({"ctrl"}, "tab", 0)
+	-- hs.eventtap.keyStroke({}, "ctrl", 0)
+
+
+	hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
+	-- print("up right 1")
+	hs.eventtap.event.newKeyEvent("ctrl", true):post()
+	hs.timer.doAfter(0.01, function()
+		-- print("up right 12")
+		hs.eventtap.event.newKeyEvent("tab", true):post()
+		-- print("up right 13")
+		hs.eventtap.event.newKeyEvent("tab", false):post()
+		-- print("up right 14")
+		-- print("setLowerRight-tab-false")
+		hs.timer.doAfter(0.16, function()
+			-- print("up right 15")
+			-- print("setLowerRight-cmd-false")
+			-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.cmd, false):post()
+			hs.eventtap.event.newKeyEvent("ctrl", false):post()
+			-- print("up right 16")
+		end)
+	end)
+end
 
 -- 触发快捷键 ctrl+shift+tab: 前一个APP
 function pkg:setLowerLeft()
@@ -795,62 +977,14 @@ function pkg:setLowerLeft()
 		end)
 	end
 
-	setCorner(ll, cb)
+	setCorner(ll, rightTabCb)
 	return self
 end
 
 
 -- 触发快捷键 ctrl+shift+tab: 前一个标签页
 function pkg:setUpperLeft()
-	local cb = function()
-		-- 模拟按下 Ctrl+Shift 键
-		-- hs.eventtap.keyStroke({"ctrl", "shift"}, "tab", 1600)
-		-- hs.timer.doAfter(0.16, function()
-		--     -- 模拟释放 Ctrl+Shift 键
-		--     hs.eventtap.keyStroke({}, "tab", 0)
-		--     hs.eventtap.keyStroke({}, "shift", 0)
-		--     hs.eventtap.keyStroke({}, "ctrl", 0)
-		-- end)
-		-- hs.eventtap.event.newKeyEvent({"ctrl", "shift"}, "tab", true):post()
-		-- hs.timer.doAfter(0.16, function()
-		--     hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
-		-- end)
-
-
-		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
-
-		-- print("up left 1")
-		hs.eventtap.event.newKeyEvent("ctrl", true):post()
-		-- print("up left 12")
-		hs.timer.doAfter(0.01, function()
-			-- print("up left 13")
-			hs.eventtap.event.newKeyEvent("shift", true):post()
-		--    print("up left 14")
-		--    print("setUpperLeft-shift-true")
-			hs.timer.doAfter(0.01, function()
-			-- print("up left 15")
-				hs.eventtap.event.newKeyEvent("tab", true):post()
-			--    print("up left 16")
-				hs.eventtap.event.newKeyEvent("tab", false):post()
-			--    print("up left 17")
-			--    print("setUpperLeft-tab-false")
-				hs.timer.doAfter(0.16, function()
-				-- print("up left 18")
-				--    print("setUpperLeft-shift-false")
-					hs.eventtap.event.newKeyEvent("shift", false):post()
-				--    print("up left 19")
-					hs.timer.doAfter(0.01, function()
-					--    print("setUpperLeft-ctrl-false")
-						-- print("up left 111")
-						hs.eventtap.event.newKeyEvent("ctrl", false):post()
-					--    print("up left 112")
-					end)
-				end)
-			end)
-		end)
-	end
-
-	setCorner(ul, cb)
+	setCorner(ul, leftTabCb)
 	return self
 end
 
@@ -907,62 +1041,13 @@ function pkg:setLowerRight()
 		end)
 	end
 	
-	setCorner(lr, cb)
+	setCorner(lr, leftTabCb)
 	return self
 end
 
 -- 触发快捷键 ctrl+tab: 后一个标签页
 function pkg:setUpperRight()
-	local cb = function()
-		--    hs.alert.show('setUpperRight')
-		-- hs.eventtap.keyStroke({"ctrl"}, "tab", 1600)
-		-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", true):post()
-		-- hs.eventtap.event.newKeyEvent({"ctrl"}, "tab", false):post()
-		
-		-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
-		-- print("uppppright triggered! 1")
-		--hs.eventtap.event.newKeyEvent("ctrl", true):post()
-		--hs.timer.doAfter(0.68, function()
-		--    print("uppppright triggered! 2")
-		--    hs.eventtap.event.newKeyEvent("tab", true):post()
-		--    -- print("setUpperRight-tab-false")
-		--    hs.timer.doAfter(0.68, function()
-		--        hs.eventtap.event.newKeyEvent("tab", false):post()
-		--        -- print("setUpperRight-tab-false")
-		--        hs.timer.doAfter(0.68, function()
-		--            -- print("setUpperRight-ctrl-false")
-		--            -- hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, false):post()
-		--            print("uppppright triggered! 3")
-		--            hs.eventtap.event.newKeyEvent("ctrl", false):post()
-		--        end)
-		--    end)
-		--end)
-
-		-- hs.eventtap.keyStroke({"ctrl"}, "tab", 0)
-		-- hs.eventtap.keyStroke({}, "ctrl", 0)
-
-
-		hs.eventtap.keyStroke({}, "cmd", 0) -- 经常后面这段代码执行了没效果可能是背什么东西卡住了, 先按一下cmd试试解除
-		-- print("up right 1")
-		hs.eventtap.event.newKeyEvent("ctrl", true):post()
-		hs.timer.doAfter(0.01, function()
-			-- print("up right 12")
-			hs.eventtap.event.newKeyEvent("tab", true):post()
-			-- print("up right 13")
-			hs.eventtap.event.newKeyEvent("tab", false):post()
-			-- print("up right 14")
-			-- print("setLowerRight-tab-false")
-			hs.timer.doAfter(0.16, function()
-				-- print("up right 15")
-				-- print("setLowerRight-cmd-false")
-				-- hs.eventtap.event.newKeyEvent(hs.keycodes.map.cmd, false):post()
-				hs.eventtap.event.newKeyEvent("ctrl", false):post()
-				-- print("up right 16")
-			end)
-		end)
-	end
-
-	setCorner(ur, cb)
+	setCorner(ur, rightTabCb)
 	return self
 end
 

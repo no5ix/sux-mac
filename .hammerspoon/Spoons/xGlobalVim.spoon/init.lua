@@ -5,7 +5,7 @@ local pkg = {}
 
 
 
--- 临时测试代码，按下任意键查看 keyCode
+-- 按下任意键根据keyCode然后触发一个快捷键或者一个行为
 keyDownWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
     -- 语音键 keyCode
     local voiceKeyCode = 176

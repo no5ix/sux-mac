@@ -25,12 +25,18 @@ local pkg = {}
 --     end
 -- )
 
+-- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 或者 mac自带的简体中文拼音输入法 )
+local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
+if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
+    secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
+end
+
 -- 处理切换输入法
 function fn_cb_switch_input_source(from_shift)
     -- 因为 `hs.eventtap.keyStroke({"ctrl", "shift", "cmd"}, "space")`切换输入法是有延时的, 所以这里提前自己算出来写一个输入法名字
     local curInputSource = "com.apple.keylayout.ABC"
     if (hs.keycodes.currentSourceID() == "com.apple.keylayout.ABC") then
-        curInputSource = "com.sogou.inputmethod.sogou.pinyin"
+        curInputSource = secondInputSource
     end
     if from_shift then
         -- 按 shift 的时候用 `hs.keycodes.currentSourceID(curInputSource)`经常输入法没有真正的切换, 不知道原因, 
@@ -69,7 +75,7 @@ end
 
 -- 以下代码专属于开启搜狗输入法的英文输入法模式
 function changeInputSourceToLastLang(app)
-    hs.keycodes.currentSourceID("com.sogou.inputmethod.sogou.pinyin")  -- 永远保证是搜狗输入法
+    hs.keycodes.currentSourceID(secondInputSource)  -- 永远保证是搜狗输入法
     local app_name = app:name()
     local last_input_lang = APP_NAME_2_LAST_INPUT_LANG[app_name]
     if last_input_lang and last_input_lang ~= CUR_INPUT_LANG then
@@ -166,7 +172,7 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             fn_cb_switch_input_source(true)
             -- doubleHitMod.lastInputSource = hs.keycodes.currentSourceID()
             -- if (doubleHitMod.lastInputSource == "com.apple.keylayout.ABC") then
-            --     doubleHitMod.lastInputSource = "com.sogou.inputmethod.sogou.pinyin"
+            --     doubleHitMod.lastInputSource = secondInputSource
             -- else
             --     doubleHitMod.lastInputSource = "com.apple.keylayout.ABC"
             -- end
@@ -217,11 +223,11 @@ APP_NAME_2_LAST_INPUT_SOURCE = {
     ["网易有道翻译"] = "com.apple.keylayout.ABC",
     ["Messages"] = "com.apple.keylayout.ABC",
     
-    ["TencentDocs"] = "com.sogou.inputmethod.sogou.pinyin",
-    ["腾讯文档"] = "com.sogou.inputmethod.sogou.pinyin",
-    ["WeChat"] = "com.sogou.inputmethod.sogou.pinyin",
-    ["微信"] = "com.sogou.inputmethod.sogou.pinyin",
-    ["WPS Office"] = "com.sogou.inputmethod.sogou.pinyin",
+    ["TencentDocs"] = secondInputSource,
+    ["腾讯文档"] = secondInputSource,
+    ["WeChat"] = secondInputSource,
+    ["微信"] = secondInputSource,
+    ["WPS Office"] = secondInputSource,
 }
 
 APP_NAME_2_FOCUSED_ACTION = {
@@ -315,7 +321,7 @@ function applicationWatcher(appName, eventType, appObject)
             local new_input_source = changeInputSourceToLastInputSource(appObject)
             -- local tempMap = {
             --     ["com.apple.keylayout.ABC"] = "English",
-            --     ["com.sogou.inputmethod.sogou.pinyin"] = "Chinese",
+            --     [secondInputSource] = "Chinese",
             -- }
             -- local style =
             -- {

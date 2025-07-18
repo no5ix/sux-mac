@@ -6,7 +6,7 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 
 # features
 
-- Directly Click to interact with the window under your mouse pointer (now, you don't need to click the other window first to 'activate' it, before You can interact with it. Just like the click logic on Windows!)
+<!-- - Directly Click to interact with the window under your mouse pointer (now, you don't need to click the other window first to 'activate' it, before You can interact with it. Just like the click logic on Windows!) -->
 - Trackpad gestures:  
     - double tap with 2 fingers: middle click
     - clockwise rotation: close current window 
@@ -48,14 +48,14 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 # Usage
 
 1.	Install the Hammerspoon software: https://www.hammerspoon.org
-2.	Place the .hammerspoon folder in your user home directory.
+2.	Place the `.hammerspoon` folder in your user home directory.
 3.	Launch Hammerspoon and reload the configuration:
     - ![alt text](/img/image-3.png)
 
 
 # 功能
 
-- 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。 
+<!-- - 直接点击与鼠标指针下方的窗口进行交互（现在，在你能够与之交互之前，无需先点击其他窗口来“激活”它）。  -->
 - 触控板手势:  
     - 用2个手指双击：中键单击
     - 顺时针旋转：关闭当前窗口
@@ -98,6 +98,6 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 # 用法
 
 1. 安装 hammerspoon 软件, https://www.hammerspoon.org
-2. 把 .hammerspoon 放到你的用户根目录
+2. 把 `.hammerspoon` 放到你的用户根目录
 3. 启动 hammerspoon, 重载
     - ![alt text](/img/image-3.png)
