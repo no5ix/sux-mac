@@ -249,6 +249,30 @@ function TimerLaunchOrFocusApp(appName)
 end
 
 
+EDITOR_BROWSER_APPS = {
+    ["Code"] = true,  -- vscode
+    ["WebStorm"] = true,
+    ["PyCharm"] = true,
+    ["Clion"] = true,
+    ["IntelliJ IDEA"] = true,
+    ["IntelliJ IDEA CE"] = true,
+    ["Rider"] = true,
+    ["Safari"] = true,
+    ["Safari浏览器"] = true,
+    ["Microsoft Edge"] = true,
+    ["Google Chrome"] = true,
+}
+
+EDITOR_APPS = {
+    ["Code"] = true,  -- vscode
+    ["WebStorm"] = true,
+    ["PyCharm"] = true,
+    ["Clion"] = true,
+    ["IntelliJ IDEA"] = true,
+    ["IntelliJ IDEA CE"] = true,
+    ["Rider"] = true,
+}
+
 function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 	local gestureType = event:getType(true)
 	local rotationDegreesSum = 0
@@ -319,6 +343,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--TimerLaunchOrFocusApp("NetEaseMusic")
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
+				local app = hs.application.frontmostApplication()
+				if EDITOR_BROWSER_APPS[app:name()] then
+					hs.eventtap.keyStroke({"cmd"}, "[")
+				end
 			elseif gestureType == hs.eventtap.event.types.rotate then
 			end
 		end
@@ -334,13 +362,28 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("cmd up handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
+		elseif gestureOrMouseClick == 'trackPadGesture' then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+				local app = hs.application.frontmostApplication()
+				if EDITOR_BROWSER_APPS[app:name()] then
+					hs.eventtap.keyStroke({"cmd"}, "]")
+				end
+			elseif gestureType == hs.eventtap.event.types.rotate then
+			end
 		end
 	elseif revisedPos.x <= pkg.edgeDeltaShort and revisedPos.y > (curFrame.h / 2) then  -- 左下
 		if gestureOrMouseClick == 'leftMouse' then
 			--print("ul.cb()")
 			--ul.cb()
 		elseif gestureOrMouseClick == 'rightMouse' then
-
+		elseif gestureOrMouseClick == 'trackPadGesture' then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+				local app = hs.application.frontmostApplication()
+				if EDITOR_BROWSER_APPS[app:name()] then
+					hs.eventtap.keyStroke({"cmd"}, "]")
+				end
+			elseif gestureType == hs.eventtap.event.types.rotate then
+			end
 		end
 	elseif revisedPos.x >= (curFrame.w - pkg.edgeDeltaShort) and revisedPos.y > (curFrame.h / 2) then  -- 右下
 		if gestureOrMouseClick == 'leftMouse' then
@@ -351,6 +394,14 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("cmd down handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
+		elseif gestureOrMouseClick == 'trackPadGesture' then
+			if gestureType == hs.eventtap.event.types.smartMagnify then
+				local app = hs.application.frontmostApplication()
+				if EDITOR_BROWSER_APPS[app:name()] then
+					hs.eventtap.keyStroke({"cmd"}, "[")
+				end
+			elseif gestureType == hs.eventtap.event.types.rotate then
+			end
 		end
 	elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左
 		if gestureOrMouseClick == 'leftMouse' then
@@ -448,8 +499,14 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 		if gestureOrMouseClick == "trackPadGesture" then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
 				-- print("-- they're preforming a smartMagnify gesture")
-				local mousePos = hs.mouse.absolutePosition()
-				hs.eventtap.middleClick(mousePos)
+				local app = hs.application.frontmostApplication()
+				if EDITOR_APPS[app:name()] then
+					hs.eventtap.keyStroke({}, "F12")
+				else
+					local mousePos = hs.mouse.absolutePosition()
+					hs.eventtap.middleClick(mousePos)
+				end
+				
 				-- -- minimize
 				-- local win = hs.window.focusedWindow()
 				-- if win then
@@ -461,9 +518,14 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
 					hs.eventtap.keyStroke({"cmd"}, "q")
 				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
-					local win = hs.window.focusedWindow()
-					if win then
-						win:close()
+					local app = hs.application.frontmostApplication()
+				    if EDITOR_BROWSER_APPS[app:name()] then
+						hs.eventtap.keyStroke({"cmd"}, "w")
+					else
+						local win = hs.window.focusedWindow()
+						if win then
+							win:close()
+						end
 					end
 				end
 				return true
