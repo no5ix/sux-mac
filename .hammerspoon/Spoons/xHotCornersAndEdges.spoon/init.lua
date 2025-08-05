@@ -343,10 +343,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--TimerLaunchOrFocusApp("NetEaseMusic")
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local app = hs.application.frontmostApplication()
-				if EDITOR_BROWSER_APPS[app:name()] then
-					hs.eventtap.keyStroke({"cmd"}, "[")
-				end
+				-- local app = hs.application.frontmostApplication()
+				-- if EDITOR_BROWSER_APPS[app:name()] then
+				-- 	hs.eventtap.keyStroke({"cmd"}, "[")
+				-- end
 			elseif gestureType == hs.eventtap.event.types.rotate then
 			end
 		end
@@ -364,10 +364,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local app = hs.application.frontmostApplication()
-				if EDITOR_BROWSER_APPS[app:name()] then
-					hs.eventtap.keyStroke({"cmd"}, "]")
-				end
+				-- local app = hs.application.frontmostApplication()
+				-- if EDITOR_BROWSER_APPS[app:name()] then
+				-- 	hs.eventtap.keyStroke({"cmd"}, "]")
+				-- end
 			elseif gestureType == hs.eventtap.event.types.rotate then
 			end
 		end
@@ -378,10 +378,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 		elseif gestureOrMouseClick == 'rightMouse' then
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local app = hs.application.frontmostApplication()
-				if EDITOR_BROWSER_APPS[app:name()] then
-					hs.eventtap.keyStroke({"cmd"}, "]")
-				end
+				-- local app = hs.application.frontmostApplication()
+				-- if EDITOR_BROWSER_APPS[app:name()] then
+				-- 	hs.eventtap.keyStroke({"cmd"}, "]")
+				-- end
 			elseif gestureType == hs.eventtap.event.types.rotate then
 			end
 		end
@@ -396,10 +396,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local app = hs.application.frontmostApplication()
-				if EDITOR_BROWSER_APPS[app:name()] then
-					hs.eventtap.keyStroke({"cmd"}, "[")
-				end
+				-- local app = hs.application.frontmostApplication()
+				-- if EDITOR_BROWSER_APPS[app:name()] then
+				-- 	hs.eventtap.keyStroke({"cmd"}, "[")
+				-- end
 			elseif gestureType == hs.eventtap.event.types.rotate then
 			end
 		end
