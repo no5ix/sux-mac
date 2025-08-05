@@ -500,10 +500,11 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			if gestureType == hs.eventtap.event.types.smartMagnify then
 				-- print("-- they're preforming a smartMagnify gesture")
 				local app = hs.application.frontmostApplication()
+				local mousePos = hs.mouse.absolutePosition()
 				if EDITOR_APPS[app:name()] then
+					hs.eventtap.leftClick(mousePos)
 					hs.eventtap.keyStroke({}, "F12")
 				else
-					local mousePos = hs.mouse.absolutePosition()
 					hs.eventtap.middleClick(mousePos)
 				end
 				
