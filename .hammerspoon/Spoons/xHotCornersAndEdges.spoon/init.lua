@@ -461,6 +461,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			elseif gestureType == hs.eventtap.event.types.rotate then
 				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
 				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+					local win = hs.window.focusedWindow()
+					if win then
+						win:close()
+					end
 				end
 				return true
 			end
@@ -487,6 +491,10 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			elseif gestureType == hs.eventtap.event.types.rotate then
 				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
 				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+					local win = hs.window.focusedWindow()
+					if win then
+						win:close()
+					end
 				end
 				return true
 			end
