@@ -31,8 +31,9 @@ if (hs.keycodes.layouts()[1] == "ABC") then
     firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
 end
 
--- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 或者 mac自带的简体中文拼音输入法 )
-local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
+-- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
+-- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
+local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
 if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
 end
