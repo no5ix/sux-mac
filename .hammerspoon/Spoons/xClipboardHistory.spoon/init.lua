@@ -14,8 +14,8 @@ local menuData = {}  -- chooser menu data
 
 local clipboard_chooser = nil  -- Chooser/menu object
 
-local max_history_size_for_text = 100
-local max_history_size_for_img = 10
+local max_history_size_for_text = 10000
+local max_history_size_for_img = 100
 local display_max_text_length = 200
 
 -- local last_change = pasteboard.changeCount() -- keeps track of how many times the pasteboard owner has changed // Indicates a new copy has been made
