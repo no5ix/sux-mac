@@ -31,53 +31,72 @@ if (hs.keycodes.layouts()[1] == "ABC") then
     firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
 end
 
+-- new approach:
+local secondInputSource
+
+-- old approach below:
 -- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
 -- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
-local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
-if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
-    secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
-end
+-- local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
+-- if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
+--     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
+-- end
 
 -- 处理切换输入法
 function fn_cb_switch_input_source(from_shift)
     -- 因为 `hs.eventtap.keyStroke({"ctrl", "shift", "cmd"}, "space")`切换输入法是有延时的, 所以这里提前自己算出来写一个输入法名字
     local curInputSource = firstInputSource
-    if (hs.keycodes.currentSourceID() == firstInputSource) then
-        curInputSource = secondInputSource
+
+    local app = hs.application.frontmostApplication()
+    local app_name
+    if app then
+        app_name = app:name()
     end
+
     if from_shift then
         -- 按 shift 的时候用 `hs.keycodes.currentSourceID(curInputSource)`经常输入法没有真正的切换, 不知道原因, 
         -- 所以改为快捷键触发
         hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
+            hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
+                if (hs.keycodes.currentSourceID() ~= firstInputSource) then
+                    secondInputSource = hs.keycodes.currentSourceID()  -- 这个是为了适配之前没有设置好 secondInputSource 的情况, 让它在第一次切换输入法的时候就能正确的设置好 secondInputSource 的值
+                    curInputSource = secondInputSource
+                    -- print("第一次记录secondInputSource,   : " .. secondInputSource)
+                    if app_name then
+                        -- print("主动按键设置改变 curInputSource=" .. curInputSource .. ", appName是: " .. app_name)
+                        APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
+                    end
+                end
+            end)
     else
+        if (hs.keycodes.currentSourceID() == firstInputSource) then
+            curInputSource = secondInputSource
+        end
+        -- print("from shift false,   curInputSource: " .. curInputSource)
         hs.keycodes.currentSourceID(curInputSource)
+        if app_name then
+            APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
+        end
     end
-
-    local app = hs.application.frontmostApplication()
-    if app then
-        local app_name = app:name()
-        -- print("主动按键设置改变 curInputSource=" .. curInputSource .. ", appName是: " .. app_name)
-        APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
-    end
-    return curInputSource
 end
 
 function changeInputSourceToLastInputSource(app)
     local app_name = app:name()
+    -- print("切换了,  0 app_name, " .. app_name)
     local last_input_source = APP_NAME_2_LAST_INPUT_SOURCE[app_name]
     local cur_input_source = hs.keycodes.currentSourceID()
-    local new_input_source = cur_input_source
     if last_input_source then
+        -- print("切换了app后,1")
         if last_input_source ~= cur_input_source then
             -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
             -- hs.keycodes.currentSourceID(last_input_source)
-            new_input_source = fn_cb_switch_input_source()
-            -- print("切换了app后,  changeInputSourceToLastInputSource, 改之后: last_input_source:" .. last_input_source .. ", 当前为: " .. hs.keycodes.currentSourceID() .. ", appName是: " .. app_name)
+            fn_cb_switch_input_source()
         end
     else
+
+        -- print("切换了app后,2, cur_input_source: " .. cur_input_source)
         APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
     end
-    return new_input_source
 end
 
 -- 以下代码专属于开启搜狗输入法的英文输入法模式
