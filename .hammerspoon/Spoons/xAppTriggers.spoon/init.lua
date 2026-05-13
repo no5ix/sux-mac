@@ -4,6 +4,67 @@ local application = require "hs.application"
 local pkg = {}
 
 
+
+CUR_INPUT_LANG = 0  -- 0 for chinese, 1 for english
+APP_NAME_2_LAST_INPUT_LANG = {}
+
+pkg.APP_NAME_2_LAST_INPUT_SOURCE = {
+    ["Terminal"] = firstInputSource,
+    ["Code"] = firstInputSource,  -- vs code
+    ["WebStorm"] = firstInputSource,
+    ["PyCharm"] = firstInputSource,
+    ["Clion"] = firstInputSource,
+    ["IntelliJ IDEA"] = firstInputSource,
+    ["IntelliJ IDEA CE"] = firstInputSource,
+    ["Rider"] = firstInputSource,
+    ["网易有道翻译"] = firstInputSource,
+    ["Messages"] = firstInputSource,
+    
+    ["TencentDocs"] = secondInputSource,
+    ["腾讯文档"] = secondInputSource,
+    ["WeChat"] = secondInputSource,
+    ["微信"] = secondInputSource,
+    ["WPS Office"] = secondInputSource,
+}
+
+APP_NAME_2_FOCUSED_ACTION = {
+    -- ["Safari"] = autoProxyPac,
+    -- ["Safari浏览器"] = autoProxyPac,
+}
+
+SHOULD_MAXIMIZE_APPS = {
+    ["Terminal"] = true,
+    ["Code"] = true,  -- vscode
+    ["WebStorm"] = true,
+    ["PyCharm"] = true,
+    ["Clion"] = true,
+    ["IntelliJ IDEA"] = true,
+    ["IntelliJ IDEA CE"] = true,
+    ["Rider"] = true,
+    ["TencentDocs"] = true,
+    ["腾讯文档"] = true,
+    -- ["WeChat"] = true,
+    -- ["微信"] = true,  开视频的小窗口也会放大, 所以注释
+    ["WPS Office"] = true,
+    ["Safari"] = true,
+    ["Safari浏览器"] = true,
+    ["豆包"] = true,
+    ["ChatGPT"] = true,
+    ["Microsoft Edge"] = true,
+    ["Mail"] = true,
+    ["Maps"] = true,
+    ["Notes"] = true,
+    ["Docker Desktop"] = true,
+    ["Spotify"] = true,
+    ["Finder"] = true,
+    ["Preview"] = true,
+    ["Activity Monitor"] = true,
+    ["NeteaseMusic"] = true,
+    ["阿里云盘"] = true,
+}
+
+
+
 --------------------- 当聚焦某些app时, 自动切换到上一次离开app时的输入法 & 科学上网 ---------------------
 
 -- 切换app的时候触发太多了次了, 所以弃用
@@ -12,13 +73,13 @@ local pkg = {}
 --         local app = hs.application.frontmostApplication()
 --         if app then
 --             local app_name = app:name()
---             local last_input_source = APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+--             local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
 --             local cur_input_source = hs.keycodes.currentSourceID()
 --             print("主动改变 hs.keycodes.inputSourceChanged: 改之前: " .. cur_input_source .. ", appName是: " .. app_name .. " last_input_source=" .. (last_input_source or "nil"))
 --             if last_input_source and last_input_source ~= cur_input_source then
 --                 hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉而错乱
 --                     print("主动改变 hs.keycodes.inputSourceChanged: " .. hs.keycodes.currentSourceID() .. ", appName是: " .. app:name())
---                     APP_NAME_2_LAST_INPUT_SOURCE[app:name()] = hs.keycodes.currentSourceID()
+--                     pkg.APP_NAME_2_LAST_INPUT_SOURCE[app:name()] = hs.keycodes.currentSourceID()
 --                 end)
 --             end
 --         end
@@ -38,6 +99,7 @@ local secondInputSource
 -- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
 -- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
 -- local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
+-- local secondInputSource = "om.bytedance.inputmethod.doubaoime.pinyin"
 -- if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
 --     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
 -- end
@@ -64,26 +126,26 @@ function fn_cb_switch_input_source(from_shift)
                     -- print("第一次记录secondInputSource,   : " .. secondInputSource)
                     if app_name then
                         -- print("主动按键设置改变 curInputSource=" .. curInputSource .. ", appName是: " .. app_name)
-                        APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
+                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
                     end
                 end
             end)
     else
-        if (hs.keycodes.currentSourceID() == firstInputSource) then
-            curInputSource = secondInputSource
+        if hs.keycodes.currentSourceID() == firstInputSource and secondInputSource then
+            curInputSource = secondInputSource        -- print("from shift false,   curInputSource: " .. curInputSource)
+            hs.keycodes.currentSourceID(curInputSource)
+            if app_name then
+                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
+            end
         end
-        -- print("from shift false,   curInputSource: " .. curInputSource)
-        hs.keycodes.currentSourceID(curInputSource)
-        if app_name then
-            APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
-        end
+
     end
 end
 
 function changeInputSourceToLastInputSource(app)
     local app_name = app:name()
     -- print("切换了,  0 app_name, " .. app_name)
-    local last_input_source = APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+    local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
     local cur_input_source = hs.keycodes.currentSourceID()
     if last_input_source then
         -- print("切换了app后,1")
@@ -93,9 +155,8 @@ function changeInputSourceToLastInputSource(app)
             fn_cb_switch_input_source()
         end
     else
-
         -- print("切换了app后,2, cur_input_source: " .. cur_input_source)
-        APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
+        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
     end
 end
 
@@ -208,8 +269,8 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             -- if app then
             --     local app_name = app:name()
             --     print("主动按键设置改变 hs.keycodes.inputSourceChanged: doubleHitMod.lastInputSource= " .. doubleHitMod.lastInputSource .. ", hs.keycodes.currentSourceID()=" .. hs.keycodes.currentSourceID() .. ", appName是: " .. app_name)
-            --     -- APP_NAME_2_LAST_INPUT_SOURCE[app_name] = doubleHitMod.lastInputSource
-            --     APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
+            --     -- pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = doubleHitMod.lastInputSource
+            --     pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
             -- end
 
             -- -- 以下代码专属于开启搜狗输入法的英文输入法模式
@@ -233,64 +294,6 @@ end)
 
 
 
-
-CUR_INPUT_LANG = 0  -- 0 for chinese, 1 for english
-APP_NAME_2_LAST_INPUT_LANG = {}
-
-APP_NAME_2_LAST_INPUT_SOURCE = {
-    ["Terminal"] = firstInputSource,
-    ["Code"] = firstInputSource,  -- vs code
-    ["WebStorm"] = firstInputSource,
-    ["PyCharm"] = firstInputSource,
-    ["Clion"] = firstInputSource,
-    ["IntelliJ IDEA"] = firstInputSource,
-    ["IntelliJ IDEA CE"] = firstInputSource,
-    ["Rider"] = firstInputSource,
-    ["网易有道翻译"] = firstInputSource,
-    ["Messages"] = firstInputSource,
-    
-    ["TencentDocs"] = secondInputSource,
-    ["腾讯文档"] = secondInputSource,
-    ["WeChat"] = secondInputSource,
-    ["微信"] = secondInputSource,
-    ["WPS Office"] = secondInputSource,
-}
-
-APP_NAME_2_FOCUSED_ACTION = {
-    -- ["Safari"] = autoProxyPac,
-    -- ["Safari浏览器"] = autoProxyPac,
-}
-
-SHOULD_MAXIMIZE_APPS = {
-    ["Terminal"] = true,
-    ["Code"] = true,  -- vscode
-    ["WebStorm"] = true,
-    ["PyCharm"] = true,
-    ["Clion"] = true,
-    ["IntelliJ IDEA"] = true,
-    ["IntelliJ IDEA CE"] = true,
-    ["Rider"] = true,
-    ["TencentDocs"] = true,
-    ["腾讯文档"] = true,
-    -- ["WeChat"] = true,
-    -- ["微信"] = true,  开视频的小窗口也会放大, 所以注释
-    ["WPS Office"] = true,
-    ["Safari"] = true,
-    ["Safari浏览器"] = true,
-    ["豆包"] = true,
-    ["ChatGPT"] = true,
-    ["Microsoft Edge"] = true,
-    ["Mail"] = true,
-    ["Maps"] = true,
-    ["Notes"] = true,
-    ["Docker Desktop"] = true,
-    ["Spotify"] = true,
-    ["Finder"] = true,
-    ["Preview"] = true,
-    ["Activity Monitor"] = true,
-    ["NeteaseMusic"] = true,
-    ["阿里云盘"] = true,
-}
 
 -- -- event 可以是: hs.window.filter.windowCreated 或者 hs.window.filter.windowFocused, 不填则为 hs.window.filter.windowFocused
 -- local function set_app_focused_func(app_name, app_focused_func, event)
