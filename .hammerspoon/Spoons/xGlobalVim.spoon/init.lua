@@ -1,7 +1,6 @@
 local pkg = {}
 
 
-hs.loadSpoon("xAppTriggers")
 
 
 --------------------- 类似 vi 的键盘设置 ---------------------

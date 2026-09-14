@@ -4,6 +4,24 @@ local application = require "hs.application"
 local pkg = {}
 
 
+-- mac自带的英文输入法
+local firstInputSource = "com.apple.keylayout.US"  -- for American Mac
+if (hs.keycodes.layouts()[1] == "ABC") then
+    firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
+end
+
+-- new approach:
+local secondInputSource
+
+-- old approach below:
+-- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
+-- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
+-- local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
+-- local secondInputSource = "om.bytedance.inputmethod.doubaoime.pinyin"
+-- if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
+--     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
+-- end
+
 
 CUR_INPUT_LANG = 0  -- 0 for chinese, 1 for english
 APP_NAME_2_LAST_INPUT_LANG = {}
@@ -19,12 +37,18 @@ pkg.APP_NAME_2_LAST_INPUT_SOURCE = {
     ["Rider"] = firstInputSource,
     ["网易有道翻译"] = firstInputSource,
     ["Messages"] = firstInputSource,
+    ["Microsoft Edge"] = firstInputSource,
+    ["Safari"] = firstInputSource,
+    ["Safari浏览器"] = firstInputSource,
+    ["Finder"] = firstInputSource,
+    ["Preview"] = firstInputSource,
+    ["Activity Monitor"] = firstInputSource,
     
-    ["TencentDocs"] = secondInputSource,
-    ["腾讯文档"] = secondInputSource,
-    ["WeChat"] = secondInputSource,
-    ["微信"] = secondInputSource,
-    ["WPS Office"] = secondInputSource,
+    -- ["TencentDocs"] = secondInputSource,
+    -- ["腾讯文档"] = secondInputSource,
+    -- ["WeChat"] = secondInputSource,
+    -- ["微信"] = secondInputSource,
+    -- ["WPS Office"] = secondInputSource,
 }
 
 APP_NAME_2_FOCUSED_ACTION = {
@@ -86,121 +110,12 @@ SHOULD_MAXIMIZE_APPS = {
 --     end
 -- )
 
--- mac自带的英文输入法
-local firstInputSource = "com.apple.keylayout.US"  -- for American Mac
-if (hs.keycodes.layouts()[1] == "ABC") then
-    firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
-end
-
--- new approach:
-local secondInputSource
-
--- old approach below:
--- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
--- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
--- local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
--- local secondInputSource = "om.bytedance.inputmethod.doubaoime.pinyin"
--- if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
---     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
--- end
-
--- 处理切换输入法
-function fn_cb_switch_input_source(from_shift)
-    -- 因为 `hs.eventtap.keyStroke({"ctrl", "shift", "cmd"}, "space")`切换输入法是有延时的, 所以这里提前自己算出来写一个输入法名字
-    local curInputSource = firstInputSource
-
-    local app = hs.application.frontmostApplication()
-    local app_name
-    if app then
-        app_name = app:name()
+function initSecondInputSourceIfNeeded()
+      -- 这个是为了适配之前没有设置好 secondInputSource 的情况, 让它在第一次切换输入法的时候就能正确的设置好 secondInputSource 的值
+    if hs.keycodes.currentSourceID() ~= firstInputSource and not secondInputSource then
+        secondInputSource = hs.keycodes.currentSourceID()
+        -- print("第一次记录secondInputSource,   : " .. secondInputSource)
     end
-
-    if from_shift then
-        -- 按 shift 的时候用 `hs.keycodes.currentSourceID(curInputSource)`经常输入法没有真正的切换, 不知道原因, 
-        -- 所以改为快捷键触发
-        hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
-            hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
-                if (hs.keycodes.currentSourceID() ~= firstInputSource) then
-                    secondInputSource = hs.keycodes.currentSourceID()  -- 这个是为了适配之前没有设置好 secondInputSource 的情况, 让它在第一次切换输入法的时候就能正确的设置好 secondInputSource 的值
-                    curInputSource = secondInputSource
-                    -- print("第一次记录secondInputSource,   : " .. secondInputSource)
-                    if app_name then
-                        -- print("主动按键设置改变 curInputSource=" .. curInputSource .. ", appName是: " .. app_name)
-                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
-                    end
-                end
-            end)
-    else
-        if hs.keycodes.currentSourceID() == firstInputSource and secondInputSource then
-            curInputSource = secondInputSource        -- print("from shift false,   curInputSource: " .. curInputSource)
-            hs.keycodes.currentSourceID(curInputSource)
-            if app_name then
-                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = curInputSource
-            end
-        end
-
-    end
-end
-
-function changeInputSourceToLastInputSource(app)
-    local app_name = app:name()
-    -- print("切换了,  0 app_name, " .. app_name)
-    local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
-    local cur_input_source = hs.keycodes.currentSourceID()
-    if last_input_source then
-        -- print("切换了app后,1")
-        if last_input_source ~= cur_input_source then
-            -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
-            -- hs.keycodes.currentSourceID(last_input_source)
-            fn_cb_switch_input_source()
-        end
-    else
-        -- print("切换了app后,2, cur_input_source: " .. cur_input_source)
-        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
-    end
-end
-
--- 以下代码专属于开启搜狗输入法的英文输入法模式
-function changeInputSourceToLastLang(app)
-    hs.keycodes.currentSourceID(secondInputSource)  -- 永远保证是搜狗输入法
-    local app_name = app:name()
-    local last_input_lang = APP_NAME_2_LAST_INPUT_LANG[app_name]
-    if last_input_lang and last_input_lang ~= CUR_INPUT_LANG then
-        print("切换了app后,  changeInputSourceToLastLang, 改之前: " .. tostring(CUR_INPUT_LANG) .. ", appName是: " .. app_name)
-        hs.eventtap.keyStroke({"cmd", "shift"}, "e", 0)
-        if CUR_INPUT_LANG == 1 then
-            CUR_INPUT_LANG = 0
-        else 
-            CUR_INPUT_LANG = 1
-        end
-        print("切换了app后,  changeInputSourceToLastLang, 改之后: last_input_lang:" .. tostring(last_input_lang) .. ", 当前为: " .. tostring(CUR_INPUT_LANG) .. ", appName是: " .. app_name)
-    end
-end
-
-
-  
-function autoProxyPac(app)  -- 科学上网自动切换pac
-    -- # 科学上网
-    -- 科学上网软件： ClashX    
-    -- 下载地址: https://itlanyan.com/trojan-clients-download/
-    -- 步骤:  
-    -- 1. 去 just my socks 拷贝那些服务节点的配置然后去google搜“ss配置转clash配置”的网站(但是似乎很有可能会泄露相关 ss 密码之类的)，比如 https://subconverter.speedupvpn.com ， 然后在线转换为clash的配置然后点击 ClashX 的菜单栏的图标， 然后 `Config`-`Remote Config`-`Manage`-`Add`
-    -- 2. 如果发现上不了网的话, 点击 ClashX 的图标, 然后 `Config`-`Open Config Folder` 查看生成的 config 文件是否和 本 github 项目的 `clashx`里的类似
-    -- 3. 请不要打开 clashx 的"设置为系统代理", 否则剪映等一些软件无法联网, 
-        -- 1. 但此时 safari 也会翻不了墙 (以下教程参考 https://www.youtube.com/watch?v=pAY8pNou9Gk)
-        --     1. 此时需要先把 `safari_proxy` 文件夹中的 `proxy.pac`(这个是由 edge 的 SwitchyOmega插件里的配置生成的) 放到 `/Library/WebServer/Documents` 里
-        --     2. 然后在`设置`-`网络`-`高级`-`代理`的`Automatic proxy configuration` 里输入 `http://127.0.0.1/proxy.pac`, 然后点击 右下角的 `ok`, 点击完`ok`之后会退回上一层菜单, 然后再点击 `Apply`
-        --     3. 然后在 terminal 里输入命令 `sudo apachectl start`
-        --     4. 去 safari 的地址栏输入`http://127.0.0.1/proxy.pac` 测试一下是否能访问这个, 有内容说明成功了, 此时再看看是否能谷歌/油管
-        -- 2. 此时还有个问题就是:可能会因为其它软件给关掉，如 ClashX 设置为系统代理的时候会把这个 pac 给清除掉, 所以我们需要检查一下 `hammerspoon` 里的 `init.lua`是否有 `networksetup -setautoproxyurl ` 相关的代码, 有的话就会自动在激活 safari 的时候自动设置一下 pac 设置(相关代码其实是参考了 https://nowtime.cc/macos/1753.html , `networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"` , 这个 "Wi-Fi" 是通过命令 `networksetup -listallnetworkservices` 拿到的)
-
-    -- 当 safari 被激活的时候
-    -- 会自动在激活 safari 的时候自动设置一下 pac 设置(相关代码其实是参考了 https://nowtime.cc/macos/1753.html), (`networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"` (这个 "Wi-Fi" 是通过命令 `networksetup -listallnetworkservices` 拿到的)
-    -- 设置一下 proxy.pac
-    os.execute('networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"');
-    -- local copyret = os.execute('networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"');
-    -- print("copyret = "..copyret)
-    -- print("auto proxy pac")
 end
 
 
@@ -256,7 +171,26 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
         else
             -- 注: 这样会有点慢, 按了 shift 切换输入法之后瞬间立即打字的话, 可能打了几个英文字母才打出中文来
             -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "space")  -- 模拟切换输入法快捷键, 英文用自带的, 中文用搜狗
-            fn_cb_switch_input_source(true)
+
+            local app = hs.application.frontmostApplication()
+            local app_name
+            if app then
+                app_name = app:name()
+            end
+
+
+            -- 按 shift 的时候用 `hs.keycodes.currentSourceID(****)`经常输入法没有真正的切换, 不知道原因, 
+            -- 所以改为快捷键触发
+            -- print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
+            hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
+            hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
+                initSecondInputSourceIfNeeded()
+                if app_name then
+                    pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
+                end
+            end)
+
+
             -- doubleHitMod.lastInputSource = hs.keycodes.currentSourceID()
             -- if (doubleHitMod.lastInputSource == firstInputSource) then
             --     doubleHitMod.lastInputSource = secondInputSource
@@ -347,7 +281,34 @@ function applicationWatcher(appName, eventType, appObject)
                 focusedAction(appObject)
             end
             -- print(appObject:bundleID())
-            local new_input_source = changeInputSourceToLastInputSource(appObject)
+
+
+            local app_name = appObject:name()
+            -- print("切换了,  0 app_name, " .. app_name)
+            local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+            local cur_input_source = hs.keycodes.currentSourceID()
+            if last_input_source then
+                -- print("切换了app后,1")
+                if last_input_source ~= cur_input_source then
+                    -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
+                    -- print("非非非主动按键设置改变 from_shift=false" .. ", appName是: " .. app_name)
+                    initSecondInputSourceIfNeeded()
+                    if hs.keycodes.currentSourceID() == firstInputSource then
+                        hs.keycodes.currentSourceID(secondInputSource)
+                    else
+                        hs.keycodes.currentSourceID(firstInputSource)
+                    end
+                    if app_name then
+                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
+                    end
+                end
+            else
+                -- print("切换了app后,2, cur_input_source: " .. cur_input_source)
+                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
+            end
+
+
+
             -- local tempMap = {
             --     [firstInputSource] = "English",
             --     [secondInputSource] = "Chinese",
@@ -381,6 +342,51 @@ function applicationWatcher(appName, eventType, appObject)
         end)
     end
 end
+
+
+-- 以下代码专属于开启搜狗输入法的英文输入法模式
+function changeInputSourceToLastLang(app)
+    hs.keycodes.currentSourceID(secondInputSource)  -- 永远保证是搜狗输入法
+    local app_name = app:name()
+    local last_input_lang = APP_NAME_2_LAST_INPUT_LANG[app_name]
+    if last_input_lang and last_input_lang ~= CUR_INPUT_LANG then
+        print("切换了app后,  changeInputSourceToLastLang, 改之前: " .. tostring(CUR_INPUT_LANG) .. ", appName是: " .. app_name)
+        hs.eventtap.keyStroke({"cmd", "shift"}, "e", 0)
+        if CUR_INPUT_LANG == 1 then
+            CUR_INPUT_LANG = 0
+        else 
+            CUR_INPUT_LANG = 1
+        end
+        print("切换了app后,  changeInputSourceToLastLang, 改之后: last_input_lang:" .. tostring(last_input_lang) .. ", 当前为: " .. tostring(CUR_INPUT_LANG) .. ", appName是: " .. app_name)
+    end
+end
+
+
+  
+function autoProxyPac(app)  -- 科学上网自动切换pac
+    -- # 科学上网
+    -- 科学上网软件： ClashX    
+    -- 下载地址: https://itlanyan.com/trojan-clients-download/
+    -- 步骤:  
+    -- 1. 去 just my socks 拷贝那些服务节点的配置然后去google搜“ss配置转clash配置”的网站(但是似乎很有可能会泄露相关 ss 密码之类的)，比如 https://subconverter.speedupvpn.com ， 然后在线转换为clash的配置然后点击 ClashX 的菜单栏的图标， 然后 `Config`-`Remote Config`-`Manage`-`Add`
+    -- 2. 如果发现上不了网的话, 点击 ClashX 的图标, 然后 `Config`-`Open Config Folder` 查看生成的 config 文件是否和 本 github 项目的 `clashx`里的类似
+    -- 3. 请不要打开 clashx 的"设置为系统代理", 否则剪映等一些软件无法联网, 
+        -- 1. 但此时 safari 也会翻不了墙 (以下教程参考 https://www.youtube.com/watch?v=pAY8pNou9Gk)
+        --     1. 此时需要先把 `safari_proxy` 文件夹中的 `proxy.pac`(这个是由 edge 的 SwitchyOmega插件里的配置生成的) 放到 `/Library/WebServer/Documents` 里
+        --     2. 然后在`设置`-`网络`-`高级`-`代理`的`Automatic proxy configuration` 里输入 `http://127.0.0.1/proxy.pac`, 然后点击 右下角的 `ok`, 点击完`ok`之后会退回上一层菜单, 然后再点击 `Apply`
+        --     3. 然后在 terminal 里输入命令 `sudo apachectl start`
+        --     4. 去 safari 的地址栏输入`http://127.0.0.1/proxy.pac` 测试一下是否能访问这个, 有内容说明成功了, 此时再看看是否能谷歌/油管
+        -- 2. 此时还有个问题就是:可能会因为其它软件给关掉，如 ClashX 设置为系统代理的时候会把这个 pac 给清除掉, 所以我们需要检查一下 `hammerspoon` 里的 `init.lua`是否有 `networksetup -setautoproxyurl ` 相关的代码, 有的话就会自动在激活 safari 的时候自动设置一下 pac 设置(相关代码其实是参考了 https://nowtime.cc/macos/1753.html , `networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"` , 这个 "Wi-Fi" 是通过命令 `networksetup -listallnetworkservices` 拿到的)
+
+    -- 当 safari 被激活的时候
+    -- 会自动在激活 safari 的时候自动设置一下 pac 设置(相关代码其实是参考了 https://nowtime.cc/macos/1753.html), (`networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"` (这个 "Wi-Fi" 是通过命令 `networksetup -listallnetworkservices` 拿到的)
+    -- 设置一下 proxy.pac
+    os.execute('networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"');
+    -- local copyret = os.execute('networksetup -setautoproxyurl "Wi-Fi" "http://127.0.0.1/proxy.pac"');
+    -- print("copyret = "..copyret)
+    -- print("auto proxy pac")
+end
+
 
 appWatcher = application.watcher.new(applicationWatcher)
 appWatcher:start()
