@@ -2,48 +2,7 @@ local pkg = {}
 
 
 
-
 --------------------- 类似 vi 的键盘设置 ---------------------
-
-local isVoiceInputMethodListening = false
-
--- 按下任意键根据keyCode然后触发一个快捷键或者一个行为
-keyDownWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
-    -- 语音键 keyCode
-    local voiceKeyCode = 176
-    if event:getKeyCode() == voiceKeyCode then
-        -- print("监听到语音键被按下, 当前isVoiceInputMethodListening是: " .. tostring(isVoiceInputMethodListening))
-        -- if hs.keycodes.currentSourceID() == "com.bytedance.inputmethod.doubaoime.pinyin" and isVoiceInputMethodListening then
-        --     hs.eventtap.event.newKeyEvent(hs.keycodes.map.fn, false):post()
-        --     isVoiceInputMethodListening = false
-        --     local app_name = hs.window.focusedWindow():application():name()
-        --     print(" 语音输入法监听中, 收到语音键的按下事件, spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE 是: " .. spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE[app_name])
-        --     local last_input_source = spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
-        --     hs.timer.doAfter(0.88, function()
-        --         hs.keycodes.currentSourceID(last_input_source)
-        --     end)
-        --     return true  -- 阻止默认行为
-        -- end
-
-        -- if hs.keycodes.currentSourceID() == "com.bytedance.inputmethod.doubaoime.pinyin" then
-        --     hs.eventtap.event.newKeyEvent(hs.keycodes.map.fn, true):post()
-        -- else
-        --     print("监听到语音键被按下222, 当前isVoiceInputMethodListening是: " .. tostring(isVoiceInputMethodListening))
-        --     hs.keycodes.currentSourceID("com.bytedance.inputmethod.doubaoime.pinyin")
-        --     hs.timer.doAfter(1.98, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
-        --         print("监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
-        --         hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
-        --     end)
-        -- end
-        -- isVoiceInputMethodListening = true
-
-        hs.eventtap.keyStroke({"ctrl", "shift", "alt", "cmd"}, "d")
-        return true  -- 阻止默认行为
-    end
-    return false
-end)
-
-keyDownWatcher:start()
 
 
 -- cd ~/.hammerspoon/ && wget https://raw.githubusercontent.com/hetima/hammerspoon-foundation_remapping/master/foundation_remapping.lua

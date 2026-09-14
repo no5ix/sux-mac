@@ -9,7 +9,6 @@ local firstInputSource = "com.apple.keylayout.US"  -- for American Mac
 if (hs.keycodes.layouts()[1] == "ABC") then
     firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
 end
-
 -- new approach:
 local secondInputSource
 
@@ -17,7 +16,8 @@ local secondInputSource
 -- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
 -- local secondInputSource = "com.sogou.inputmethod.sogou.pinyin"
 -- local secondInputSource = "org.fcitx.inputmethod.Fcitx5.zhHans"
--- local secondInputSource = "om.bytedance.inputmethod.doubaoime.pinyin"
+-- local secondInputSource = "com.bytedance.inputmethod.doubaoime.pinyin"
+-- local secondInputSource = "com.tencent.inputmethod.wetype.pinyin"
 -- if (hs.keycodes.methods()[1] == "Pinyin - Simplified") then
 --     secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
 -- end
@@ -118,6 +118,87 @@ function initSecondInputSourceIfNeeded()
     end
 end
 
+function switchInputSource()
+    local app = hs.application.frontmostApplication()
+    local app_name
+    if app then
+        app_name = app:name()
+    end
+
+    -- 按 shift 的时候用 `hs.keycodes.currentSourceID(****)`经常输入法没有真正的切换, 不知道原因, 
+    -- 所以改为快捷键触发
+    -- print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
+    hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
+    hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
+        initSecondInputSourceIfNeeded()
+        if app_name then
+            pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
+            -- print("主动按键设置改变 appName是: " .. app_name .. ", 当前输入法是: " .. hs.keycodes.currentSourceID())
+        end
+    end)
+end
+
+
+local isVoiceInputMethodListening = false
+
+-- 按下任意键根据keyCode然后触发一个快捷键或者一个行为
+keyDownWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
+    -- 语音键 keyCode
+    local voiceKeyCode = 176
+    if event:getKeyCode() == voiceKeyCode then
+        -- print("监听到语音键被按下, 当前isVoiceInputMethodListening是: " .. tostring(isVoiceInputMethodListening))
+        -- if hs.keycodes.currentSourceID() == "com.bytedance.inputmethod.doubaoime.pinyin" and isVoiceInputMethodListening then
+        --     hs.eventtap.event.newKeyEvent(hs.keycodes.map.fn, false):post()
+        --     isVoiceInputMethodListening = false
+        --     local app_name = hs.window.focusedWindow():application():name()
+        --     print(" 语音输入法监听中, 收到语音键的按下事件, spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE 是: " .. spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE[app_name])
+        --     local last_input_source = spoon.xAppTriggers.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+        --     hs.timer.doAfter(0.88, function()
+        --         hs.keycodes.currentSourceID(last_input_source)
+        --     end)
+        --     return true  -- 阻止默认行为
+        -- end
+
+        -- if hs.keycodes.currentSourceID() == "com.bytedance.inputmethod.doubaoime.pinyin" then
+        --     hs.eventtap.event.newKeyEvent(hs.keycodes.map.fn, true):post()
+        -- else
+        --     print("监听到语音键被按下222, 当前isVoiceInputMethodListening是: " .. tostring(isVoiceInputMethodListening))
+        --     hs.keycodes.currentSourceID("com.bytedance.inputmethod.doubaoime.pinyin")
+        --     hs.timer.doAfter(1.98, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
+        --         print("监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
+        --         hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
+        --     end)
+        -- end
+        -- isVoiceInputMethodListening = true
+
+        -- hs.eventtap.keyStroke({"ctrl", "shift", "alt", "cmd"}, "d")
+
+        --     print("vvvv 00 当前输入法是: " .. hs.keycodes.currentSourceID())
+        -- if hs.keycodes.currentSourceID() == firstInputSource then
+        --     print("vvvv当前输入法是: " .. hs.keycodes.currentSourceID())
+        --     switchInputSource()
+        --     hs.timer.doAfter(1.98, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
+        --         print("vvvv 00 当前输入法是: " .. hs.keycodes.currentSourceID())
+        --         if hs.keycodes.currentSourceID() == firstInputSource then
+        --             print("vvvv当前输入法是: " .. hs.keycodes.currentSourceID())
+        --             switchInputSource()
+        --         end
+        -- --         print("00 监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
+        -- --         hs.eventtap.keyStroke({"ctrl", "cmd"}, "o", 0)
+        --     end)
+        -- else
+            -- print("11 监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
+            -- hs.eventtap.keyStroke({"ctrl", "alt"}, "o", 0)
+            --  hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
+            -- print("6611 监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
+        -- end
+        return true  -- 阻止默认行为
+    end
+    return false
+end)
+
+keyDownWatcher:start()
+
 
 --------------------- 双击修饰键的逻辑 (模拟切换输入法快捷键, 英文用自带的, 中文用搜狗, 缺点: 两个输入法之间切换得有点慢, 如果打字快的有可能会导致英文切中文的时候前几个字符打的是英文因为几毫秒之后才从英文切到中文输入法) ---------------------
 
@@ -172,24 +253,7 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             -- 注: 这样会有点慢, 按了 shift 切换输入法之后瞬间立即打字的话, 可能打了几个英文字母才打出中文来
             -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "space")  -- 模拟切换输入法快捷键, 英文用自带的, 中文用搜狗
 
-            local app = hs.application.frontmostApplication()
-            local app_name
-            if app then
-                app_name = app:name()
-            end
-
-
-            -- 按 shift 的时候用 `hs.keycodes.currentSourceID(****)`经常输入法没有真正的切换, 不知道原因, 
-            -- 所以改为快捷键触发
-            -- print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
-            hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
-            hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
-                initSecondInputSourceIfNeeded()
-                if app_name then
-                    pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
-                end
-            end)
-
+            switchInputSource()
 
             -- doubleHitMod.lastInputSource = hs.keycodes.currentSourceID()
             -- if (doubleHitMod.lastInputSource == firstInputSource) then
