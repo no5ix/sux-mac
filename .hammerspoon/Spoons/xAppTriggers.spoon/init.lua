@@ -6,11 +6,12 @@ local pkg = {}
 
 -- mac自带的英文输入法
 local firstInputSource = "com.apple.keylayout.US"  -- for American Mac
-if (hs.keycodes.layouts()[1] == "ABC") then
-    firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
-end
+-- if (hs.keycodes.layouts()[1] == "ABC") then
+--     firstInputSource = "com.apple.keylayout.ABC"  -- for Chinese Mac
+-- end
+
 -- new approach:
-local secondInputSource
+local secondInputSource = "com.apple.inputmethod.SCIM.ITABC"
 
 -- old approach below:
 -- 除了mac自带的英文输入法以外的另一个输入法( 搜狗 / Fcitx5 或者 mac自带的简体中文拼音输入法 )
@@ -43,12 +44,21 @@ pkg.APP_NAME_2_LAST_INPUT_SOURCE = {
     ["Finder"] = firstInputSource,
     ["Preview"] = firstInputSource,
     ["Activity Monitor"] = firstInputSource,
+    ["Mail"] = firstInputSource,
+    ["Maps"] = firstInputSource,
+    ["ChatGPT"] = firstInputSource,
     
-    -- ["TencentDocs"] = secondInputSource,
-    -- ["腾讯文档"] = secondInputSource,
-    -- ["WeChat"] = secondInputSource,
-    -- ["微信"] = secondInputSource,
-    -- ["WPS Office"] = secondInputSource,
+    ["TencentDocs"] = secondInputSource,
+    ["腾讯文档"] = secondInputSource,
+    ["WeChat"] = secondInputSource,
+    ["微信"] = secondInputSource,
+    ["WPS Office"] = secondInputSource,
+    ["豆包"] = secondInputSource,
+    ["Notes"] = secondInputSource,
+    ["Docker Desktop"] = secondInputSource,
+    ["Spotify"] = secondInputSource,
+    ["NeteaseMusic"] = secondInputSource,
+    ["阿里云盘"] = secondInputSource,
 }
 
 APP_NAME_2_FOCUSED_ACTION = {
@@ -112,28 +122,29 @@ SHOULD_MAXIMIZE_APPS = {
 
 function initSecondInputSourceIfNeeded()
       -- 这个是为了适配之前没有设置好 secondInputSource 的情况, 让它在第一次切换输入法的时候就能正确的设置好 secondInputSource 的值
-    if hs.keycodes.currentSourceID() ~= firstInputSource and not secondInputSource then
+    if not secondInputSource and hs.keycodes.currentSourceID() ~= firstInputSource then
         secondInputSource = hs.keycodes.currentSourceID()
-        -- print("第一次记录secondInputSource,   : " .. secondInputSource)
+        print("第一次记录secondInputSource,   : " .. secondInputSource)
     end
 end
 
-function switchInputSource()
-    local app = hs.application.frontmostApplication()
-    local app_name
-    if app then
-        app_name = app:name()
+function switchInputSource(app_name)
+    if not app_name then
+        local app = hs.application.frontmostApplication()
+        if app then
+            app_name = app:name()
+        end
     end
 
     -- 按 shift 的时候用 `hs.keycodes.currentSourceID(****)`经常输入法没有真正的切换, 不知道原因, 
     -- 所以改为快捷键触发
-    -- print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
+    print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
     hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
     hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
         initSecondInputSourceIfNeeded()
         if app_name then
             pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
-            -- print("主动按键设置改变 appName是: " .. app_name .. ", 当前输入法是: " .. hs.keycodes.currentSourceID())
+            print("主动按键设置改变 appName是: " .. app_name .. ", 当前输入法是: " .. hs.keycodes.currentSourceID())
         end
     end)
 end
@@ -315,28 +326,31 @@ function applicationWatcher(appName, eventType, appObject)
     -- print(eventType)
     -- print("mmms")
     if (eventType == application.watcher.activated or eventType == application.watcher.launched) then
-        if (eventType == application.watcher.launched) then
-            if SHOULD_MAXIMIZE_APPS[appName] then
-                hs.timer.doAfter(0.4, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-                    winresize("max")
+        hs.timer.doAfter(0.66, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
 
-                    -- if pkg.isStageManagerEnabled then
-                        -- newrect = { 1 / 27, 0, 26 / 27, 1 }
-                    -- else
-                        -- newrect = hs.layout.maximized
-                    -- end
-                    -- appObject:getWindow():move(newrect)
-                    -- print("mmmmmmmmmmmaxxx???")
-                end)
+            local app_name = appObject:name()
+            print("切换了,  0 app_name, " .. app_name)
+            local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+            local cur_input_source = hs.keycodes.currentSourceID()
+            if last_input_source then
+                print("切换了app后,1")
+                if last_input_source ~= cur_input_source then
+                    -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
+                    initSecondInputSourceIfNeeded()
+                    print("非非非主动按键设置改变 from_shift=false" .. ", firstInputSource: " .. firstInputSource .. ", secondInputSource: " .. secondInputSource)
+                    
+                    hs.keycodes.currentSourceID(last_input_source)
+                    if app_name then
+                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = last_input_source
+                    end
+
+                    -- switchInputSource(app_name)
+                end
+            else
+                print("切换了app后,2, cur_input_source: " .. cur_input_source)
+                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
             end
 
-            -- if eventType == application.watcher.activated and appName == "Finder" then
-            --     winresize("max")
-            --     -- print("mmmmmmmmmmmaxxx???")
-            -- end
-        end
-
-        hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
             -- print("applicationWatcher 000")
             -- local app = application.frontmostApplication()
             -- local focusedAction = APP_NAME_2_FOCUSED_ACTION[appObject:name()]
@@ -345,32 +359,6 @@ function applicationWatcher(appName, eventType, appObject)
                 focusedAction(appObject)
             end
             -- print(appObject:bundleID())
-
-
-            local app_name = appObject:name()
-            -- print("切换了,  0 app_name, " .. app_name)
-            local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
-            local cur_input_source = hs.keycodes.currentSourceID()
-            if last_input_source then
-                -- print("切换了app后,1")
-                if last_input_source ~= cur_input_source then
-                    -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
-                    -- print("非非非主动按键设置改变 from_shift=false" .. ", appName是: " .. app_name)
-                    initSecondInputSourceIfNeeded()
-                    if hs.keycodes.currentSourceID() == firstInputSource then
-                        hs.keycodes.currentSourceID(secondInputSource)
-                    else
-                        hs.keycodes.currentSourceID(firstInputSource)
-                    end
-                    if app_name then
-                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
-                    end
-                end
-            else
-                -- print("切换了app后,2, cur_input_source: " .. cur_input_source)
-                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
-            end
-
 
 
             -- local tempMap = {
@@ -404,8 +392,33 @@ function applicationWatcher(appName, eventType, appObject)
             --     end)
             -- end)
         end)
+
+        if (eventType == application.watcher.launched) then
+            if SHOULD_MAXIMIZE_APPS[appName] then
+                hs.timer.doAfter(0.4, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+                    winresize("max")
+
+                    -- if pkg.isStageManagerEnabled then
+                        -- newrect = { 1 / 27, 0, 26 / 27, 1 }
+                    -- else
+                        -- newrect = hs.layout.maximized
+                    -- end
+                    -- appObject:getWindow():move(newrect)
+                    -- print("mmmmmmmmmmmaxxx???")
+                end)
+            end
+
+            -- if eventType == application.watcher.activated and appName == "Finder" then
+            --     winresize("max")
+            --     -- print("mmmmmmmmmmmaxxx???")
+            -- end
+        end
+
     end
 end
+
+-- appWatcher = application.watcher.new(applicationWatcher)
+-- appWatcher:start()
 
 
 -- 以下代码专属于开启搜狗输入法的英文输入法模式
@@ -452,8 +465,6 @@ function autoProxyPac(app)  -- 科学上网自动切换pac
 end
 
 
-appWatcher = application.watcher.new(applicationWatcher)
-appWatcher:start()
 
 
 return pkg
