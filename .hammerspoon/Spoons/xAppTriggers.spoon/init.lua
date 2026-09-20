@@ -328,28 +328,30 @@ function applicationWatcher(appName, eventType, appObject)
     if (eventType == application.watcher.activated or eventType == application.watcher.launched) then
         hs.timer.doAfter(0.66, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
 
-            local app_name = appObject:name()
-            print("切换了,  0 app_name, " .. app_name)
-            local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
-            local cur_input_source = hs.keycodes.currentSourceID()
-            if last_input_source then
-                print("切换了app后,1")
-                if last_input_source ~= cur_input_source then
-                    -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
-                    initSecondInputSourceIfNeeded()
-                    print("非非非主动按键设置改变 from_shift=false" .. ", firstInputSource: " .. firstInputSource .. ", secondInputSource: " .. secondInputSource)
+            ------ comment the code section below out, because the auto input source switch feature was not stable
+            -- local app_name = appObject:name()
+            -- print("切换了,  0 app_name, " .. app_name)
+            -- local last_input_source = pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name]
+            -- local cur_input_source = hs.keycodes.currentSourceID()
+            -- if last_input_source then
+            --     print("切换了app后,1")
+            --     if last_input_source ~= cur_input_source then
+            --         -- print("切换了app后,  changeInputSourceToLastInputSource, 改之前: " .. cur_input_source .. ", appName是: " .. app_name)
+            --         initSecondInputSourceIfNeeded()
+            --         print("非非非主动按键设置改变 from_shift=false" .. ", firstInputSource: " .. firstInputSource .. ", secondInputSource: " .. secondInputSource)
                     
-                    hs.keycodes.currentSourceID(last_input_source)
-                    if app_name then
-                        pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = last_input_source
-                    end
+            --         hs.keycodes.currentSourceID(last_input_source)
+            --         if app_name then
+            --             pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = last_input_source
+            --         end
 
-                    -- switchInputSource(app_name)
-                end
-            else
-                print("切换了app后,2, cur_input_source: " .. cur_input_source)
-                pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
-            end
+            --         -- switchInputSource(app_name)
+            --     end
+            -- else
+            --     print("切换了app后,2, cur_input_source: " .. cur_input_source)
+            --     pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = cur_input_source
+            -- end
+
 
             -- print("applicationWatcher 000")
             -- local app = application.frontmostApplication()
@@ -417,8 +419,8 @@ function applicationWatcher(appName, eventType, appObject)
     end
 end
 
--- appWatcher = application.watcher.new(applicationWatcher)
--- appWatcher:start()
+appWatcher = application.watcher.new(applicationWatcher)
+appWatcher:start()
 
 
 -- 以下代码专属于开启搜狗输入法的英文输入法模式
