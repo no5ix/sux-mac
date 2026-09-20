@@ -138,13 +138,13 @@ function switchInputSource(app_name)
 
     -- 按 shift 的时候用 `hs.keycodes.currentSourceID(****)`经常输入法没有真正的切换, 不知道原因, 
     -- 所以改为快捷键触发
-    print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
+    -- print("主动按键设置改变 from_shift=true" .. ", appName是: " .. app_name)
     hs.eventtap.keyStroke({"ctrl", "alt"}, "space")
     hs.timer.doAfter(0.16, function()  -- 这个timer不可少, 不然经常会输入法没有改掉
         initSecondInputSourceIfNeeded()
         if app_name then
             pkg.APP_NAME_2_LAST_INPUT_SOURCE[app_name] = hs.keycodes.currentSourceID()
-            print("主动按键设置改变 appName是: " .. app_name .. ", 当前输入法是: " .. hs.keycodes.currentSourceID())
+            -- print("主动按键设置改变 appName是: " .. app_name .. ", 当前输入法是: " .. hs.keycodes.currentSourceID())
         end
     end)
 end
