@@ -204,10 +204,10 @@ keyDownWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(eve
             -- print("6611 监听到语音键被按下 0.98秒后,  " .. tostring(isVoiceInputMethodListening))
         -- end
         return true  -- 阻止默认行为
-    elseif event:getKeyCode() == 178 then  -- don't disturb key
-        -- print("event:getKeyCode: " .. tostring(event:getKeyCode()))
-        switchInputSource()
-        return true
+    -- elseif event:getKeyCode() == 178 then  -- don't disturb key
+    --     -- print("event:getKeyCode: " .. tostring(event:getKeyCode()))
+    --     switchInputSource()
+    --     return true
     end
     return false
 end)
