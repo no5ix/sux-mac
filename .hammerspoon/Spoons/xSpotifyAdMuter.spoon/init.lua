@@ -1,6 +1,8 @@
 -----------------------------------------------------------
 -- xSpotifyAdMuter
 -- Spotify advertisement muter for Hammerspoon
+-- Mute all the Thai ads by default
+-- `ctrl+shift+option+cmd+A` to add current playing ad
 -----------------------------------------------------------
 
 local obj = {}
@@ -10,7 +12,7 @@ obj.fadeOutDuration = 0.6
 obj.fadeInDuration = 0.8
 
 obj.knownAdsFile =
-    os.getenv("HOME") .. "/.hammerspoon/spotify_known_ads.lua"
+    os.getenv("HOME") .. "/.hammerspoon/Spoons/xSpotifyAdMuter.spoon/spotify_known_ads.lua"
 
 local adActive = false
 local originalVolume = 100
