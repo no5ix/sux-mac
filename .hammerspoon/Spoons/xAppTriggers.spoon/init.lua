@@ -270,7 +270,8 @@ table.insert(doubleHitMod.flagsChangeCallbacks, function(event)
             -- 注: 这样会有点慢, 按了 shift 切换输入法之后瞬间立即打字的话, 可能打了几个英文字母才打出中文来
             -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "space")  -- 模拟切换输入法快捷键, 英文用自带的, 中文用搜狗
 
-            switchInputSource()
+            -- temp comment out
+            -- switchInputSource()
 
             -- doubleHitMod.lastInputSource = hs.keycodes.currentSourceID()
             -- if (doubleHitMod.lastInputSource == firstInputSource) then

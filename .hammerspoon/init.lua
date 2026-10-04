@@ -138,7 +138,7 @@
 hs.loadSpoon("xGlobalVim")
 hs.loadSpoon("xAppTriggers")
 hs.loadSpoon("xClipboardHistory")
-
+hs.loadSpoon("xSpotifyAdMuter")
 
 hs.loadSpoon("xHotCornersAndEdges")
 --spoon.xHotCornersAndEdges.delta = 20 -- 触发角处的正方形边长(单位像素)
@@ -354,3 +354,4 @@ spoon.xHotCornersAndEdges:start()
 -- -- function back() hs.eventtap.keyStroke({"alt"}, "Left", 0) end
 -- -- hyper:bind({}, 'b', back, nil, back)
 -- -- -- }}}3
+
