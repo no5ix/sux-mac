@@ -1,18 +1,110 @@
+-----------------------------------------------------------
+-- xSpotifyAdMuter
+-- Spotify advertisement muter for Hammerspoon
+-----------------------------------------------------------
+
 local obj = {}
 
-obj.interval = 1
-obj.confirmationTime = 2
+obj.interval = 0.1
+obj.fadeOutDuration = 0.6
+obj.fadeInDuration = 0.8
 
-local muted = false
+obj.knownAdsFile =
+    os.getenv("HOME") .. "/.hammerspoon/spotify_known_ads.lua"
+
+local adActive = false
 local originalVolume = 100
-local lastState = nil
-local stateSince = nil
+local fadeTimer = nil
+
 
 -----------------------------------------------------------
--- Get Spotify information
+-- Utility
+-----------------------------------------------------------
+
+local function stopFade()
+    if fadeTimer then
+        fadeTimer:stop()
+        fadeTimer = nil
+    end
+end
+
+
+local function luaQuote(value)
+    value = tostring(value or "")
+    return string.format("%q", value)
+end
+
+
+-----------------------------------------------------------
+-- Load known advertisements
+-----------------------------------------------------------
+
+local function loadKnownAds()
+    local file = io.open(obj.knownAdsFile, "r")
+
+    if not file then
+        return {}
+    end
+
+    local content = file:read("*all")
+    file:close()
+
+    local chunk, err = load(content, "spotify_known_ads", "t", {})
+
+    if not chunk then
+        hs.alert.show("Failed to load Spotify ad database")
+        return {}
+    end
+
+    local ok, result = pcall(chunk)
+
+    if not ok or type(result) ~= "table" then
+        hs.alert.show("Invalid Spotify ad database")
+        return {}
+    end
+
+    return result
+end
+
+
+local knownAds = loadKnownAds()
+
+
+-----------------------------------------------------------
+-- Save known advertisements
+-----------------------------------------------------------
+
+local function saveKnownAds()
+    local file = io.open(obj.knownAdsFile, "w")
+
+    if not file then
+        hs.alert.show("Unable to save Spotify ad database")
+        return false
+    end
+
+    file:write("return {\n")
+
+    for _, ad in ipairs(knownAds) do
+        file:write("    {\n")
+        file:write("        name = " .. luaQuote(ad.name) .. ",\n")
+        file:write("        artist = " .. luaQuote(ad.artist) .. ",\n")
+        file:write("        album = " .. luaQuote(ad.album) .. ",\n")
+        file:write("    },\n")
+    end
+
+    file:write("}\n")
+    file:close()
+
+    return true
+end
+
+
+-----------------------------------------------------------
+-- Spotify information
 -----------------------------------------------------------
 
 local function spotifyInfo()
+
     local script = [[
         tell application "Spotify"
             if player state is playing then
@@ -45,23 +137,124 @@ local function spotifyInfo()
         name = name,
         artist = artist,
         album = album,
-        volume = tonumber(volume)
+        volume = tonumber(volume) or 0
     }
 end
 
+
 -----------------------------------------------------------
--- Detect Thai characters
+-- Thai detection
 -----------------------------------------------------------
 
 local function containsThai(text)
+
     if not text or text == "" then
         return false
     end
 
-    for i = 1, #text do
-        local byte = string.byte(text, i)
+    local i = 1
+    local length = #text
 
-        if byte >= 0xE0 and byte <= 0xE3 then
+    while i <= length do
+
+        local b1 = string.byte(text, i)
+        local codepoint
+
+        if b1 < 0x80 then
+
+            codepoint = b1
+            i = i + 1
+
+        elseif b1 >= 0xC0 and b1 <= 0xDF then
+
+            local b2 = string.byte(text, i + 1)
+
+            if not b2 then
+                break
+            end
+
+            codepoint =
+                (b1 - 0xC0) * 0x40 +
+                (b2 - 0x80)
+
+            i = i + 2
+
+        elseif b1 >= 0xE0 and b1 <= 0xEF then
+
+            local b2 = string.byte(text, i + 1)
+            local b3 = string.byte(text, i + 2)
+
+            if not b2 or not b3 then
+                break
+            end
+
+            codepoint =
+                (b1 - 0xE0) * 0x1000 +
+                (b2 - 0x80) * 0x40 +
+                (b3 - 0x80)
+
+            i = i + 3
+
+        elseif b1 >= 0xF0 and b1 <= 0xF4 then
+
+            local b2 = string.byte(text, i + 1)
+            local b3 = string.byte(text, i + 2)
+            local b4 = string.byte(text, i + 3)
+
+            if not b2 or not b3 or not b4 then
+                break
+            end
+
+            codepoint =
+                (b1 - 0xF0) * 0x40000 +
+                (b2 - 0x80) * 0x1000 +
+                (b3 - 0x80) * 0x40 +
+                (b4 - 0x80)
+
+            i = i + 4
+
+        else
+
+            i = i + 1
+
+        end
+
+        if codepoint >= 0x0E00 and codepoint <= 0x0E7F then
+            return true
+        end
+
+    end
+
+    return false
+end
+
+
+-----------------------------------------------------------
+-- Known advertisement matching
+-----------------------------------------------------------
+
+local function matchesKnownAd(info, ad)
+
+    if ad.name and ad.name ~= "" and info.name ~= ad.name then
+        return false
+    end
+
+    if ad.artist and ad.artist ~= "" and info.artist ~= ad.artist then
+        return false
+    end
+
+    if ad.album and ad.album ~= "" and info.album ~= ad.album then
+        return false
+    end
+
+    return true
+end
+
+
+local function isKnownAd(info)
+
+    for _, ad in ipairs(knownAds) do
+        if matchesKnownAd(info, ad) then
             return true
         end
     end
@@ -69,21 +262,40 @@ local function containsThai(text)
     return false
 end
 
+
 -----------------------------------------------------------
--- Detect advertisement
+-- Advertisement detection
 -----------------------------------------------------------
 
 local function isAdvertisement(info)
-    return containsThai(info.name)
-        or containsThai(info.artist)
-        or containsThai(info.album)
+
+    if containsThai(info.name) then
+        return true
+    end
+
+    if containsThai(info.artist) then
+        return true
+    end
+
+    if containsThai(info.album) then
+        return true
+    end
+
+    if isKnownAd(info) then
+        return true
+    end
+
+    return false
 end
 
+
 -----------------------------------------------------------
--- Set Spotify volume
+-- Spotify volume
 -----------------------------------------------------------
 
 local function setSpotifyVolume(volume)
+
+    volume = tonumber(volume) or 0
     volume = math.max(0, math.min(100, math.floor(volume)))
 
     local script = string.format([[
@@ -95,8 +307,169 @@ local function setSpotifyVolume(volume)
     hs.osascript.applescript(script)
 end
 
+
 -----------------------------------------------------------
--- Check Spotify
+-- Smooth volume fading
+-----------------------------------------------------------
+
+local function fadeSpotifyVolume(fromVolume, toVolume, duration)
+
+    stopFade()
+
+    fromVolume = tonumber(fromVolume) or 0
+    toVolume = tonumber(toVolume) or 0
+
+    local steps =
+        math.max(1, math.floor(duration / 0.05))
+
+    local stepInterval = duration / steps
+    local step = 0
+
+    fadeTimer = hs.timer.doEvery(stepInterval, function()
+
+        step = step + 1
+
+        local progress =
+            math.min(1, step / steps)
+
+        local volume =
+            fromVolume +
+            (toVolume - fromVolume) * progress
+
+        setSpotifyVolume(volume)
+
+        if progress >= 1 then
+            stopFade()
+        end
+    end)
+end
+
+
+-----------------------------------------------------------
+-- Mute advertisement
+-----------------------------------------------------------
+
+local function muteAdvertisement(info)
+
+    if not adActive then
+        originalVolume = info.volume
+        adActive = true
+    end
+
+    fadeSpotifyVolume(
+        info.volume,
+        0,
+        obj.fadeOutDuration
+    )
+end
+
+
+-----------------------------------------------------------
+-- Restore Spotify volume
+-----------------------------------------------------------
+
+local function restoreSpotifyVolume()
+
+    if not adActive then
+        return
+    end
+
+    adActive = false
+
+    fadeSpotifyVolume(
+        0,
+        originalVolume,
+        obj.fadeInDuration
+    )
+end
+
+
+-----------------------------------------------------------
+-- Add current track to advertisement database
+-----------------------------------------------------------
+
+local function teachCurrentAdvertisement()
+
+    local info = spotifyInfo()
+
+    if not info then
+        hs.alert.show("Spotify is not playing")
+        return
+    end
+
+    -------------------------------------------------------
+    -- Add to memory immediately
+    -------------------------------------------------------
+
+    local alreadyKnown = false
+
+    for _, ad in ipairs(knownAds) do
+        if matchesKnownAd(info, ad) then
+            alreadyKnown = true
+            break
+        end
+    end
+
+    if not alreadyKnown then
+
+        table.insert(knownAds, {
+            name = info.name,
+            artist = info.artist,
+            album = info.album
+        })
+
+        saveKnownAds()
+
+    end
+
+    -------------------------------------------------------
+    -- Mute immediately
+    -------------------------------------------------------
+
+    muteAdvertisement(info)
+
+    -------------------------------------------------------
+    -- Notify user
+    -------------------------------------------------------
+
+    if alreadyKnown then
+
+        hs.notify.show(
+            "xSpotifyAdMuter",
+            "Advertisement already known",
+            info.name
+        )
+
+    else
+
+        hs.notify.show(
+            "xSpotifyAdMuter",
+            "Advertisement learned",
+            info.name
+        )
+
+    end
+end
+
+
+-----------------------------------------------------------
+-- Shortcut
+--
+-- Command + Option + A
+--
+-- Teach current Spotify track as an advertisement
+-----------------------------------------------------------
+
+obj.adHotkey =
+    hs.hotkey.bind(
+        {"cmd", "alt", "ctrl", "shift"},
+        "A",
+        teachCurrentAdvertisement
+    )
+
+
+-----------------------------------------------------------
+-- Main Spotify watcher
 -----------------------------------------------------------
 
 local function checkSpotify()
@@ -104,74 +477,40 @@ local function checkSpotify()
     local info = spotifyInfo()
 
     if not info then
-        if muted then
-            setSpotifyVolume(originalVolume)
-            muted = false
+
+        if adActive then
+            restoreSpotifyVolume()
         end
 
-        lastState = nil
-        stateSince = nil
-
         return
     end
 
-    local currentState =
-        isAdvertisement(info) and "AD" or "MUSIC"
+    local ad = isAdvertisement(info)
 
-    -------------------------------------------------------
-    -- State changed
-    -------------------------------------------------------
+    if ad then
 
-    if currentState ~= lastState then
-        lastState = currentState
-        stateSince = os.time()
-        return
-    end
+        if not adActive then
+            muteAdvertisement(info)
+        end
 
-    -------------------------------------------------------
-    -- Wait for confirmation
-    -------------------------------------------------------
+    else
 
-    if not stateSince then
-        stateSince = os.time()
-        return
-    end
-
-    if os.time() - stateSince < obj.confirmationTime then
-        return
-    end
-
-    -------------------------------------------------------
-    -- Confirmed advertisement
-    -------------------------------------------------------
-
-    if currentState == "AD" and not muted then
-        originalVolume = info.volume or 100
-        setSpotifyVolume(0)
-        muted = true
-        return
-    end
-
-    -------------------------------------------------------
-    -- Confirmed music
-    -------------------------------------------------------
-
-    if currentState == "MUSIC" and muted then
-        setSpotifyVolume(originalVolume)
-        muted = false
-        return
+        if adActive then
+            restoreSpotifyVolume()
+        end
     end
 end
 
+
 -----------------------------------------------------------
--- Automatically start monitoring when the Spoon loads
+-- Start watcher automatically
 -----------------------------------------------------------
 
-obj.timer = hs.timer.doEvery(
-    obj.interval,
-    checkSpotify
-)
-
+obj.timer =
+    hs.timer.doEvery(
+        obj.interval,
+        checkSpotify
+    )
 
 
 return obj
