@@ -7,7 +7,7 @@
 
 local obj = {}
 
-obj.interval = 0.1
+obj.interval = 0.8
 obj.fadeOutDuration = 0.6
 obj.fadeInDuration = 0.8
 
