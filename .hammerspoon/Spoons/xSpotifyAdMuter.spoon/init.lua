@@ -105,7 +105,19 @@ end
 -- Spotify information
 -----------------------------------------------------------
 
+-- IMPORTANT:
+-- Never use `tell application "Spotify"` unless Spotify is already
+-- running. AppleScript can launch an application just by targeting it.
+local spotifyRunning = hs.application.get("Spotify") ~= nil
+
+local function spotifyIsRunning()
+    return spotifyRunning
+end
+
 local function spotifyInfo()
+    if not spotifyIsRunning() then
+        return nil
+    end
 
     local script = [[
         tell application "Spotify"
@@ -297,6 +309,13 @@ end
 
 local function setSpotifyVolume(volume)
 
+    -- Spotify may have been closed while a fade timer was still running.
+    -- Do not let AppleScript relaunch it.
+    if not spotifyIsRunning() then
+        stopFade()
+        return
+    end
+
     volume = tonumber(volume) or 0
     volume = math.max(0, math.min(100, math.floor(volume)))
 
@@ -377,6 +396,13 @@ local function restoreSpotifyVolume()
     end
 
     adActive = false
+
+    -- If Spotify was closed, there is nothing to restore.
+    -- Most importantly, do not start a fade that could relaunch it.
+    if not spotifyIsRunning() then
+        stopFade()
+        return
+    end
 
     fadeSpotifyVolume(
         0,
@@ -471,10 +497,46 @@ obj.adHotkey =
 
 
 -----------------------------------------------------------
+-- Spotify process watcher
+-----------------------------------------------------------
+
+-- If Spotify quits, immediately cancel every operation that could
+-- touch Spotify. This also prevents a pending fade from bringing it back.
+if obj.appWatcher then
+    obj.appWatcher:stop()
+    obj.appWatcher = nil
+end
+
+obj.appWatcher = hs.application.watcher.new(function(appName, eventType, appObject)
+    if appName ~= "Spotify" then
+        return
+    end
+
+    if eventType == hs.application.watcher.launched then
+        spotifyRunning = true
+        return
+    end
+
+    if eventType == hs.application.watcher.terminated then
+        spotifyRunning = false
+        stopFade()
+        adActive = false
+    end
+end)
+
+obj.appWatcher:start()
+
+
+-----------------------------------------------------------
 -- Main Spotify watcher
 -----------------------------------------------------------
 
 local function checkSpotify()
+
+    -- Do absolutely nothing while Spotify is closed.
+    if not spotifyRunning then
+        return
+    end
 
     local info = spotifyInfo()
 
@@ -507,6 +569,11 @@ end
 -----------------------------------------------------------
 -- Start watcher automatically
 -----------------------------------------------------------
+
+if obj.timer then
+    obj.timer:stop()
+    obj.timer = nil
+end
 
 obj.timer =
     hs.timer.doEvery(
