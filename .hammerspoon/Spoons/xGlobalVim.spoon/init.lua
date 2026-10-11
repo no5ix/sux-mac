@@ -40,8 +40,30 @@ end
 -- 上面已经把 capslock 映射为了 ctrl 键, 所以这里的 ctrl 其实就是 capslock
 
 -- screenshot
-hs.hotkey.bind({"ctrl"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift", "ctrl"))
+-- hs.hotkey.bind({"ctrl"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift", "ctrl"))
+-- faster version of the above
+hs.hotkey.bind({"ctrl"}, "q", function()
+    if captureTask and captureTask:isRunning() then
+        hs.alert.show("Screenshot capture is already running")
+        return
+    end
+
+    captureTask = hs.task.new("/usr/sbin/screencapture", function(exitCode)
+        captureTask = nil
+        if exitCode == 0 then
+            -- hs.alert.show("Screenshot copied to clipboard")
+        end -- Nonzero is often just the user cancelling the selection.
+    end, {"-i", "-c", "-x"})
+    -- end, {"-i", "-c"})
+    -- end, {"-i", "-x"})
+
+    if captureTask then captureTask:start()
+    else hs.alert.show("Could not start screencapture") end
+end)
+
 hs.hotkey.bind({"ctrl", "shift"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift"))
+
+
 
 -- failed1
 -- hs.hotkey.bind({"ctrl"}, "v", hs.fnutils.partial(fn_cb_task, "v", "alt", "cmd"))
