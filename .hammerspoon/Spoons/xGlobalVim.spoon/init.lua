@@ -41,6 +41,7 @@ end
 
 -- screenshot
 -- hs.hotkey.bind({"ctrl"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift", "ctrl"))
+
 -- faster version of the above
 hs.hotkey.bind({"ctrl"}, "q", function()
     if captureTask and captureTask:isRunning() then
@@ -54,8 +55,6 @@ hs.hotkey.bind({"ctrl"}, "q", function()
             -- hs.alert.show("Screenshot copied to clipboard")
         end -- Nonzero is often just the user cancelling the selection.
     end, {"-i", "-c", "-x"})
-    -- end, {"-i", "-c"})
-    -- end, {"-i", "-x"})
 
     if captureTask then captureTask:start()
     else hs.alert.show("Could not start screencapture") end
@@ -63,6 +62,27 @@ end)
 
 hs.hotkey.bind({"ctrl", "shift"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift"))
 
+-- faster version of the above without popping up the screenshot thumbnail at the bottom right corner
+-- hs.hotkey.bind({"ctrl", "shift"}, "q", function()
+--     local outputPath = os.getenv("HOME") .. "/Desktop/screenshot.png"
+
+--     local task = hs.task.new(
+--         "/usr/sbin/screencapture",
+--         function(exitCode, stdout, stderr)
+--             print("Screenshot exit code:", exitCode)
+--             if stderr and stderr ~= "" then
+--                 print("Screenshot error:", stderr)
+--             end
+--         end,
+--         {"-i", outputPath}
+--     )
+
+--     if task then
+--         task:start()
+--     else
+--         hs.alert.show("Could not start screenshot")
+--     end
+-- end)
 
 
 -- failed1
