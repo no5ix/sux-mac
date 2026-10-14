@@ -9,4 +9,9 @@ return {
         artist = "",
         album = "",
     },
+    {
+        name = "—",
+        artist = "",
+        album = "",
+    },
 }
