@@ -267,7 +267,7 @@ local function handleClipboardPanelMessage(message)
                 end
             end
         end
-        local cardsHTML = #cards > 0 and table.concat(cards, "\\n")
+        local cardsHTML = #cards > 0 and table.concat(cards, "\n")
             or '<div class="empty">No matching clipboard items</div>'
         clipboard_webview:evaluateJavaScript(
             "document.querySelector('main').innerHTML = " .. hs.json.encode(cardsHTML) .. ";" ..
