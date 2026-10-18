@@ -127,6 +127,25 @@ local function escapeHTML(value)
     return value
 end
 
+-- Encode arbitrary Lua strings as JavaScript string literals. hs.json.encode
+-- accepts tables only in Hammerspoon, so don't pass strings to it.
+local function jsStringLiteral(value)
+    value = tostring(value or "")
+    value = value:gsub("\\", "\\\\")
+                 :gsub('"', '\\"')
+                 :gsub("\b", "\\b")
+                 :gsub("\f", "\\f")
+                 :gsub("\n", "\\n")
+                 :gsub("\r", "\\r")
+                 :gsub("\t", "\\t")
+                 :gsub("[%z\1-\31]", function(ch)
+                     return string.format("\\u%04x", string.byte(ch))
+                 end)
+                 :gsub("\226\128\168", "\\u2028")
+                 :gsub("\226\128\169", "\\u2029")
+    return '"' .. value .. '"'
+end
+
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
@@ -270,9 +289,9 @@ local function handleClipboardPanelMessage(message)
         local cardsHTML = #cards > 0 and table.concat(cards, "\n")
             or '<div class="empty">No matching clipboard items</div>'
         clipboard_webview:evaluateJavaScript(
-            "document.querySelector('main').innerHTML = " .. hs.json.encode(cardsHTML) .. ";" ..
+            "document.querySelector('main').innerHTML = " .. jsStringLiteral(cardsHTML) .. ";" ..
             "document.querySelector('.count').textContent = " ..
-            hs.json.encode(tostring(#cards) .. " matching items") .. ";"
+            jsStringLiteral(tostring(#cards) .. " matching items") .. ";"
         )
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
