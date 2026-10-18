@@ -327,7 +327,9 @@ clipboard_webview:windowCallback(function(action, _, focused)
     if action == "focusChange" and focused == false and not suppressFocusDismiss then
         -- Clicking another app or elsewhere dismisses the floating history panel.
         hs.timer.doAfter(0.1, function()
-            if clipboard_webview then clipboard_webview:hide() end
+            if clipboard_webview and not clipboard_webview:hswindow():isFocused() then
+                clipboard_webview:hide()
+            end
         end)
     end
 end)
@@ -422,6 +424,10 @@ function showClipboardHistory()
     local frontApp = application.frontmostApplication()
     if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
         previousApplication = frontApp
+    elseif previousApplication and previousApplication:isRunning() then
+        -- Preserve the app remembered before an immediate repeated hotkey.
+    else
+        previousApplication = nil
     end
     suppressFocusDismiss = true
     menuData = {}
@@ -475,6 +481,7 @@ function showClipboardHistory()
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
     clipboard_webview:show()
+    clipboard_webview:hswindow():focus()
     -- Clear this guard after the initial key-window transition settles.
     hs.timer.doAfter(0.25, function() suppressFocusDismiss = false end)
 
