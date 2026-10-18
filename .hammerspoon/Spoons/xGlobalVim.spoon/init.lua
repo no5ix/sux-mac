@@ -42,8 +42,10 @@ end
 -- screenshot
 -- hs.hotkey.bind({"ctrl"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift", "ctrl"))
 
--- faster version of the above
-hs.hotkey.bind({"ctrl"}, "q", function()
+-- Prefer WeChat's built-in screenshot tool when WeChat is running.
+-- WeChat's default screenshot shortcut on macOS is Ctrl+Cmd+A. If WeChat is
+-- not available, preserve the existing interactive macOS screenshot fallback.
+local function startMacScreenshot()
     if captureTask and captureTask:isRunning() then
         hs.alert.show("Screenshot capture is already running")
         return
@@ -52,13 +54,32 @@ hs.hotkey.bind({"ctrl"}, "q", function()
     captureTask = hs.task.new("/usr/sbin/screencapture", function(exitCode)
         captureTask = nil
         if exitCode == 0 then
-            -- hs.alert.show("Screenshot copied to clipboard")
+            -- Screenshot was copied to the clipboard.
         end -- Nonzero is often just the user cancelling the selection.
     end, {"-i", "-c", "-x"})
 
     if captureTask then captureTask:start()
     else hs.alert.show("Could not start screencapture") end
-end)
+end
+
+local function startPreferredScreenshot()
+    local wechat = hs.application.get("微信") or hs.application.get("WeChat")
+    if wechat then
+        -- Activate WeChat before sending its screenshot shortcut, so it is
+        -- handled by WeChat even when another application was frontmost.
+        wechat:activate()
+        hs.timer.doAfter(0.25, function()
+            -- WeChat's macOS screenshot shortcut; keep this separate from the
+            -- fallback so we don't open two capture tools for one key press.
+            hs.eventtap.keyStroke({"ctrl", "cmd"}, "a", 0)
+        end)
+        return
+    end
+
+    startMacScreenshot()
+end
+
+hs.hotkey.bind({"ctrl"}, "q", startPreferredScreenshot)
 
 hs.hotkey.bind({"ctrl", "shift"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift"))
 

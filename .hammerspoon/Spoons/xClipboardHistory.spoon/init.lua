@@ -14,6 +14,22 @@ local menuData = {}  -- chooser menu data
 
 local clipboard_chooser = nil  -- Chooser/menu object
 
+-- Release references held by both the history and the chooser. hs.image values
+-- can retain large native image buffers, so clearing only the history arrays
+-- is not sufficient while menuData/chooser choices still reference them.
+local function clearClipboardHistory()
+    text_clipboard_history = {}
+    img_clipboard_history = {}
+
+    if clipboard_chooser then
+        clipboard_chooser:choices({})
+        clipboard_chooser:hide()
+    end
+
+    menuData = {}
+    collectgarbage("collect")
+end
+
 local max_history_size_for_text = 10000
 local max_history_size_for_img = 100
 local display_max_text_length = 200
@@ -126,14 +142,11 @@ clipboard_chooser = chooser.new(function(choice)
             end)
         elseif choice.type == "paste_all" then 
             pasteSomeWithDelimiterFromStartRow(#menuData)
-        elseif choice.type == "clear_all" then 
-            -- pasteboard.clearContents()
-            text_clipboard_history = {}  -- Array to store the clipboard history for text
-            img_clipboard_history = {}  -- Array to store the clipboard history for img
-            -- last_change = pasteboard.changeCount()
-            -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
+        elseif choice.type == "clear_all" then
+            clearClipboardHistory()
+            -- Do not clear the system pasteboard: Clear All only clears the history.
+            -- Restart the watcher after all chooser references have been released.
             pasteboard_watcher:start()
-            menuData = nil
         end
     end
 end)
