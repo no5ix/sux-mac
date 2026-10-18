@@ -381,26 +381,6 @@ function showClipboardHistory()
 
     menuData = {}
 
-    -- insert a "Paste All" action into the menuData at the first place
-    table.insert(
-        menuData,
-        { 
-            text = "Paste All",
-            type = "paste_all",
-            image = hs.image.imageFromName('NSMultipleDocuments')
-        }
-    )
-
-    -- insert a "Clear All" action into the menuData at the second place
-    table.insert(
-        menuData,
-        { 
-            text = "Clear All",
-            type = "clear_all",
-            image = hs.image.imageFromName('NSTrashFull')
-        }
-    )
-
     function insertToMenuData(v, type, unixTs)
         -- print("unixTs " .. tostring(unixTs))
         local dateTimeStr = "[" .. os.date("%Y-%m-%d %H:%M:%S", unixTs) .. "] "
