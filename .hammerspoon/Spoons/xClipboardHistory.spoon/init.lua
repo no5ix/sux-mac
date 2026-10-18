@@ -21,17 +21,6 @@ local function decodeImage(entry)
     return hs.image.imageFromURL(entry.imageData)
 end
 
-local function clearClipboardHistory()
-    text_clipboard_history = {}
-    img_clipboard_history = {}
-    if clipboard_chooser then
-        clipboard_chooser:choices({})
-        clipboard_chooser:hide()
-    end
-    menuData = {}
-    collectgarbage("collect")
-end
-
 local max_history_size_for_text = 10000
 local max_history_size_for_img = 100
 local display_max_text_length = 200
