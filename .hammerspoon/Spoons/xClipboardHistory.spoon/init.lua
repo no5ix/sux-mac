@@ -134,6 +134,10 @@ clipboard_chooser = chooser.new(function(choice)
             -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
             pasteboard_watcher:start()
             menuData = nil
+
+            -- collectgarbage("collect")
+            -- even collectgarbage("collect") doesn't work, lua vm still retain memory for reuse. so we just force it to reload
+            hs.reload()
         end
     end
 end)
