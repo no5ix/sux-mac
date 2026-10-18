@@ -300,6 +300,7 @@ clipboard_webview:allowTextEntry(true)
 local function finishPasteAll()
     restoreNewestClipContent()
     menuData = {}
+    if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
     hs.alert.show("The Paste task has finished.")
 end
