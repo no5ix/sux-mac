@@ -6,13 +6,14 @@ local pkg = {}
 local hotkey = require "hs.hotkey"
 local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
-local chooser = require "hs.chooser"
+local webview = require "hs.webview"
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
-local menuData = {}  -- chooser menu data
-
-local clipboard_chooser = nil  -- Chooser/menu object
+local menuData = {}  -- Clipboard history data
+local clipboard_webview = nil
+local clipboard_usercontent = nil
+local clipboard_search = ""
 
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
@@ -24,11 +25,11 @@ end
 local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-    if clipboard_chooser then
-        clipboard_chooser:choices({})
-        clipboard_chooser:hide()
-    end
     menuData = {}
+    if clipboard_webview then
+        clipboard_webview:hide()
+        clipboard_webview:html(clipboardPanelHTML())
+    end
     collectgarbage("collect")
 end
 
@@ -117,54 +118,163 @@ function restoreNewestClipContent()
     end
 end
 
-clipboard_chooser = chooser.new(function(choice)
-    if choice then
-        -- print("mmmmpp idx ?" .. tostring(choice.menuItemIdx))
-        -- if choice.menuItemIdx == 3 then
-        --     print("mmmmppx xx ?")
-        --     hs.eventtap.keyStroke({"cmd"}, "v")
-        --     return
-        -- end
 
-        pasteboard_watcher:stop()
-        if choice.type == "text" then
-            pasteboard.setContents(choice.data)
-            hs.timer.doAfter(0.6, function()
-                hs.eventtap.keyStroke({"cmd"}, "v")
-                hs.timer.doAfter(0.6, function()
-                    restoreNewestClipContent()
-                    -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
-                    pasteboard_watcher:start()
-                    menuData = nil
-                end)
-            end)
-        elseif choice.type == "image" then
-            local image = decodeImage(choice.historyEntry)
-            if not image then
-                pasteboard_watcher:start()
-                hs.alert.show("Unable to restore this clipboard image")
-                return
+local function escapeHTML(value)
+    value = tostring(value or "")
+    value = value:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    value = value:gsub('"', "&quot;"):gsub("'", "&#39;")
+    return value
+end
+
+local function historyItemHTML(entry, index)
+    local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
+    if entry.type == "image" then
+        local src = entry.historyEntry and entry.historyEntry.thumbnailData or ""
+        local preview
+        if src ~= "" then
+            preview = '<img class="preview" src="' .. escapeHTML(src) .. '" alt="Clipboard image preview">'
+        else
+            preview = '<div class="preview placeholder">Image preview unavailable</div>'
+        end
+        return '<button class="item image-item" data-action="paste" data-index="' .. index .. '">' ..
+            preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
+            escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
+    end
+    local content = tostring(entry.data or "")
+    local previewText = content:gsub("[\\r\\n]+", " ")
+    if #previewText > display_max_text_length then previewText = previewText:sub(1, display_max_text_length) .. "…" end
+    return '<button class="item text-item" data-action="paste" data-index="' .. index .. '">' ..
+        '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
+        '</div><div class="text-preview">' .. escapeHTML(previewText) ..
+        '</div><div class="hint">Click to paste</div></button>'
+end
+
+function clipboardPanelHTML()
+    local cards = {}
+    local filter = string.lower(clipboard_search or "")
+    for index, entry in ipairs(menuData or {}) do
+        if entry.type == "text" or entry.type == "image" then
+            local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
+                tostring(entry.data or "") .. " " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
+            if filter == "" or searchable:find(filter, 1, true) then
+                cards[#cards + 1] = historyItemHTML(entry, index)
             end
-            pasteboard.writeObjects(image)
-            hs.timer.doAfter(0.6, function()
-                hs.eventtap.keyStroke({"cmd"}, "v")
-                hs.timer.doAfter(0.6, function()
-                    restoreNewestClipContent()
-                    -- why? because pasteSomeWithDelimiterFromStartRow will do the logic below itself
-                    pasteboard_watcher:start()
-                    menuData = nil
-                end)
-            end)
-        elseif choice.type == "paste_all" then 
-            pasteSomeWithDelimiterFromStartRow(#menuData)
-        elseif choice.type == "clear_all" then
-            clearClipboardHistory()
-            -- Do not clear the system pasteboard: Clear All only clears the history.
-            -- Restart the watcher after all chooser references have been released.
-            pasteboard_watcher:start()
         end
     end
-end)
+    local html = [[
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { box-sizing: border-box; }
+body { margin:0; background:#1d1f24; color:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; }
+header { position:sticky; top:0; z-index:5; padding:14px 16px 12px; background:#202329; border-bottom:1px solid #3c4049; }
+.top { display:flex; align-items:center; gap:10px; }
+h1 { margin:0; font-size:17px; font-weight:650; flex:1; }
+.count { color:#aab0bd; font-size:12px; }
+input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid #454a55; background:#15171b; color:#f5f6f8; font-size:13px; outline:none; }
+input:focus { border-color:#7da6ff; }
+.actions { display:flex; gap:8px; margin-top:10px; }
+.action { border:1px solid #4a505b; border-radius:8px; padding:7px 10px; background:#30343d; color:#f7f7f9; cursor:pointer; font-size:12px; }
+.action.primary { background:#3267d6; border-color:#3267d6; }
+.action.danger { color:#ff9b9b; }
+main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; }
+.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
+.item:hover { border-color:#85aaff; background:#30343d; }
+.image-item .preview { width:100%; height:160px; object-fit:contain; display:block; background:#191b20; border-radius:7px; }
+.preview.placeholder { display:flex; align-items:center; justify-content:center; color:#9ba2af; }
+.meta { padding:9px 2px 1px; }
+.kind { font-size:10px; letter-spacing:.12em; color:#93b5ff; font-weight:700; }
+.stamp { color:#b8beca; font-size:11px; margin-top:5px; }
+.text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.45; }
+.hint { color:#8e96a5; font-size:10px; margin-top:8px; }
+.empty { color:#9ca3b1; text-align:center; padding:40px 12px; grid-column:1/-1; }
+footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-size:11px; }
+</style></head><body>
+<header><div class="top"><h1>Clipboard History</h1><span class="count">]] .. tostring(#cards) .. [[ matching items</span></div>
+<input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
+<div class="actions"><button class="action primary" data-action="pasteAll">Paste All</button>
+<button class="action danger" data-action="clearAll">Clear All</button>
+<button class="action" data-action="close">Close</button></div></header>
+<main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No matching clipboard items</div>') .. [[</main>
+<footer>Enter: paste first match · Esc: close · Larger image previews</footer>
+<script>
+const bridge = (action, index, query) => {
+  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query}); } catch (_) {}
+};
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-action]');
+  if (!button) return;
+  bridge(button.dataset.action, Number(button.dataset.index || 0), '');
+});
+const search = document.getElementById('search');
+search.addEventListener('input', () => bridge('search', 0, search.value));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') bridge('close', 0, '');
+  if (event.key === 'Enter') {
+    const first = document.querySelector('.item');
+    if (first) bridge('paste', Number(first.dataset.index || 0), '');
+  }
+});
+search.focus();
+</script></body></html>]]
+    return html
+end
+
+local function pasteHistoryEntry(index)
+    local choice = menuData and menuData[index]
+    if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
+    pasteboard_watcher:stop()
+    if choice.type == "text" then
+        pasteboard.setContents(choice.data)
+    else
+        local image = decodeImage(choice.historyEntry)
+        if not image then
+            pasteboard_watcher:start()
+            hs.alert.show("Unable to restore this clipboard image")
+            return
+        end
+        pasteboard.writeObjects(image)
+    end
+    if clipboard_webview then clipboard_webview:hide() end
+    hs.timer.doAfter(0.6, function()
+        hs.eventtap.keyStroke({"cmd"}, "v", 0)
+        hs.timer.doAfter(0.6, function()
+            restoreNewestClipContent()
+            pasteboard_watcher:start()
+            menuData = {}
+        end)
+    end)
+end
+
+local function handleClipboardPanelMessage(message)
+    local body = message and message.body
+    if type(body) ~= "table" then return end
+    if body.action == "close" then
+        if clipboard_webview then clipboard_webview:hide() end
+    elseif body.action == "search" then
+        clipboard_search = tostring(body.query or "")
+        clipboard_webview:html(clipboardPanelHTML())
+        clipboard_webview:show()
+    elseif body.action == "paste" then
+        pasteHistoryEntry(tonumber(body.index))
+    elseif body.action == "pasteAll" then
+        pasteSomeWithDelimiterFromStartRow(#menuData)
+    elseif body.action == "clearAll" then
+        clearClipboardHistory()
+        if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()); clipboard_webview:show() end
+        pasteboard_watcher:start()
+        hs.alert.show("Clipboard history cleared")
+    end
+end
+
+clipboard_usercontent = webview.usercontent.new("clipboardHistory")
+clipboard_usercontent:setCallback(handleClipboardPanelMessage)
+clipboard_webview = webview.new(
+    {x = 120, y = 80, w = 980, h = 760},
+    {javaScriptEnabled = true, privateBrowsing = true},
+    clipboard_usercontent
+):windowStyle({"titled", "closable", "resizable"})
+clipboard_webview:allowTextEntry(true)
 
 -- Paste clipboard-history rows from the oldest selected item to the newest.
 -- The chooser is displayed newest-first, so walk the selected range backwards.
@@ -241,28 +351,10 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
 
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
-    clipboard_chooser:hide()
-    -- Snapshot the target row index before hiding the chooser.
+    if clipboard_webview then clipboard_webview:hide() end
+    -- Snapshot the target row index before hiding the panel.
     pasteAllWithDelimiterRecursionVersion(startRow)
 end
-
-clipboard_chooser:rightClickCallback(function(row)
-    -- print("_showContextMenu row:" .. row)
-    point = hs.mouse.absolutePosition()
-    -- print(clipboard_chooser:selectedRowContents(row).text)
-    -- print(clipboard_chooser:selectedRowContents(row).type)
-    -- print(clipboard_chooser:selectedRowContents(row).data)
-    -- local selectedRowTs = clipboard_chooser:selectedRowContents(row).rowTs
-    local menu = hs.menubar.new(false)
-    local menuTable = {
-        { 
-            title = "Paste All the rows above this row in the order from early to late, including this row", fn = hs.fnutils.partial(pasteSomeWithDelimiterFromStartRow, row)
-        },
-    }
-    menu:setMenu(menuTable)
-    menu:popupMenu(point)
-    -- print(hs.inspect(point))
-end)
 
 -- Function to show clipboard history
 function showClipboardHistory()
@@ -308,9 +400,7 @@ function showClipboardHistory()
                 text = dateTimeStr .. "[IMG]",
                 type = type,
                 rowTs = unixTs,
-                historyEntry = v,
-                image = v.thumbnailData and hs.image.imageFromURL(v.thumbnailData)
-                    or hs.image.imageFromName("NSMultipleDocuments")
+                historyEntry = v
             })
         end
     end
@@ -338,8 +428,9 @@ function showClipboardHistory()
         j = j - 1
     end
 
-    clipboard_chooser:choices(menuData)
-    clipboard_chooser:show()
+    clipboard_search = ""
+    clipboard_webview:html(clipboardPanelHTML())
+    clipboard_webview:show()
 
 end
 
