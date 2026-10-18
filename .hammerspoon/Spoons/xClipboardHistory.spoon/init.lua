@@ -264,7 +264,7 @@ local function pasteHistoryEntry(index)
         if previousApplication and previousApplication:isRunning() then
             previousApplication:activate(true)
         end
-        hs.timer.doAfter(0.2, function()
+        hs.timer.doAfter(0.35, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
                 restoreNewestClipContent()
@@ -327,9 +327,7 @@ clipboard_webview:windowCallback(function(action, _, focused)
     if action == "focusChange" and focused == false and not suppressFocusDismiss then
         -- Clicking another app or elsewhere dismisses the floating history panel.
         hs.timer.doAfter(0.1, function()
-            if clipboard_webview and not clipboard_webview:hswindow():isFocused() then
-                clipboard_webview:hide()
-            end
+            if clipboard_webview then clipboard_webview:hide() end
         end)
     end
 end)
