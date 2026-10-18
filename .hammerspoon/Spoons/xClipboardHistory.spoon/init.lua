@@ -44,7 +44,16 @@ function pasteboardToClipboard(item_type, item)
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
     else
-        table.insert(img_clipboard_history, {ts=cur_ts, imageData=item:encodeAsURLString()})
+        -- Keep the full image for pasting, plus a small encoded thumbnail for
+        -- the chooser. This avoids decoding full-resolution screenshots just
+        -- to display the history list.
+        local thumbnail = item:bitmapRepresentation({w=64, h=64})
+        table.insert(img_clipboard_history, {
+            ts=cur_ts,
+            imageData=item:encodeAsURLString(),
+            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or nil
+        })
+        thumbnail = nil
     end
 end
 
@@ -284,7 +293,8 @@ function showClipboardHistory()
                 type = type,
                 rowTs = unixTs,
                 historyEntry = v,
-                image = hs.image.imageFromName("NSMultipleDocuments")
+                image = v.thumbnailData and hs.image.imageFromURL(v.thumbnailData)
+                    or hs.image.imageFromName("NSMultipleDocuments")
             })
         end
     end
