@@ -305,7 +305,7 @@ local function finishPasteAll()
 end
 
 local function pasteAllRowsStep(row)
-    if not menuData or row < 3 then
+    if not menuData or row < 1 then
         finishPasteAll()
         return
     end
