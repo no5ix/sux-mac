@@ -47,7 +47,7 @@ function pasteboardToClipboard(item_type, item)
         -- Keep the full image for pasting, plus a small encoded thumbnail for
         -- the chooser. This avoids decoding full-resolution screenshots just
         -- to display the history list.
-        local thumbnail = item:bitmapRepresentation({w=64, h=64})
+        local thumbnail = item:bitmapRepresentation({w=320, h=320})
         table.insert(img_clipboard_history, {
             ts=cur_ts,
             imageData=item:encodeAsURLString(),
