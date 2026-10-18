@@ -27,6 +27,7 @@ local function clearClipboardHistory()
     img_clipboard_history = {}
     menuData = {}
     if clipboard_webview then
+        clipboard_search = ""
         clipboard_webview:hide()
         clipboard_webview:html(clipboardPanelHTML())
     end
@@ -253,8 +254,26 @@ local function handleClipboardPanelMessage(message)
         if clipboard_webview then clipboard_webview:hide() end
     elseif body.action == "search" then
         clipboard_search = tostring(body.query or "")
-        clipboard_webview:html(clipboardPanelHTML())
-        clipboard_webview:show()
+        -- Filter the visible cards in-place so the search field keeps focus.
+        local filter = string.lower(clipboard_search)
+        local cards = {}
+        for index, entry in ipairs(menuData or {}) do
+            if entry.type == "text" or entry.type == "image" then
+                local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
+                    tostring(entry.data or "") .. " " ..
+                    os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
+                if filter == "" or searchable:find(filter, 1, true) then
+                    cards[#cards + 1] = historyItemHTML(entry, index)
+                end
+            end
+        end
+        local cardsHTML = #cards > 0 and table.concat(cards, "\\n")
+            or '<div class="empty">No matching clipboard items</div>'
+        clipboard_webview:evaluateJavaScript(
+            "document.querySelector('main').innerHTML = " .. hs.json.encode(cardsHTML) .. ";" ..
+            "document.querySelector('.count').textContent = " ..
+            hs.json.encode(tostring(#cards) .. " matching items") .. ";"
+        )
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAll" then
