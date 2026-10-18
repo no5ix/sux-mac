@@ -14,18 +14,20 @@ local menuData = {}  -- chooser menu data
 
 local clipboard_chooser = nil  -- Chooser/menu object
 
--- Release references held by both the history and the chooser. hs.image values
--- can retain large native image buffers, so clearing only the history arrays
--- is not sufficient while menuData/chooser choices still reference them.
+-- Store images as compressed data URLs in history. Decode them only when the
+-- user selects an image to paste, not for every row in the chooser.
+local function decodeImage(entry)
+    if not entry or not entry.imageData then return nil end
+    return hs.image.imageFromURL(entry.imageData)
+end
+
 local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-
     if clipboard_chooser then
         clipboard_chooser:choices({})
         clipboard_chooser:hide()
     end
-
     menuData = {}
     collectgarbage("collect")
 end
@@ -42,8 +44,7 @@ function pasteboardToClipboard(item_type, item)
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
     else
-        -- table.insert(img_clipboard_history, {ts=cur_ts, content=item, imgEncodedString=item:encodeAsURLString()})
-        table.insert(img_clipboard_history, {ts=cur_ts, content=item})
+        table.insert(img_clipboard_history, {ts=cur_ts, imageData=item:encodeAsURLString()})
     end
 end
 
@@ -60,7 +61,7 @@ function handleClipboardChange(content)
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
                 (#text_clipboard_history == 0 or (img_clipboard_history[#img_clipboard_history].ts > text_clipboard_history[#text_clipboard_history].ts)) then
-                    if img_clipboard_history[#img_clipboard_history].content:encodeAsURLString() == pasteboardImg:encodeAsURLString() then
+                    if img_clipboard_history[#img_clipboard_history].imageData == pasteboardImg:encodeAsURLString() then
                         -- print("[handleClipboardChange] it's the same as the last img")
                         return
                     end
@@ -96,15 +97,14 @@ end
 
 -- restore the newest clipboard content
 function restoreNewestClipContent()
-    if #img_clipboard_history == 0 and #text_clipboard_history == 0 then
-        return
-    end
-    if menuData then
-        if menuData[3].type == "text" then
-            pasteboard.setContents(menuData[3].data)
-        else
-            pasteboard.writeObjects(menuData[3].data)
-        end
+    local newestText = text_clipboard_history[#text_clipboard_history]
+    local newestImage = img_clipboard_history[#img_clipboard_history]
+    if not newestText and not newestImage then return end
+    if newestImage and (not newestText or newestImage.ts > newestText.ts) then
+        local image = decodeImage(newestImage)
+        if image then pasteboard.writeObjects(image) end
+    elseif newestText then
+        pasteboard.setContents(newestText.content)
     end
 end
 
@@ -129,8 +129,14 @@ clipboard_chooser = chooser.new(function(choice)
                     menuData = nil
                 end)
             end)
-        elseif choice.type == "image" then 
-            pasteboard.writeObjects(choice.data)
+        elseif choice.type == "image" then
+            local image = decodeImage(choice.historyEntry)
+            if not image then
+                pasteboard_watcher:start()
+                hs.alert.show("Unable to restore this clipboard image")
+                return
+            end
+            pasteboard.writeObjects(image)
             hs.timer.doAfter(0.6, function()
                 hs.eventtap.keyStroke({"cmd"}, "v")
                 hs.timer.doAfter(0.6, function()
@@ -169,7 +175,8 @@ function pasteAllWithDelimiterRecursionVersion(startRow)
         pasteboard.setContents(entry.data .. "\n")
         hs.eventtap.keyStroke({"cmd"}, "v")
     else
-        pasteboard.writeObjects(entry.data)
+        local image = decodeImage(entry.historyEntry)
+        if image then pasteboard.writeObjects(image) end
         hs.eventtap.keyStroke({"cmd"}, "v")
         pasteboard.setContents("\n")
         hs.eventtap.keyStroke({"cmd"}, "v")
@@ -270,14 +277,14 @@ function showClipboardHistory()
                 data = v
             })
         elseif (type == "image") then
+            -- Avoid decoding every full-size screenshot when constructing the list.
             table.insert(menuData, {
                 menuItemIdx = #menuData + 1,
                 text = dateTimeStr .. "[IMG]",
                 type = type,
                 rowTs = unixTs,
-                data = v,
-                --    image = hs.image.imageFromURL(v)})
-                image = v
+                historyEntry = v,
+                image = hs.image.imageFromName("NSMultipleDocuments")
             })
         end
     end
@@ -290,7 +297,7 @@ function showClipboardHistory()
             insertToMenuData(text_clipboard_history[i].content, "text", text_clipboard_history[i].ts)
             i = i - 1
         else
-            insertToMenuData(img_clipboard_history[j].content, "image", img_clipboard_history[j].ts)
+            insertToMenuData(img_clipboard_history[j], "image", img_clipboard_history[j].ts)
             j = j - 1
         end
     end
@@ -301,7 +308,7 @@ function showClipboardHistory()
     end
 
     while j >= 1 do
-        insertToMenuData(img_clipboard_history[j].content, "image", img_clipboard_history[j].ts)
+        insertToMenuData(img_clipboard_history[j], "image", img_clipboard_history[j].ts)
         j = j - 1
     end
 
