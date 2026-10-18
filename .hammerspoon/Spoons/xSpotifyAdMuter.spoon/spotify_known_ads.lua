@@ -14,4 +14,9 @@ return {
         artist = "",
         album = "",
     },
+    {
+        name = "PSYCHIC FEVER",
+        artist = "",
+        album = "",
+    },
 }
