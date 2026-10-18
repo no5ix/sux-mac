@@ -363,7 +363,7 @@ function pasteAllWithDelimiterRecursionVersion(startRow)
 end
 
 function pasteSomeWithDelimiterFromStartRow(startRow)
-    if type(startRow) ~= "number" or startRow < 3 or not menuData then
+    if type(startRow) ~= "number" or startRow < 1 or not menuData or #menuData == 0 then
         hs.alert.show("No clipboard-history rows to paste.")
         return
     end
@@ -371,7 +371,8 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
-    -- Snapshot the target row index before hiding the panel.
+    -- The web panel lists only real history rows, newest first. Reverse the
+    -- selected range to preserve the historical oldest-to-newest paste order.
     pasteAllWithDelimiterRecursionVersion(startRow)
 end
 
