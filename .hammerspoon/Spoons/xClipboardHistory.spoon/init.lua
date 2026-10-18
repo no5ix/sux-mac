@@ -7,6 +7,7 @@ local hotkey = require "hs.hotkey"
 local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
 local webview = require "hs.webview"
+local application = require "hs.application"
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
@@ -14,6 +15,8 @@ local menuData = {}  -- Clipboard history data
 local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
+local previousApplication = nil
+local suppressFocusDismiss = false
 
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
@@ -256,12 +259,19 @@ local function pasteHistoryEntry(index)
         pasteboard.writeObjects(image)
     end
     if clipboard_webview then clipboard_webview:hide() end
-    hs.timer.doAfter(0.6, function()
-        hs.eventtap.keyStroke({"cmd"}, "v", 0)
-        hs.timer.doAfter(0.6, function()
-            restoreNewestClipContent()
-            pasteboard_watcher:start()
-            menuData = {}
+    hs.timer.doAfter(0.15, function()
+        -- Restore focus to the app that was active before the history panel opened.
+        if previousApplication and previousApplication:isRunning() then
+            previousApplication:activate(true)
+        end
+        hs.timer.doAfter(0.2, function()
+            hs.eventtap.keyStroke({"cmd"}, "v", 0)
+            hs.timer.doAfter(0.6, function()
+                restoreNewestClipContent()
+                pasteboard_watcher:start()
+                menuData = {}
+                previousApplication = nil
+            end)
         end)
     end)
 end
@@ -313,6 +323,14 @@ clipboard_webview = webview.new(
     clipboard_usercontent
 ):windowStyle({"titled", "closable", "resizable"})
 clipboard_webview:allowTextEntry(true)
+clipboard_webview:windowCallback(function(action, _, focused)
+    if action == "focusChange" and focused == false and not suppressFocusDismiss then
+        -- Clicking another app or elsewhere dismisses the floating history panel.
+        hs.timer.doAfter(0.1, function()
+            if clipboard_webview then clipboard_webview:hide() end
+        end)
+    end
+end)
 
 -- Paste clipboard-history rows from the oldest selected item to the newest.
 -- The chooser is displayed newest-first, so walk the selected range backwards.
@@ -400,6 +418,12 @@ end
 function showClipboardHistory()
     pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
 
+    -- Remember the app that should receive a paste before the panel takes focus.
+    local frontApp = application.frontmostApplication()
+    if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
+        previousApplication = frontApp
+    end
+    suppressFocusDismiss = true
     menuData = {}
 
     function insertToMenuData(v, type, unixTs)
@@ -451,6 +475,8 @@ function showClipboardHistory()
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
     clipboard_webview:show()
+    -- Clear this guard after the initial key-window transition settles.
+    hs.timer.doAfter(0.25, function() suppressFocusDismiss = false end)
 
 end
 
