@@ -162,68 +162,84 @@ clipboard_chooser = chooser.new(function(choice)
     end
 end)
 
-function pasteAllWithDelimiterRecursionVersion(startRow)
-    if startRow < 3 then
-        restoreNewestClipContent()
-        menuData = nil
-        pasteboard_watcher:start()
-        hs.alert.show("the Paste task has finished !!")
-        return
-    end    
+-- Paste clipboard-history rows from the oldest selected item to the newest.
+-- The chooser is displayed newest-first, so walk the selected range backwards.
+local function finishPasteAll()
+    restoreNewestClipContent()
+    menuData = {}
+    pasteboard_watcher:start()
+    hs.alert.show("The Paste task has finished.")
+end
 
-    local entry = menuData[startRow]
+local function pasteAllRowsStep(row)
+    if not menuData or row < 3 then
+        finishPasteAll()
+        return
+    end
+
+    local entry = menuData[row]
+    if not entry or (entry.type ~= "text" and entry.type ~= "image") then
+        hs.timer.doAfter(0.05, function()
+            pasteAllRowsStep(row - 1)
+        end)
+        return
+    end
+
+    local wroteContent = false
     if entry.type == "text" then
-        -- 这个方法不稳定, 经常打不出来
-        -- hs.eventtap.keyStrokes(text_clipboard_history[i].content)
-        -- hs.eventtap.keyStrokes("\n")
-        -- print(k)
-        pasteboard.setContents(entry.data .. "\n")
-        hs.eventtap.keyStroke({"cmd"}, "v")
+        wroteContent = pasteboard.setContents(entry.data .. "\n") ~= false
     else
         local image = decodeImage(entry.historyEntry)
-        if image then pasteboard.writeObjects(image) end
-        hs.eventtap.keyStroke({"cmd"}, "v")
-        pasteboard.setContents("\n")
-        hs.eventtap.keyStroke({"cmd"}, "v")
+        if image then
+            wroteContent = pasteboard.writeObjects(image) ~= false
+        else
+            hs.alert.show("Skipped an image that could not be decoded.")
+        end
     end
-    hs.timer.doAfter(0.6, function()
-        pasteAllWithDelimiterRecursionVersion(startRow - 1)
+
+    if not wroteContent then
+        hs.timer.doAfter(0.05, function()
+            pasteAllRowsStep(row - 1)
+        end)
+        return
+    end
+
+    -- Give the destination app time to consume this clipboard item before it
+    -- is replaced by the next entry.
+    hs.timer.doAfter(0.15, function()
+        hs.eventtap.keyStroke({"cmd"}, "v", 0)
+        hs.timer.doAfter(0.4, function()
+            if entry.type == "image" then
+                -- Preserve the existing behavior of separating images with a newline.
+                pasteboard.setContents("\n")
+                hs.timer.doAfter(0.15, function()
+                    hs.eventtap.keyStroke({"cmd"}, "v", 0)
+                    hs.timer.doAfter(0.4, function()
+                        pasteAllRowsStep(row - 1)
+                    end)
+                end)
+            else
+                pasteAllRowsStep(row - 1)
+            end
+        end)
     end)
 end
 
+function pasteAllWithDelimiterRecursionVersion(startRow)
+    pasteAllRowsStep(startRow)
+end
+
 function pasteSomeWithDelimiterFromStartRow(startRow)
-    -- print("[pasteSomeWithDelimiterFromStartRow: " .. os.date("%Y-%m-%d %H:%M:%S", selectedRowTs) .. "] ")
-    if startRow < 3 then
+    if type(startRow) ~= "number" or startRow < 3 or not menuData then
+        hs.alert.show("No clipboard-history rows to paste.")
         return
-    end    
-    
-    hs.alert.show("Please wait for the Paste task to finish !!")
+    end
+
+    hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     clipboard_chooser:hide()
-    pasteAllWithDelimiterRecursionVersion(startRow)  -- this is the recursion version
-
-    -- -----------------**** below is the traversal version ****------------------------
-    -- local k = startRow
-    -- while k >= 3 do
-    --     local entry = menuData[k]
-    --     if entry.type == "text" then
-    --         -- 这个方法不稳定, 经常打不出来
-    --         -- hs.eventtap.keyStrokes(text_clipboard_history[i].content)
-    --         -- hs.eventtap.keyStrokes("\n")
-    --         print(k)
-    --         pasteboard.setContents(entry.data .. "\n")
-    --         hs.eventtap.keyStroke({"cmd"}, "v")
-    --     else
-    --         pasteboard.writeObjects(entry.data)
-    --         hs.eventtap.keyStroke({"cmd"}, "v")
-    --         pasteboard.setContents("\n")
-    --         hs.eventtap.keyStroke({"cmd"}, "v")
-    --     end
-    --     k = k - 1
-    -- end
-    -- restoreNewestClipContent()
-    -- menuData = nil
-    -- pasteboard_watcher:start()
+    -- Snapshot the target row index before hiding the chooser.
+    pasteAllWithDelimiterRecursionVersion(startRow)
 end
 
 clipboard_chooser:rightClickCallback(function(row)
