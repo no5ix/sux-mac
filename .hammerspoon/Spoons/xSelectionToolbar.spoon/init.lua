@@ -2,7 +2,6 @@ local obj = {}
 obj.__index = obj
 
 local pasteboard = require("hs.pasteboard")
-local hotkey = require("hs.hotkey")
 local webview = require("hs.webview")
 local timer = require("hs.timer")
 local json = require("hs.json")
@@ -125,7 +124,6 @@ function obj:start()
     if mouseSelectionTap then mouseSelectionTap:stop() end
     local lastText = ""
     local lastShownAt = 0
-    local lastMouseDown = false
     local function selectionFromAccessibility()
         local ok, value = pcall(function()
             local function walk(element)
