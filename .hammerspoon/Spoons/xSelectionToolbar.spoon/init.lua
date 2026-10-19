@@ -167,9 +167,6 @@ local function detectTranslationDirection(text)
     -- Lightweight script-based language detection is sufficient for the three
     -- requested routes: Latin/English -> Chinese, CJK/Chinese -> English,
     -- Thai script -> Chinese. Mixed/script-neutral text defaults to Chinese.
-    if text:match("[\\224-\\239][\\128-\\191][\\128-\\191]") then
-        -- UTF-8 byte patterns below count script characters more specifically.
-    end
     local thaiCount, cjkCount = 0, 0
     for _, codepoint in utf8.codes(text) do
         if codepoint >= 0x0E00 and codepoint <= 0x0E7F then thaiCount = thaiCount + 1 end
