@@ -167,10 +167,12 @@ local function buildToolbar(text)
                 targetAction = "youdao-word"
             end
         end
-        local script = string.format(
-            "document.querySelectorAll('.bar button').forEach(function(b){var h=b.getAttribute('data-action')===%q;b.classList.toggle('is-hovered',h);b.style.setProperty('cursor',h?'pointer':'default','important');});",
-            targetAction
-        )
+        local actionLiteral = string.format("%q", targetAction)
+        local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
+            "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
+            "b.classList.toggle('is-hovered',h);" ..
+            "b.style.setProperty('cursor',h?'pointer':'default','important');" ..
+            "});"
         pcall(function() toolbar:evaluateJavaScript(script) end)
     end)
 end
