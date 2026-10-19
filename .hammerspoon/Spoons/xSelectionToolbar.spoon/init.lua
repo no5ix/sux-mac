@@ -41,7 +41,7 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important}button.is-hovered,button:hover,button:active{background:#e0e3e9!important;box-shadow:inset 0 0 0 999px #e0e3e9!important;color:#202124!important;cursor:pointer!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
 <button onclick="action('copy')">Copy</button>
 <button onclick="action('doubao')">Proofread + translate</button>
@@ -51,17 +51,29 @@ local function getToolbarHTML(text)
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-document.querySelectorAll('.bar button').forEach(button => {
-  const enter = () => button.classList.add('is-hovered');
-  const leave = () => button.classList.remove('is-hovered');
-  button.addEventListener('mouseover', enter, true);
-  button.addEventListener('mouseenter', enter, true);
-  button.addEventListener('mousemove', enter, true);
-  button.addEventListener('mouseout', leave, true);
-  button.addEventListener('mouseleave', leave, true);
-  button.addEventListener('blur', leave, true);
+const buttons = Array.from(document.querySelectorAll('.bar button'));
+function updateHoveredButton(event) {
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  buttons.forEach(button => {
+    const hit = target && (target === button || button.contains(target));
+    button.classList.toggle('is-hovered', Boolean(hit));
+    if (hit) button.style.setProperty('cursor', 'pointer', 'important');
+  });
+}
+document.addEventListener('mousemove', updateHoveredButton, true);
+document.addEventListener('mouseover', updateHoveredButton, true);
+document.addEventListener('mouseleave', () => buttons.forEach(b => b.classList.remove('is-hovered')), true);
+buttons.forEach(button => {
+  button.addEventListener('mouseenter', () => button.classList.add('is-hovered'));
+  button.addEventListener('mouseleave', () => button.classList.remove('is-hovered'));
+  button.addEventListener('click', () => {
+    button.classList.add('is-hovered');
+    button.style.setProperty('cursor', 'pointer', 'important');
+  });
   button.style.setProperty('cursor', 'pointer', 'important');
 });
+document.documentElement.style.setProperty('cursor', 'default');
+
 </script></body></html>
 ]=]
     return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
@@ -108,7 +120,6 @@ local function onToolbarMessage(message)
     if action == "copy" then
         pasteboard.setContents(text)
         hideToolbar()
-        hs.alert.show("Copied selection")
     elseif action == "doubao" then
         local prompt = DOUBAO_PROMPT .. " " .. text
         pasteboard.setContents(prompt)
