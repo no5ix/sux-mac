@@ -130,8 +130,14 @@ function handleClipboardChange(content)
             -- Trust the watcher callback's exact string. Re-reading the pasteboard
             -- here can race with another clipboard write and associate a different
             -- value with this callback. Keep capture and display byte-for-byte.
-            logger.i("Clipboard history capture: watcher length=" .. tostring(#content) ..
-                ", current pasteboard length=" .. tostring(type(pasteboard.getContents()) == "string" and #pasteboard.getContents() or -1))
+            local rawCallback = content
+            local clipboardString = pasteboard.getContents()
+            logger.i("Clipboard history capture diagnostic: callback=" .. string.format("%q", rawCallback) ..
+                ", pasteboard=" .. string.format("%q", tostring(clipboardString or "")))
+            -- If the watcher and current pasteboard disagree, capture the current
+            -- value only when it matches the string's change count snapshot. Since
+            -- hs.pasteboard.watcher has no snapshot API, prefer its unmodified
+            -- callback value to avoid assigning unrelated later clipboard data.
 
             -- Don't add if it's the same as the last entry
             if #text_clipboard_history ~= 0 and 
