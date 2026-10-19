@@ -52,6 +52,15 @@ local function getToolbarHTML(text)
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
+document.querySelectorAll('.bar button').forEach(button => {
+  button.addEventListener('mouseenter', () => {
+    button.style.background = '#e0e3e9';
+    button.style.cursor = 'pointer';
+  });
+  button.addEventListener('mouseleave', () {
+    button.style.background = 'transparent';
+  });
+});
 </script></body></html>
 ]=]
     return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
