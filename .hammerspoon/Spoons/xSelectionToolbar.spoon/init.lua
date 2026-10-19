@@ -25,7 +25,10 @@ local function hideToolbar()
 end
 
 local function getToolbarHTML(text)
-    local encodedText = json.encode(text) or '""'
+    -- Hammerspoon hs.json.encode expects a table, so encode the selection as
+    -- a single-element array and extract the JSON-escaped string literal.
+    local encoded = json.encode({ text })
+    local encodedText = type(encoded) == "table" and encoded[1] or encoded or '""'
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
