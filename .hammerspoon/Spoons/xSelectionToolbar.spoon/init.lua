@@ -204,8 +204,12 @@ local function showTranslationWindow(text)
                     return "OPENED"
                 end tell
             ]]
-            local ok, result = pcall(function() return hs.osascript.applescript(appleScript) end)
-            if not ok or type(result) ~= "table" or result.ok == false then
+            local callOk, scriptSucceeded = pcall(function()
+                return hs.osascript.applescript(appleScript)
+            end)
+            -- hs.osascript.applescript returns a boolean success value. Avoid
+            -- opening the URL a second time when Safari already handled it.
+            if not callOk or scriptSucceeded ~= true then
                 hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
             end
             timer.doAfter(1.8, function()
@@ -286,10 +290,12 @@ local function onToolbarMessage(message)
                 return "OPENED"
             end tell
         ]]
-        local ok, task = pcall(function()
+        local callOk, scriptSucceeded = pcall(function()
             return hs.osascript.applescript(appleScript)
         end)
-        if not ok or type(task) ~= "table" or task.ok == false then
+        -- hs.osascript.applescript returns success as its first value; pcall
+        -- returns that boolean as the second result.
+        if not callOk or scriptSucceeded ~= true then
             -- Non-Safari default browser fallback. Avoid opening the URL twice
             -- when Safari's script successfully found or opened the conversation.
             hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
