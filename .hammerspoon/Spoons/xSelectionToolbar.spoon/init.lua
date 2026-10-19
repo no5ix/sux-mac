@@ -34,10 +34,7 @@ local function escapeHTML(value)
 end
 
 local function scriptString(value)
-    return json.encode({value}) and (function()
-        local encoded = json.encode({ value })
-        return encoded:sub(2, -2)
-    end)() or '""'
+    return json.encode(value) or '\"\"'
 end
 
 local function getToolbarHTML(text)
@@ -126,6 +123,8 @@ end
 
 local function buildToolbar(text)
     if toolbar then toolbar:delete() end
+    local usercontent = hs.webview.usercontent.new("selectionToolbar")
+    usercontent:setCallback(function(message) onToolbarMessage(nil, message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
@@ -136,8 +135,6 @@ local function buildToolbar(text)
     toolbar:allowTextEntry(false)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
-    local usercontent = hs.webview.usercontent.new("selectionToolbar")
-    usercontent:setCallback(onToolbarMessage)
     toolbar:html(getToolbarHTML(text))
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
@@ -151,7 +148,6 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = width, h = height })
     toolbar:show()
 end
-
 function obj:start()
     if captureHotkey then captureHotkey:delete() end
     -- Select text, then press Ctrl+Alt+Shift+S to capture it and show actions.
