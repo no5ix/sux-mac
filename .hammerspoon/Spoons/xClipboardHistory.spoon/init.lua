@@ -345,10 +345,10 @@ local function handleClipboardPanelMessage(message)
         )
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
-    elseif body.action == "pasteAll" then
-        pasteSomeWithDelimiterFromStartRow(#menuData)
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
+    elseif body.action == "pasteAll" then
+        pasteSomeWithDelimiterFromStartRow(#menuData)
     elseif body.action == "clearAll" then
         clearClipboardHistory()
         if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()); clipboard_webview:show() end
