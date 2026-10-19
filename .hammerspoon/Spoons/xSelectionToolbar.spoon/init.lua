@@ -182,15 +182,18 @@ window.translationStatus=value=>status.textContent=value||'';
 window.translationResult=value=>{
   result.value=value||'';
   copy.disabled=!value;
-  // Resize to content, capped to the available popup height. If the content is
-  // longer than the available area, the textarea scrolls instead of growing off-screen.
+  // Measure only after the text is laid out, then ask the native window to resize.
   requestAnimationFrame(()=>{
     result.style.height='auto';
-    const contentHeight=result.scrollHeight;
-    const popupLimit=window.__popupMaxResultHeight||Math.max(90,window.innerHeight-120);
-    result.style.height=Math.max(90,Math.min(contentHeight,popupLimit))+'px';
-    bridge('resize',{contentHeight:result.offsetHeight});
+    result.style.overflowY='hidden';
+    const desiredHeight=Math.max(90,result.scrollHeight);
+    bridge('resize',{contentHeight:desiredHeight});
   });
+};
+window.setPopupResultHeight=maxHeight=>{
+  const limit=Math.max(90,Number(maxHeight)||90);
+  result.style.height=Math.min(Math.max(90,result.scrollHeight),limit)+'px';
+  result.style.overflowY=result.scrollHeight>limit?'auto':'hidden';
 };
 copy.addEventListener('click',()=>bridge('copy',{text:result.value}));
 </script></body></html>
@@ -315,19 +318,26 @@ local function showCustomAIWindow(text, config)
             if translationWindow and currentScreen then
                 local screenFrame = currentScreen:frame()
                 local maxWindowHeight = math.max(180, screenFrame.h - 40)
-                local targetHeight = math.min(maxWindowHeight, math.max(180, body.contentHeight + 118))
+                local targetHeight = math.min(maxWindowHeight, math.max(230, body.contentHeight + 148))
                 local windowFrame = translationWindow:frame()
-                if math.abs(windowFrame.h - targetHeight) > 3 then
-                    local mouse = hs.mouse.absolutePosition()
-                    local y = math.max(screenFrame.y + 20, math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
-                    if mouse.y < windowFrame.y then
-                        y = math.max(screenFrame.y + 20, math.min(mouse.y - targetHeight - 18, screenFrame.y + screenFrame.h - targetHeight - 20))
-                    end
-                    translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                    translationWindow:evaluateJavaScript(
-                        "window.__popupMaxResultHeight=" .. tostring(math.max(90, maxWindowHeight - 118)) .. ";"
-                    )
+                local y = math.max(screenFrame.y + 20,
+                    math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
+                -- Anchor the resized popup near the pointer if the existing top edge
+                -- would leave the new height outside the monitor.
+                local mouse = hs.mouse.absolutePosition()
+                if y + targetHeight > screenFrame.y + screenFrame.h - 20 then
+                    y = screenFrame.y + screenFrame.h - targetHeight - 20
                 end
+                if mouse.y < windowFrame.y then
+                    y = math.max(screenFrame.y + 20,
+                        math.min(mouse.y - targetHeight - 18, screenFrame.y + screenFrame.h - targetHeight - 20))
+                end
+                -- Keep the native window width exactly as it was; change height only.
+                translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
+                local maxResultHeight = math.max(90, targetHeight - 148)
+                translationWindow:evaluateJavaScript(
+                    "window.setPopupResultHeight && window.setPopupResultHeight(" .. tostring(maxResultHeight) .. ");"
+                )
             end
         end
     end)
@@ -355,7 +365,14 @@ local function showCustomAIWindow(text, config)
         end
     end)
     translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
-    translationWindow:evaluateJavaScript("window.__popupMaxResultHeight=" .. tostring(math.max(90, maxWindowHeight - 118)) .. ";")
+    timer.doAfter(0.1, function()
+        if translationWindow then
+            translationWindow:evaluateJavaScript(
+                "window.setPopupResultHeight && window.setPopupResultHeight(" ..
+                tostring(math.max(90, h - 148)) .. ");"
+            )
+        end
+    end)
     syncTranslationAppearance()
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
