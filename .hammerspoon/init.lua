@@ -138,6 +138,8 @@
 hs.loadSpoon("xGlobalVim")
 hs.loadSpoon("xAppTriggers")
 hs.loadSpoon("xClipboardHistory")
+hs.loadSpoon("xSelectionToolbar")
+spoon.xSelectionToolbar:start()
 hs.loadSpoon("xSpotifyAdMuter")
 
 hs.loadSpoon("xHotCornersAndEdges")
