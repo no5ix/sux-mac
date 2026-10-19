@@ -24,19 +24,6 @@ local function hideToolbar()
     if toolbar then toolbar:hide() end
 end
 
-local function escapeHTML(value)
-    return tostring(value or "")
-        :gsub("&", "&amp;")
-        :gsub("<", "&lt;")
-        :gsub(">", "&gt;")
-        :gsub('"', "&quot;")
-        :gsub("'", "&#39;")
-end
-
-local function scriptString(value)
-    return json.encode(value) or '\"\"'
-end
-
 local function getToolbarHTML(text)
     local encodedText = json.encode(text) or '""'
     local html = [=[
