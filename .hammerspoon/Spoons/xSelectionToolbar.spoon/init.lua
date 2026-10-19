@@ -125,21 +125,26 @@ function obj:start()
     -- Poll conservatively and show the toolbar when a non-empty selection changes.
     local lastShownText = ""
     local lastShownAt = 0
-    selectionWatcher = hs.timer.doEvery(0.35, function()
+    selectionWatcher = hs.timer.doEvery(0.25, function()
         if toolbar and toolbar:isVisible() then return end
         local app = hs.application.frontmostApplication()
         if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
         local ok, value = pcall(function()
-            local element = hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition())
-            if not element then return nil end
-            local selected = element:attributeValue("AXSelectedText")
-            if type(selected) == "string" and selected ~= "" then return selected end
-            local parent = element:attributeValue("AXParent")
-            if parent then
-                selected = parent:attributeValue("AXSelectedText")
-                if type(selected) == "string" and selected ~= "" then return selected end
+            local function selectedTextFrom(element)
+                local depth = 0
+                while element and depth < 8 do
+                    local selected = element:attributeValue("AXSelectedText")
+                    if type(selected) == "string" and trim(selected) ~= "" then return selected end
+                    element = element:attributeValue("AXParent")
+                    depth = depth + 1
+                end
+                return nil
             end
-            return nil
+            local focused = hs.axuielement.systemElement():attributeValue("AXFocusedUIElement")
+            local selected = selectedTextFrom(focused)
+            if selected then return selected end
+            local underMouse = hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition())
+            return selectedTextFrom(underMouse)
         end)
         if not ok then return end
         value = trim(value)
