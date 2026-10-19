@@ -9,6 +9,7 @@ local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
 local hoverWatcher = nil
+local appearancePoll = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -196,7 +197,8 @@ local function buildToolbar(text)
     local lastAppearance = nil
     local function syncToolbarAppearance()
         if not toolbar then return end
-        local dark = hs.host.interfaceStyle and hs.host.interfaceStyle() == "Dark"
+        local style = hs.host.interfaceStyle and hs.host.interfaceStyle()
+        local dark = style == "Dark"
         local appearance = dark and "dark" or "light"
         if appearance == lastAppearance then return end
         lastAppearance = appearance
@@ -206,7 +208,8 @@ local function buildToolbar(text)
         )
     end
     syncToolbarAppearance()
-    local appearancePoll = timer.doEvery(1, syncToolbarAppearance)
+    if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
+    appearancePoll = timer.doEvery(1, syncToolbarAppearance)
     local previousHideToolbar = hideToolbar
     hideToolbar = function()
         if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
@@ -418,7 +421,7 @@ function obj:start()
 end
 function obj:stop()
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
-    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
+    if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
