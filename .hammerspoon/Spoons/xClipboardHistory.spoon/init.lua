@@ -94,7 +94,8 @@ function handleClipboardChange(content)
             if pasteboardImg ~= nil then
                 content = nil
             else
-                logger and logger.w("Clipboard text resembles image data but has no readable image representation")
+                -- Do not add an image encoding as plain text when the app does
+                -- not expose a readable image flavor.
                 return
             end
         end
