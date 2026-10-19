@@ -26,8 +26,7 @@ local function hideToolbar()
 end
 
 local function normalizeMessage(message)
-    -- hs.webview.usercontent passes a WKScriptMessage table; the posted JS
-    -- object is in message.body, not at the top level.
+    -- Hammerspoon delivers a WKScriptMessage; its JavaScript payload is body.
     if type(message) == "table" and type(message.body) == "table" then
         return message.body
     end
@@ -54,7 +53,7 @@ const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 </script></body></html>
 ]=]
-    return html:gsub("__SELECTION_JSON__", function() return encodedText end)
+    return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
 end
 local function urlEncode(text)
     return tostring(text or ""):gsub("([^%w%-_%.~])", function(ch)
