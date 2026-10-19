@@ -93,7 +93,7 @@ end
 local function buildToolbar(text)
     if toolbar then toolbar:delete() end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
-    usercontent:setCallback(function(message) onToolbarMessage(nil, message) end)
+    usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
