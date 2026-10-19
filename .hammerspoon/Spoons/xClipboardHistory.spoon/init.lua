@@ -40,7 +40,7 @@ local function capturePreviousWindow()
 end
 
 local function restorePreviousWindow()
-    -- Prefer the exact window. Focusing it avoids application:activate(true),
+    -- Prefer the exact window so other windows in the same app remain untouched.
     -- which may raise other windows from the same application.
     if previousWindow then
         local ok = pcall(function()
