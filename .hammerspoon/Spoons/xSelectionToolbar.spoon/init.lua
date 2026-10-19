@@ -148,14 +148,6 @@ local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
 -- Add custom local-AI actions here. Each entry creates a toolbar button and
 -- uses its prompt template with the selected text. Use {{text}} where the
 -- selection should be inserted into the prompt.
-local CUSTOM_AI_BUTTONS = {
-    {
-        id = "correct",
-        label = "Correct",
-        icon = "✏️",
-        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\n\n{{text}}",
-    },
-}
 
 local function translationWindowHTML(text)
     local encoded = json.encode({ text })
@@ -697,7 +689,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 3 + #CUSTOM_AI_BUTTONS then cursor = cursor + separatorWidthWithMargins + gap end
+                if i == 3 + #(CUSTOM_AI_BUTTONS or {}) then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
