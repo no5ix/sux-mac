@@ -192,6 +192,25 @@ local function translationJSCall(functionName, value)
     return "window." .. functionName .. "(" .. literal .. ");"
 end
 
+local function destroyTranslationWindow()
+    -- Invalidate callbacks from any request associated with the old popup.
+    translationRequestId = translationRequestId + 1
+    if translationRequestTask then
+        pcall(function() translationRequestTask:terminate() end)
+        translationRequestTask = nil
+    end
+    if translationAppearancePoll then
+        translationAppearancePoll:stop()
+        translationAppearancePoll = nil
+    end
+    if translationWindow then
+        local oldWindow = translationWindow
+        translationWindow = nil
+        pcall(function() oldWindow:delete() end)
+    end
+    translationUsercontent = nil
+end
+
 local function syncTranslationAppearance()
     if not translationWindow then return end
     local style = hs.host.interfaceStyle and hs.host.interfaceStyle()
