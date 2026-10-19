@@ -370,17 +370,16 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
-    -- The toolbar is icon-only with four fixed-width buttons and two 1px
-    -- borders plus padding/gaps. Set the native frame explicitly rather than
-    -- depending on WebKit's asynchronous width measurement.
-    local buttonSize, gap, padding = 38, 6, 8
-    local buttonCount = 5
-    -- Include the two borders, both outer paddings, button gaps, and the
-    -- separator plus its margins. Add a small safety allowance for WebKit's
-    -- subpixel rounding so the final icon can't be clipped at the right edge.
-    local separatorAndMargins = 5
-    local roundingAllowance = 12
-    local toolbarWidth = padding * 2 + buttonCount * buttonSize + (buttonCount - 1) * gap + separatorAndMargins + 2 + roundingAllowance
+    -- Set the native frame to the measured layout estimate. The Translation
+    -- button includes its word label and is wider than the icon-only buttons.
+    -- Match the HTML toolbar geometry: 4 icon buttons and one wider
+    -- "🌐 Translation" button, plus the separator between ChatGPT and Translation.
+    local buttonWidths = { 38, 38, 108, 38, 38 }
+    local gap, padding = 4, 6
+    local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
+    local toolbarWidth = 2 + padding * 2 + gap * 5 + separatorWidthWithMargins
+    for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
+    toolbarWidth = toolbarWidth + 8 -- safety allowance for WebKit subpixel rounding
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
@@ -401,15 +400,16 @@ local function buildToolbar(text)
         local rx, ry = mouse.x - bounds.x, mouse.y - bounds.y
         local target = nil
         if ry >= 7 and ry <= 51 then
-            local cursor = padding + 1
+            local cursor = padding + 1 -- left border + bar padding
             local buttonActions = { "copy", "chatgpt", "translation", "youdao-result", "youdao-word" }
             for i, name in ipairs(buttonActions) do
-                if rx >= cursor and rx <= cursor + buttonSize then
+                local width = buttonWidths[i]
+                if rx >= cursor and rx <= cursor + width then
                     target = name
                     break
                 end
-                cursor = cursor + buttonSize + gap
-                if i == 2 then cursor = cursor + separatorAndMargins end
+                cursor = cursor + width + gap
+                if i == 2 then cursor = cursor + separatorWidthWithMargins end
             end
         end
 
