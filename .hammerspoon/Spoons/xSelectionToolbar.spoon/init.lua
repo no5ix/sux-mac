@@ -167,7 +167,7 @@ body{padding:16px}
 header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 h1{font-size:15px;margin:0;font-weight:650;flex:1}
 .status{font-size:11px;color:var(--muted)}
-#result{width:100%;min-height:90px;max-height:60vh;resize:vertical;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 .actions{display:flex;justify-content:flex-end;margin-top:10px}
 button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);padding:7px 11px;font:inherit;cursor:pointer}
 button:disabled{opacity:.4;cursor:default}
@@ -179,7 +179,19 @@ button:disabled{opacity:.4;cursor:default}
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
 const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy');
 window.translationStatus=value=>status.textContent=value||'';
-window.translationResult=value=>{result.value=value||'';copy.disabled=!value;};
+window.translationResult=value=>{
+  result.value=value||'';
+  copy.disabled=!value;
+  // Resize to content, capped to the available popup height. If the content is
+  // longer than the available area, the textarea scrolls instead of growing off-screen.
+  requestAnimationFrame(()=>{
+    result.style.height='auto';
+    const contentHeight=result.scrollHeight;
+    const popupLimit=window.__popupMaxResultHeight||Math.max(90,window.innerHeight-120);
+    result.style.height=Math.max(90,Math.min(contentHeight,popupLimit))+'px';
+    bridge('resize',{contentHeight:result.offsetHeight});
+  });
+};
 copy.addEventListener('click',()=>bridge('copy',{text:result.value}));
 </script></body></html>
 ]=]
@@ -298,6 +310,25 @@ local function showCustomAIWindow(text, config)
                 pasteboard.setContents(body.text)
                 destroyTranslationWindow()
             end
+        elseif body.action == "resize" and type(body.contentHeight) == "number" then
+            local currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+            if translationWindow and currentScreen then
+                local screenFrame = currentScreen:frame()
+                local maxWindowHeight = math.max(180, screenFrame.h - 40)
+                local targetHeight = math.min(maxWindowHeight, math.max(180, body.contentHeight + 118))
+                local windowFrame = translationWindow:frame()
+                if math.abs(windowFrame.h - targetHeight) > 3 then
+                    local mouse = hs.mouse.absolutePosition()
+                    local y = math.max(screenFrame.y + 20, math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
+                    if mouse.y < windowFrame.y then
+                        y = math.max(screenFrame.y + 20, math.min(mouse.y - targetHeight - 18, screenFrame.y + screenFrame.h - targetHeight - 20))
+                    end
+                    translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
+                    translationWindow:evaluateJavaScript(
+                        "window.__popupMaxResultHeight=" .. tostring(math.max(90, maxWindowHeight - 118)) .. ";"
+                    )
+                end
+            end
         end
     end)
     -- Reuse the compact result-popup UI with a custom title.
@@ -306,9 +337,11 @@ local function showCustomAIWindow(text, config)
     local targetScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local f = targetScreen:frame()
     local w, h = 420, 230
+    local maxWindowHeight = math.max(180, f.h - 40)
     local x = math.max(f.x, math.min(mousePoint.x - w / 2, f.x + f.w - w))
-    local y = math.max(f.y, math.min(mousePoint.y - h - 18, f.y + f.h - h))
-    if mousePoint.y - h - 18 < f.y then y = math.min(mousePoint.y + 18, f.y + f.h - h) end
+    local y = math.max(f.y + 20, math.min(mousePoint.y - h - 18, f.y + f.h - h - 20))
+    if mousePoint.y - h - 18 < f.y + 20 then y = math.min(mousePoint.y + 18, f.y + f.h - h - 20) end
+    y = math.max(f.y + 20, math.min(y, f.y + f.h - h - 20))
     translationWindow = webview.new({x=x,y=y,w=w,h=h}, {
         developerExtrasEnabled = false, javaScriptCanOpenWindowsAutomatically = false,
         transparent = false, shadow = true, opaque = true
@@ -322,6 +355,7 @@ local function showCustomAIWindow(text, config)
         end
     end)
     translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
+    translationWindow:evaluateJavaScript("window.__popupMaxResultHeight=" .. tostring(math.max(90, maxWindowHeight - 118)) .. ";")
     syncTranslationAppearance()
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
