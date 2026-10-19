@@ -39,23 +39,26 @@ local function capturePreviousWindow()
     end
 end
 
-local function restorePreviousWindow()
-    -- Prefer the exact window so other windows in the same app remain untouched.
-    -- which may raise other windows from the same application.
-    if previousWindow then
-        local ok = pcall(function()
-            if previousWindow:isValid() then
-                previousWindow:focus()
-            else
-                previousWindow = nil
-            end
-        end)
-        if ok and previousWindow then return end
-    end
+local function restorePreviousWindow(callback)
+    local targetWindow = previousWindow
 
-    -- If Hammerspoon could not focus the original window, rely on macOS's
-    -- normal app/window focus restoration rather than activating the whole app.
+    -- Hiding the WebView first lets macOS unwind its key-window status before
+    -- we explicitly focus the one window that owned focus before the panel.
     if clipboard_webview then clipboard_webview:hide() end
+
+    hs.timer.doAfter(0.12, function()
+        local focused = false
+        if targetWindow then
+            local ok, result = pcall(function()
+                if not targetWindow:isValid() then return false end
+                targetWindow:focus()
+                return hs.window.frontmostWindow() == targetWindow
+            end)
+            focused = ok and result == true
+        end
+
+        if callback then callback(focused) end
+    end)
 end
 
 local function clearClipboardHistory()
@@ -371,10 +374,13 @@ local function pasteHistoryEntry(index)
         end
         pasteboard.writeObjects(image)
     end
-    if clipboard_webview then clipboard_webview:hide() end
-    hs.timer.doAfter(0.15, function()
-        restorePreviousWindow()
-        hs.timer.doAfter(0.2, function()
+    restorePreviousWindow(function(focused)
+        if not focused then
+            hs.alert.show("Could not restore the previous window. Paste was canceled.")
+            pasteboard_watcher:start()
+            return
+        end
+        hs.timer.doAfter(0.08, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
                 restoreNewestClipContent()
@@ -542,12 +548,14 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
 
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
-    if clipboard_webview then clipboard_webview:hide() end
-    -- Restore the exact previously focused window; do not activate the entire
-    -- application, which can bring all of its windows forward.
-    hs.timer.doAfter(0.15, function()
-        restorePreviousWindow()
-        hs.timer.doAfter(0.2, function()
+    -- Restore only the previously focused window before sending any paste keys.
+    restorePreviousWindow(function(focused)
+        if not focused then
+            hs.alert.show("Could not restore the previous window. Bulk paste was canceled.")
+            pasteboard_watcher:start()
+            return
+        end
+        hs.timer.doAfter(0.08, function()
             -- The web panel lists newest-first; the recursive routine walks
             -- selected row -> newest row, which pastes oldest-to-newest.
             pasteAllWithDelimiterRecursionVersion(startRow)
