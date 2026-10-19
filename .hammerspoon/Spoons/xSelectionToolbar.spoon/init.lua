@@ -66,28 +66,30 @@ local function openSafariURL(url)
     hs.task.new("/usr/bin/open", nil, { "-a", "Safari", url }):start()
 end
 
-local function onToolbarMessage(_, message)
+local function onToolbarMessage(message)
     if type(message) ~= "table" then return end
     local action = message.action
     local text = trim(message.text or selectedText)
-    if text == "" then
-        hs.alert.show("No selected text")
-        return
-    end
+    if text == "" then hs.alert.show("No selected text"); return end
 
     if action == "copy" then
         pasteboard.setContents(text)
         hideToolbar()
         hs.alert.show("Copied selection")
     elseif action == "doubao" then
-        runDoubao(text)
+        local prompt = DOUBAO_PROMPT .. " " .. text
+        pasteboard.setContents(prompt)
+        hideToolbar()
+        eventtap.keyStroke(DOUBAO_SHORTCUT, DOUBAO_KEY, 0.08)
+        timer.doAfter(0.6, function() eventtap.keyStroke({ "cmd" }, "v", 0.08) end)
     elseif action == "youdao-result" then
-        openSafariURL("https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en")
+        hideToolbar()
+        hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
     elseif action == "youdao-word" then
-        openSafariURL("https://dict.youdao.com/w/" .. urlEncode(text))
+        hideToolbar()
+        hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/w/" .. urlEncode(text) }):start()
     end
 end
-
 local function buildToolbar(text)
     if toolbar then toolbar:delete() end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
