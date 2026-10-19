@@ -18,6 +18,9 @@ local DOUbao_SHORTCUT = { "ctrl", "shift", "alt", "cmd" }
 local DOUbao_KEY = "o"
 local DOUbao_PROMPT = [[Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all "um/uh" fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly used in America.Avoid slang that is too extreme or hard to understand: ]]
 
+local CHATGPT_URL = "https://chatgpt.com/c/6ad59284-87fc-83ec-aeeb-282992cb1cb7"
+local CHATGPT_PROMPT = [[Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all "um/uh" fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: ]]
+
 local function trim(value)
     return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
@@ -42,13 +45,14 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:14px;font-size:14px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
-<button data-action="copy" onclick="action('copy')">Copy</button>
-<button data-action="doubao" onclick="action('doubao')">Proofread + translate</button>
+<button data-action="copy" onclick="action('copy')"><span class="icon" aria-hidden="true">⧉</span> Copy</button>
+<button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button>
+<button data-action="chatgpt" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">✦</span> ChatGPT</button>
 <span class="separator"></span>
-<button data-action="youdao-result" onclick="action('youdao-result')">Youdao Result</button>
-<button data-action="youdao-word" onclick="action('youdao-word')">Youdao Dictionary</button>
+<button data-action="youdao-result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">⌕</span> Youdao Result</button>
+<button data-action="youdao-word" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span> Youdao Dictionary</button>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
@@ -104,6 +108,15 @@ local function onToolbarMessage(message)
         hideToolbar()
         eventtap.keyStroke(DOUbao_SHORTCUT, DOUbao_KEY, 0.08)
         timer.doAfter(0.6, function() eventtap.keyStroke({ "cmd" }, "v", 0.08) end)
+    elseif action == "chatgpt" then
+        local prompt = CHATGPT_PROMPT .. " " .. text
+        pasteboard.setContents(prompt)
+        hideToolbar()
+        hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
+        -- Give the browser/conversation a moment to activate before pasting.
+        timer.doAfter(1.8, function()
+            eventtap.keyStroke({ "cmd" }, "v", 0.08)
+        end)
     elseif action == "youdao-result" then
         hideToolbar()
         hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
