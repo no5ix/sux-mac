@@ -45,14 +45,14 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:14px;font-size:14px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:14px;font-size:14px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
 <button data-action="copy" onclick="action('copy')"><span class="icon" aria-hidden="true">⧉</span> Copy</button>
-<button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button>
+<!-- Disabled for now: <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">✦</span> ChatGPT</button>
 <span class="separator"></span>
-<button data-action="youdao-result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">⌕</span> Youdao Result</button>
-<button data-action="youdao-word" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span> Youdao Dictionary</button>
+<button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
+<button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
@@ -130,7 +130,7 @@ local function buildToolbar(text)
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
-    toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
+    toolbar = webview.new({ x = 0, y = 0, w = 360, h = 58 }, {
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = true,
@@ -148,15 +148,33 @@ local function buildToolbar(text)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
-    local width, height = 550, 58
-    local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
+    local height = 58
+    local x = math.max(frame.x + 8, math.min(point.x - 180, frame.x + frame.w - 360 - 8))
     local y = point.y - height - 14
     if y < frame.y + 8 then y = point.y + 18 end
     y = math.max(frame.y + 8, math.min(y, frame.y + frame.h - height - 8))
-    toolbar:frame({ x = x, y = y, w = width, h = height })
-
+    toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
+    -- Once WebKit has laid out the inline-flex toolbar, size the native window
+    -- to the actual content width, then keep it inside the current screen.
+    timer.doAfter(0.08, function()
+        if not toolbar then return end
+        local ok, size = pcall(function()
+            return toolbar:evaluateJavaScript(
+                "({width: Math.ceil(document.querySelector('.bar').getBoundingClientRect().width), height: Math.ceil(document.querySelector('.bar').getBoundingClientRect().height)})"
+            )
+        end)
+        if ok and type(size) == "table" and tonumber(size.width) then
+            local actualWidth = math.max(100, math.min(tonumber(size.width), frame.w - 16))
+            local currentPoint = hs.mouse.absolutePosition()
+            local newX = math.max(frame.x + 8, math.min(currentPoint.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
+            local newY = currentPoint.y - height - 14
+            if newY < frame.y + 8 then newY = currentPoint.y + 18 end
+            newY = math.max(frame.y + 8, math.min(newY, frame.y + frame.h - height - 8))
+            toolbar:frame({ x = newX, y = newY, w = actualWidth, h = height })
+        end
+    end)
 
     -- Drive hover highlighting from native Hammerspoon mouse coordinates,
     -- avoiding dependence on WKWebView CSS hover/mouse event delivery.
@@ -168,25 +186,22 @@ local function buildToolbar(text)
         local p = hs.mouse.absolutePosition()
         local f = toolbar:frame()
         local lx, ly = p.x - f.x, p.y - f.y
-        local targetAction = ""
-        if ly >= 5 and ly <= 52 then
-            if lx >= 7 and lx <= 73 then
-                targetAction = "copy"
-            elseif lx >= 77 and lx <= 251 then
-                targetAction = "doubao"
-            elseif lx >= 255 and lx <= 378 then
-                targetAction = "youdao-result"
-            elseif lx >= 382 and lx <= 527 then
-                targetAction = "youdao-word"
-            end
-        end
+        local actionLiteral = string.format("%q", "")
+        -- Ask WebKit for each button's actual DOM rectangle, so hidden buttons and
+        -- adaptive toolbar sizing cannot invalidate hover hit testing.
+        local script = string.format(
+            "(()=>{const x=%d,y=%d;const e=document.elementFromPoint(x,y);const b=e&&e.closest('[data-action]');return b?b.getAttribute('data-action'):'';})()",
+            math.floor(lx), math.floor(ly)
+        )
+        local ok, actionUnderMouse = pcall(function() return toolbar:evaluateJavaScript(script) end)
+        local targetAction = ok and type(actionUnderMouse) == "string" and actionUnderMouse or ""
         local actionLiteral = string.format("%q", targetAction)
-        local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
+        local highlightScript = "document.querySelectorAll('.bar button').forEach(function(b){" ..
             "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
             "b.classList.toggle('is-hovered',h);" ..
             "b.style.setProperty('cursor','pointer','important');" ..
             "});"
-        pcall(function() toolbar:evaluateJavaScript(script) end)
+        pcall(function() toolbar:evaluateJavaScript(highlightScript) end)
     end)
 end
 function obj:start()
