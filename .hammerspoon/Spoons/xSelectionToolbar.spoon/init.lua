@@ -22,6 +22,18 @@ local DOUbao_PROMPT = [[Please proofread the following text. Make minimal change
 local CHATGPT_URL = "https://chatgpt.com/c/6ad59284-87fc-83ec-aeeb-282992cb1cb7"
 local CHATGPT_PROMPT = [[Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all "um/uh" fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: ]]
 
+-- Configurable local-AI toolbar actions. Add entries here to create buttons.
+-- {{text}} is replaced by the selected text when the prompt is sent.
+local CUSTOM_AI_BUTTONS = {
+    {
+        id = "correct",
+        label = "Correct",
+        icon = "✏️",
+        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\n\n{{text}}",
+    },
+}
+
+
 local function htmlEscape(value)
     return tostring(value or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
         :gsub('"', "&quot;"):gsub("'", "&#39;")
@@ -60,7 +72,7 @@ local function getToolbarHTML(text)
     local encoded = json.encode({ text })
     local encodedText = type(encoded) == "table" and encoded[1] or encoded or '""'
     local customButtons = {}
-    for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         local action = customActionName(config)
         customButtons[#customButtons + 1] =
             "<button class=\"custom-ai-button\" data-action=\"" .. htmlEscape(action) ..
@@ -569,7 +581,7 @@ local function onToolbarMessage(message)
         showTranslationWindow(text)
     elseif type(action) == "string" and action:sub(1, 7) == "custom-" then
         local actionId = action:sub(8)
-        for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+        for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
             if tostring(config.id) == actionId then
                 hideToolbar()
                 showCustomAIWindow(text, config)
