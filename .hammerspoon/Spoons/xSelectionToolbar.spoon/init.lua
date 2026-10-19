@@ -101,7 +101,7 @@ local translationRequestTask = nil
 local translationRequestId = 0
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
-local TRANSLATION_MODEL = nil -- nil means use the model selected by the local server's default
+local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
 
 local function translationWindowHTML(text)
     local encoded = json.encode({ text })
@@ -109,39 +109,29 @@ local function translationWindowHTML(text)
     local html = [=[
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--fg:#202124;--muted:#626b78;--border:#d9dde5;--accent:#2563eb;--field:#fff}
-:root[data-appearance="dark"]{--bg:#1d1f24;--panel:#272a31;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--field:#15171b}
-@media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--bg:#1d1f24;--panel:#272a31;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--field:#15171b}}
+:root{color-scheme:light dark;--bg:#f6f7f9;--fg:#202124;--muted:#626b78;--border:#d9dde5;--accent:#2563eb;--panel:#fff}
+:root[data-appearance="dark"]{--bg:#1d1f24;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--panel:#272a31}
+@media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--bg:#1d1f24;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--panel:#272a31}}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,sans-serif}
-body{padding:18px}
-h1{font-size:17px;margin:0 0 14px;font-weight:650}
-label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-textarea,button{font:inherit;border-radius:8px}
-textarea{width:100%;background:var(--field);color:var(--fg);border:1px solid var(--border);padding:10px;outline:none;resize:vertical;line-height:1.5}
-textarea:focus{border-color:var(--accent)}
-#source{min-height:100px;margin-bottom:14px}
-#result{min-height:200px;margin-top:7px}
-.actions{display:flex;gap:8px;margin-top:12px}
-button{border:1px solid var(--border);background:var(--panel);color:var(--fg);padding:9px 13px;cursor:pointer}
-button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:600}
-.status{min-height:17px;margin-top:8px;color:var(--muted);font-size:11px}
+body{padding:16px}
+header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+h1{font-size:15px;margin:0;font-weight:650;flex:1}
+.status{font-size:11px;color:var(--muted)}
+#result{width:100%;min-height:90px;max-height:60vh;resize:vertical;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+.actions{display:flex;justify-content:flex-end;margin-top:10px}
+button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);padding:7px 11px;font:inherit;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
 </style></head><body>
-<h1>Translation</h1>
-<label for="source">Selected text</label><textarea id="source"></textarea>
-<div class="actions"><button class="primary" id="translate">Translate</button><button id="copy" disabled>Copy result</button></div>
-<label for="result" style="margin-top:14px">Translation result</label><textarea id="result" readonly placeholder="Translation will appear here"></textarea>
-<div class="status" id="status" role="status">Detecting the source language automatically.</div>
+<header><h1>Translation</h1><span class="status" id="status">Translating locally…</span></header>
+<textarea id="result" readonly placeholder="Translation will appear here"></textarea>
+<div class="actions"><button id="copy" disabled>Copy</button></div>
 <script>
-const selectedText=__SELECTED_TEXT__;
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const source=document.getElementById('source'),result=document.getElementById('result'),status=document.getElementById('status'),translateButton=document.getElementById('translate'),copyButton=document.getElementById('copy');
-source.value=selectedText;
-translateButton.addEventListener('click',()=>bridge('translate',{text:source.value}));
-copyButton.addEventListener('click',()=>bridge('copy',{text:result.value}));
-window.translationStatus=(value)=>{status.textContent=value||'';};
-window.translationResult=(value)=>{result.value=value||'';copyButton.disabled=!value;};
-source.focus();
+const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy');
+window.translationStatus=value=>status.textContent=value||'';
+window.translationResult=value=>{result.value=value||'';copy.disabled=!value;};
+copy.addEventListener('click',()=>bridge('copy',{text:result.value}));
 </script></body></html>
 ]=]
     return (html:gsub("__SELECTED_TEXT__", function() return encodedText end))
@@ -206,7 +196,7 @@ local function sendTranslationRequest(sourceText)
         temperature = 0.1,
         stream = false
     }
-    if TRANSLATION_MODEL and TRANSLATION_MODEL ~= "" then body.model = TRANSLATION_MODEL end
+    body.model = TRANSLATION_MODEL
     local encodedBody = json.encode(body)
     if type(encodedBody) == "table" then encodedBody = encodedBody[1] end
     if type(encodedBody) ~= "string" then
@@ -284,7 +274,7 @@ local function showTranslationWindow(text)
             sendTranslationRequest(sourceText)
         end
     end)
-    translationWindow = webview.new({x=180,y=160,w=560,h=620}, {
+    translationWindow = webview.new({x=180,y=160,w=420,h=230}, {
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = false,
@@ -299,7 +289,7 @@ local function showTranslationWindow(text)
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
     translationWindow:hswindow():focus()
-    -- Translate immediately on open, so the user only clicks the toolbar icon.
+    -- Translate automatically when the 🌐 toolbar icon is clicked.
     timer.doAfter(0.15, function()
         if translationWindow then sendTranslationRequest(text) end
     end)
