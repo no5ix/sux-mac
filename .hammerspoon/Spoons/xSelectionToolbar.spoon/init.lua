@@ -176,7 +176,7 @@ local function buildToolbar(text)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
-    local height = 58
+    local height = 62
     local x = math.max(frame.x + 8, math.min(point.x - 180, frame.x + frame.w - 360 - 8))
     local y = point.y - height - 14
     if y < frame.y + 8 then y = point.y + 18 end
@@ -187,10 +187,14 @@ local function buildToolbar(text)
     -- The toolbar is icon-only with four fixed-width buttons and two 1px
     -- borders plus padding/gaps. Set the native frame explicitly rather than
     -- depending on WebKit's asynchronous width measurement.
-    local buttonSize, gap, padding = 38, 4, 6
+    local buttonSize, gap, padding = 38, 6, 8
     local buttonCount = 4
+    -- Include the two borders, both outer paddings, button gaps, and the
+    -- separator plus its margins. Add a small safety allowance for WebKit's
+    -- subpixel rounding so the final icon can't be clipped at the right edge.
     local separatorAndMargins = 5
-    local toolbarWidth = padding * 2 + buttonCount * buttonSize + (buttonCount - 1) * gap + separatorAndMargins + 2
+    local roundingAllowance = 12
+    local toolbarWidth = padding * 2 + buttonCount * buttonSize + (buttonCount - 1) * gap + separatorAndMargins + 2 + roundingAllowance
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
