@@ -236,19 +236,18 @@ document.addEventListener('click', event => {
   const contextItem = event.target.closest('#clipboard-context-menu');
   if (contextItem) return;
   const button = event.target.closest('[data-action]');
-  if (!button) {
-    const item = event.target.closest('.item');
-    if (item) {
-      event.preventDefault();
-      event.stopPropagation();
-      const index = Number(item.dataset.index || 0);
-      selectRow(rows().indexOf(item));
-      bridge('paste', index, '');
-    }
+  if (button) {
+    const index = Number(button.dataset.index || 0);
+    bridge(button.dataset.action, index, '');
     return;
   }
-  const index = Number(button.dataset.index || 0);
-  bridge(button.dataset.action, index, '');
+  const item = event.target.closest('.item');
+  if (!item) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const index = Number(item.dataset.index || 0);
+  selectRow(rows().indexOf(item));
+  bridge('paste', index, '');
 });
 const search = document.getElementById('search');
 search.addEventListener('input', () => bridge('search', 0, search.value));
