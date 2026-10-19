@@ -41,7 +41,7 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent !important;}body{padding:8px;background:transparent !important;font-family:-apple-system,BlinkMacSystemFont,sans-serif}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 16px);padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-size:13px;white-space:nowrap;cursor:pointer}button:hover{background:#e2e5eb}button:active{background:#d1d5dd}button:hover:focus{background:#e2e5eb}.separator{width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important;-webkit-background-clip:padding-box}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer;transition:background-color .1s ease}button:hover,button:focus-visible{background-color:#e2e5eb!important;outline:none}button:active{background-color:#cfd5df!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
 <button onclick="action('copy')">Copy</button>
 <button onclick="action('doubao')">Proofread + translate</button>
@@ -134,7 +134,7 @@ local function buildToolbar(text)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
-    local width, height = 550, 66
+    local width, height = 550, 58
     local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
     local y = point.y - height - 14
     if y < frame.y + 8 then y = point.y + 18 end
