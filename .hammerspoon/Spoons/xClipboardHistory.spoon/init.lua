@@ -66,14 +66,23 @@ function pasteboardToClipboard(item_type, item)
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
     else
-        -- Keep the full image for pasting, plus a small encoded thumbnail for
-        -- the chooser. This avoids decoding full-resolution screenshots just
-        -- to display the history list.
-        local thumbnail = item:bitmapRepresentation({w=320, h=320})
+        -- Keep the original image for pasting. Build a correctly-proportioned
+        -- thumbnail; requesting a fixed square bitmap can stretch some source
+        -- images depending on the image provider's bitmapRepresentation behavior.
+        local thumbnail = nil
+        local size = item:size()
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
+        if width > 0 and height > 0 then
+            local scale = math.min(1, 320 / width, 320 / height)
+            local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
+            local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
+            thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+        end
         table.insert(img_clipboard_history, {
             ts=cur_ts,
             imageData=item:encodeAsURLString(),
-            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or nil
+            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or item:encodeAsURLString()
         })
         thumbnail = nil
     end
@@ -94,7 +103,7 @@ function handleClipboardChange(content)
             if pasteboardImg ~= nil then
                 content = nil
             else
-                logger and logger.w("Clipboard text resembles image data but has no readable image representation")
+                -- Ignore image-encoded clipboard payloads rather than recording them as text.
                 return
             end
         end
@@ -118,6 +127,9 @@ function handleClipboardChange(content)
             -- print("[handleClipboardChange] img.size.h = " .. content:size()["h"] .. ", img.size.w = " .. content:size()["w"])
             -- print("[handleClipboardChange] img")
         elseif content ~= nil then
+            -- Treat the pasteboard watcher's string as authoritative. Avoid any
+            -- lossy normalization: for example, "interesting" must stay exactly
+            -- "interesting" instead of being reconstructed from character events.
             -- Don't add if it's the same as the last entry
             if #text_clipboard_history ~= 0 and 
                 (#img_clipboard_history == 0 or (text_clipboard_history[#text_clipboard_history].ts > img_clipboard_history[#img_clipboard_history].ts)) then
@@ -240,7 +252,8 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 .item:hover { border-color:#85aaff; background:#30343d; }
 .item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
-.image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center; display:block; background:#191b20; border-radius:7px; }
+.image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:#191b20; border-radius:7px; }
+.image-item .preview { aspect-ratio:auto; }
 .image-item .preview:not([src]), .image-item .preview[src=""] { object-fit:contain; }
 .text-preview { overflow-wrap:anywhere; word-break:break-word; }
 .preview.placeholder { display:flex; align-items:center; justify-content:center; color:#9ba2af; }
