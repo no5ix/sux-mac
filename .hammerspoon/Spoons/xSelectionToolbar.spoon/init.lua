@@ -24,18 +24,21 @@ local CHATGPT_PROMPT = [[Please proofread the following text. Make minimal chang
 
 -- Configurable local-AI toolbar actions. Add entries here to create buttons.
 -- {{text}} is replaced by the selected text when the prompt is sent.
+
 local CUSTOM_AI_BUTTONS = {
     {
         id = "translation",
         label = "Translation",
         icon = "🌐",
-        prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
+        -- prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
+        prompt = "If there is only one sentence, don’t provide a bilingual translation with the original foreign-language text and Chinese side by side. If there are multiple sentences, provide a bilingual translation with each sentence in the original foreign language followed by its Chinese translation. If there is any Thai text, translate only the Thai text and don’t translate the English. If the text is entirely in English, translate it directly into Chinese. For English text, explain any words above the B1 level at the end of each sentence and include their IPA pronunciations: \\n\\n{{text}}",
     },
     {
         id = "correct",
         label = "Correct",
         icon = "✏️",
-        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\\n\\n{{text}}",
+        -- prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\\n\\n{{text}}",
+        prompt = "Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all 'um/uh' fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: \\n\\n{{text}}",
     },
 }
 
