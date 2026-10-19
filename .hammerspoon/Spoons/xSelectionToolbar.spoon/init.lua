@@ -155,36 +155,7 @@ local function buildToolbar(text)
     toolbar:show()
     toolbar:bringToFront()
 
-    -- Drive hover highlighting from native Hammerspoon mouse coordinates,
-    -- avoiding dependence on WKWebView CSS hover/mouse event delivery.
-    hoverWatcher = hs.timer.doEvery(0.035, function()
-        if not toolbar or not toolbar:isVisible() then
-            if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
-            return
-        end
-        local p = hs.mouse.absolutePosition()
-        local f = toolbar:frame()
-        local lx, ly = p.x - f.x, p.y - f.y
-        local targetAction = ""
-        if ly >= 5 and ly <= 52 then
-            if lx >= 7 and lx <= 73 then
-                targetAction = "copy"
-            elseif lx >= 77 and lx <= 251 then
-                targetAction = "doubao"
-            elseif lx >= 255 and lx <= 378 then
-                targetAction = "youdao-result"
-            elseif lx >= 382 and lx <= 527 then
-                targetAction = "youdao-word"
-            end
-        end
-        local actionLiteral = string.format("%q", targetAction)
-        local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
-            "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
-            "b.classList.toggle('is-hovered',h);" ..
-            "b.style.setProperty('cursor','pointer','important');" ..
-            "});"
-        pcall(function() toolbar:evaluateJavaScript(script) end)
-    end)
+
 end
 function obj:start()
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
