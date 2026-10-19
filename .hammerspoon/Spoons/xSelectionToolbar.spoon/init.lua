@@ -196,8 +196,8 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
 
     -- Native Hammerspoon polling only: use the toolbar's known layout and the
-    -- native mouse coordinates to determine the target button. No WebKit
-    -- JavaScript or DOM hover support is involved in hit testing.
+    -- native mouse coordinates to determine the target button. No DOM-based
+    -- hit testing is used. A tiny JS update only paints the selected button.
     local previousTarget = nil
     hoverWatcher = hs.timer.doEvery(0.025, function()
         local currentToolbar = toolbar
@@ -225,19 +225,16 @@ local function buildToolbar(text)
 
         if target ~= previousTarget then
             previousTarget = target
-            local bg = target and "#d8dee9" or "transparent"
-            local outline = target and "inset 0 0 0 1px rgba(40,50,70,.18)" or "none"
-            local scripts = {}
-            for _, name in ipairs({ "copy", "chatgpt", "youdao-result", "youdao-word" }) do
-                local active = name == target
-                scripts[#scripts + 1] = string.format(
-                    "(()=>{const b=document.querySelector('[data-action=%q]');if(b){b.style.backgroundColor=%q;b.style.boxShadow=%q;}})();",
-                    name, active and bg or "transparent", active and outline or "none"
-                )
-            end
-            -- The hover watcher drives the effect using fixed native hit zones.
-            -- Apply CSS values only when the target changes to avoid constant churn.
-            currentToolbar:evaluateJavaScript(table.concat(scripts, ""))
+            local targetLiteral = target and string.format("%q", target) or "null"
+            -- Use action names encoded into the page script rather than CSS
+            -- attribute selectors, so punctuation or selector parsing cannot
+            -- prevent the highlight update from applying.
+            local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
+                "var active=" .. targetLiteral .. "!==null && b.getAttribute('data-action')===" .. targetLiteral .. ";" ..
+                "b.style.setProperty('background-color',active?'#d8dee9':'transparent','important');" ..
+                "b.style.setProperty('box-shadow',active?'inset 0 0 0 1px rgba(40,50,70,.18)':'none','important');" ..
+                "});"
+            currentToolbar:evaluateJavaScript(script)
         end
     end)
 end
