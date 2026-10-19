@@ -232,7 +232,7 @@ local function buildToolbar(text)
             local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
                 "var active=" .. targetLiteral .. "!==null && b.getAttribute('data-action')===" .. targetLiteral .. ";" ..
                 "b.style.setProperty('background-color',active?'#d8dee9':'transparent','important');" ..
-                "b.style.setProperty('box-shadow',active?'inset 0 0 0 1px rgba(40,50,70,.18)':'none','important');" ..
+                -- "b.style.setProperty('box-shadow',active?'inset 0 0 0 1px rgba(40,50,70,.18)':'none','important');" ..
                 "});"
             currentToolbar:evaluateJavaScript(script)
         end
