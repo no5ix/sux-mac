@@ -66,6 +66,8 @@ button:active{background-color:var(--toolbar-active)!important}
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
 <button data-action="translation" aria-label="Translation" title="Translate selected text" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span></button>
+<!-- Custom AI buttons are generated from CUSTOM_AI_BUTTONS in Lua. -->
+<button data-action="custom-correct" aria-label="Correct" title="Correct" onclick="action('custom-correct')"><span class="icon" aria-hidden="true">✏️</span></button>
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
@@ -102,6 +104,18 @@ local translationRequestId = 0
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
 local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
+
+-- Add custom local-AI actions here. Each entry creates a toolbar button and
+-- uses its prompt template with the selected text. Use {{text}} where the
+-- selection should be inserted into the prompt.
+local CUSTOM_AI_BUTTONS = {
+    {
+        id = "correct",
+        label = "Correct",
+        icon = "✏️",
+        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\\n\\n{{text}}",
+    },
+}
 
 local function translationWindowHTML(text)
     local encoded = json.encode({ text })
@@ -173,6 +187,85 @@ local function detectTranslationDirection(text)
     else
         return "English", "Chinese"
     end
+end
+
+local function destroyTranslationWindow()
+    if translationAppearancePoll then translationAppearancePoll:stop(); translationAppearancePoll = nil end
+    if translationRequestTask then
+        pcall(function() translationRequestTask:terminate() end)
+        translationRequestTask = nil
+    end
+    translationRequestId = translationRequestId + 1
+    if translationWindow then
+        local oldWindow = translationWindow
+        translationWindow = nil
+        oldWindow:delete()
+    end
+    translationUsercontent = nil
+end
+
+local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
+    if translationRequestTask then
+        pcall(function() translationRequestTask:terminate() end)
+        translationRequestTask = nil
+    end
+    translationRequestId = translationRequestId + 1
+    local requestId = translationRequestId
+    local prompt = tostring(promptTemplate or ""):gsub("{{text}}", function() return sourceText end)
+    local body = {
+        model = TRANSLATION_MODEL,
+        messages = {
+            { role = "system", content = "Follow the user's instruction precisely and return only the requested result." },
+            { role = "user", content = prompt }
+        },
+        temperature = 0.1,
+        stream = false
+    }
+    local encodedBody = json.encode(body)
+    if type(encodedBody) == "table" then encodedBody = encodedBody[1] end
+    if type(encodedBody) ~= "string" then
+        translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not encode request."))
+        return
+    end
+    translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Working locally…"))
+    local task = hs.task.new("/usr/bin/curl", function(exitCode, stdOut, stdErr)
+        if requestId ~= translationRequestId or not translationWindow then return end
+        translationRequestTask = nil
+        if exitCode ~= 0 then
+            local detail = trim(stdErr)
+            local message = "Local AI request failed at " .. TRANSLATION_API_BASE
+            if detail ~= "" then message = message .. "\\n" .. detail end
+            translationWindow:evaluateJavaScript(translationJSCall("translationStatus", message))
+            return
+        end
+        local ok, response = pcall(function() return json.decode(stdOut or "") end)
+        if not ok or type(response) ~= "table" then
+            translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "The local AI server returned invalid JSON."))
+            return
+        end
+        local result = response.choices and response.choices[1]
+            and response.choices[1].message and response.choices[1].message.content
+        if type(result) ~= "string" or trim(result) == "" then
+            local errorMessage = response.error and (response.error.message or response.error) or "No result returned."
+            translationWindow:evaluateJavaScript(translationJSCall("translationStatus", tostring(errorMessage)))
+            return
+        end
+        translationWindow:evaluateJavaScript(
+            translationJSCall("translationResult", trim(result)) ..
+            translationJSCall("translationStatus", windowTitle .. " · local AI")
+        )
+    end, {
+        "-sS", "--max-time", "120", "-X", "POST",
+        TRANSLATION_API_BASE .. "/chat/completions",
+        "-H", "Content-Type: application/json",
+        "--data-binary", encodedBody
+    })
+    if not task then
+        translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not start local AI request."))
+        return
+    end
+    translationRequestTask = task
+    task:start()
 end
 
 local function sendTranslationRequest(sourceText)
@@ -263,8 +356,7 @@ local function showTranslationWindow(text)
         if body.action == "copy" then
             if type(body.text) == "string" and body.text ~= "" then
                 pasteboard.setContents(body.text)
-                if translationAppearancePoll then translationAppearancePoll:stop(); translationAppearancePoll = nil end
-                if translationWindow then translationWindow:hide() end
+                destroyTranslationWindow()
             end
         elseif body.action == "translate" then
             local sourceText = trim(body.text)
@@ -307,6 +399,12 @@ local function showTranslationWindow(text)
     }, translationUsercontent)
     translationWindow:windowStyle({"titled","closable","resizable"})
     translationWindow:allowTextEntry(true)
+    translationWindow:windowCallback(function(action, _, focused)
+        if action == "focusChange" and focused == false and translationWindow then
+            -- Clicking another app/window dismisses this transient result popup.
+            destroyTranslationWindow()
+        end
+    end)
     translationWindow:windowTitle("Translation")
     translationWindow:html(translationWindowHTML(text), "file:///")
     syncTranslationAppearance()
@@ -316,6 +414,52 @@ local function showTranslationWindow(text)
     -- Translate automatically when the 🌐 toolbar icon is clicked.
     timer.doAfter(0.15, function()
         if translationWindow then sendTranslationRequest(text) end
+    end)
+end
+
+local function showCustomAIWindow(text, config)
+    destroyTranslationWindow()
+    translationUsercontent = webview.usercontent.new("translationWindow")
+    translationUsercontent:setCallback(function(message)
+        message = normalizeMessage(message)
+        if type(message) ~= "table" then return end
+        local body = message.body or message
+        if type(body) ~= "table" then return end
+        if body.action == "copy" then
+            if type(body.text) == "string" and body.text ~= "" then
+                pasteboard.setContents(body.text)
+                destroyTranslationWindow()
+            end
+        end
+    end)
+    -- Reuse the compact result-popup UI with a custom title.
+    local popupText = string.format("%s", text)
+    local mousePoint = hs.mouse.absolutePosition()
+    local targetScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    local f = targetScreen:frame()
+    local w, h = 420, 230
+    local x = math.max(f.x, math.min(mousePoint.x - w / 2, f.x + f.w - w))
+    local y = math.max(f.y, math.min(mousePoint.y - h - 18, f.y + f.h - h))
+    if mousePoint.y - h - 18 < f.y then y = math.min(mousePoint.y + 18, f.y + f.h - h) end
+    translationWindow = webview.new({x=x,y=y,w=w,h=h}, {
+        developerExtrasEnabled = false, javaScriptCanOpenWindowsAutomatically = false,
+        transparent = false, shadow = true, opaque = true
+    }, translationUsercontent)
+    translationWindow:windowStyle({"titled","closable","resizable"})
+    translationWindow:allowTextEntry(true)
+    translationWindow:windowTitle(config.label)
+    translationWindow:windowCallback(function(action, _, focused)
+        if action == "focusChange" and focused == false and translationWindow then
+            destroyTranslationWindow()
+        end
+    end)
+    translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. escapeHTML(config.label) .. "</h1>"), "file:///")
+    syncTranslationAppearance()
+    translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
+    translationWindow:show()
+    translationWindow:hswindow():focus()
+    timer.doAfter(0.15, function()
+        if translationWindow then sendLocalPromptRequest(text, config.prompt, config.label) end
     end)
 end
 
@@ -395,6 +539,10 @@ local function onToolbarMessage(message)
     elseif action == "translation" then
         hideToolbar()
         showTranslationWindow(text)
+    elseif action == "custom-correct" then
+        hideToolbar()
+        local config = CUSTOM_AI_BUTTONS[1]
+        if config then showCustomAIWindow(text, config) end
     elseif action == "youdao-result" then
         hideToolbar()
         hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
@@ -459,10 +607,10 @@ local function buildToolbar(text)
     toolbar:show()
     toolbar:bringToFront()
     -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
-    local buttonWidths = { 38, 38, 38, 38, 38 }
+    local buttonWidths = { 38, 38, 38, 38, 38, 38 }
     local gap, padding = 4, 6
     local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
-    local toolbarWidth = 2 + padding * 2 + gap * 5 + separatorWidthWithMargins
+    local toolbarWidth = 2 + padding * 2 + gap * 6 + separatorWidthWithMargins
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 8
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
@@ -486,7 +634,7 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
-            local buttonActions = { "copy", "chatgpt", "translation", "youdao-result", "youdao-word" }
+            local buttonActions = { "copy", "chatgpt", "translation", "custom-correct", "youdao-result", "youdao-word" }
             for i, name in ipairs(buttonActions) do
                 local width = buttonWidths[i]
                 if rx >= cursor and rx <= cursor + width then
@@ -494,7 +642,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 3 then cursor = cursor + separatorWidthWithMargins + gap end
+                if i == 4 then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
