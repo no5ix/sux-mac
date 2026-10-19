@@ -144,6 +144,10 @@ local function onToolbarMessage(message)
         -- Let the selected conversation become active before pasting.
         timer.doAfter(1.8, function()
             eventtap.keyStroke({ "cmd" }, "v", 0.08)
+            timer.doAfter(1.0, function()
+                -- print("Pressing return to submit the prompt to ChatGPT ---- ?")
+                eventtap.keyStroke({ "" }, "return", 0.08)
+            end)
         end)
     elseif action == "youdao-result" then
         hideToolbar()
