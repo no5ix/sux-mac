@@ -28,6 +28,10 @@ local function decodeImage(entry)
     return hs.image.imageFromURL(entry.imageData)
 end
 
+local function isImageDataURL(value)
+    return type(value) == "string" and value:match("^data:image/") ~= nil
+end
+
 local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
@@ -74,6 +78,9 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
+        -- Some apps expose the selected image as a data URL in the text flavor;
+        -- prefer the decoded image entry and never add the data URL to text history.
+        if isImageDataURL(content) and pasteboardImg ~= nil then content = nil end
         if (content == nil) and (pasteboardImg ~= nil) then
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
@@ -170,6 +177,11 @@ local function historyItemHTML(entry, index)
     local content = tostring(entry.data or "")
     local previewText = content:gsub("[\\r\\n]+", " ")
     if #previewText > display_max_text_length then previewText = previewText:sub(1, display_max_text_length) .. "…" end
+    -- If an image MIME payload ever arrives as clipboard text, don't expose a
+    -- huge data:image URL as if it were ordinary text. Render a bounded marker.
+    if isImageDataURL(content) then
+        previewText = "[Image data]"
+    end
     return '<button class="item text-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
@@ -182,8 +194,9 @@ function clipboardPanelHTML()
     local filter = string.lower(clipboard_search or "")
     for index, entry in ipairs(menuData or {}) do
         if entry.type == "text" or entry.type == "image" then
+            local searchableText = isImageDataURL(entry.data) and "[image data]" or tostring(entry.data or "")
             local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
-                tostring(entry.data or "") .. " " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
+                searchableText .. " " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
             if filter == "" or searchable:find(filter, 1, true) then
                 visibleIndices[#visibleIndices + 1] = index
                 cards[#cards + 1] = historyItemHTML(entry, index)
@@ -210,7 +223,9 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 .item:hover { border-color:#85aaff; background:#30343d; }
 .item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
-.image-item .preview { width:100%; height:160px; object-fit:contain; display:block; background:#191b20; border-radius:7px; }
+.image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center; display:block; background:#191b20; border-radius:7px; }
+.image-item .preview:not([src]), .image-item .preview[src=""] { object-fit:contain; }
+.text-preview { overflow-wrap:anywhere; word-break:break-word; }
 .preview.placeholder { display:flex; align-items:center; justify-content:center; color:#9ba2af; }
 .meta { padding:9px 2px 1px; }
 .kind { font-size:10px; letter-spacing:.12em; color:#93b5ff; font-weight:700; }
@@ -373,8 +388,9 @@ local function handleClipboardPanelMessage(message)
         selectedVisibleIndex = 1
         for index, entry in ipairs(menuData or {}) do
             if entry.type == "text" or entry.type == "image" then
+                local searchableText = isImageDataURL(entry.data) and "[image data]" or tostring(entry.data or "")
                 local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
-                    tostring(entry.data or "") .. " " ..
+                    searchableText .. " " ..
                     os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
                 if filter == "" or searchable:find(filter, 1, true) then
                     visibleIndices[#visibleIndices + 1] = index
@@ -607,8 +623,11 @@ end
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
 pasteboard_watcher:start()
 
--- Add to your hotkey bindings (you can change the key combination as needed)
-hotkey.bind({"ctrl", "shift"}, "v", showClipboardHistory)
+-- Keep an explicit reference to the global shortcut so it remains live after
+-- Spoon reloads. Bindings are global, so browser password fields should not
+-- prevent the history panel from being triggered by this chord.
+local historyHotkey = hotkey.bind({"ctrl", "shift"}, "v", showClipboardHistory)
+if historyHotkey then historyHotkey:enable() end
 
 
 
