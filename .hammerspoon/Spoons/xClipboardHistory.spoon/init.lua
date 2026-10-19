@@ -38,6 +38,8 @@ local function clearClipboardHistory()
         clipboard_webview:html(clipboardPanelHTML())
     end
     collectgarbage("collect")
+    -- make sure the lua vm is reloaded, otherwise the memory will not be released
+    hs.reload()
 end
 
 local max_history_size_for_text = 10000

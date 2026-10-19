@@ -19,4 +19,9 @@ return {
         artist = "",
         album = "",
     },
+    {
+        name = "NCT WISH",
+        artist = "",
+        album = "",
+    },
 }
