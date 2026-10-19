@@ -223,21 +223,31 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><h1>Clipboard History</h1><span class="count">]] .. tostring(#cards) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
-<div class="actions"><button class="action primary" data-action="pasteAll">Paste All Above Selected</button>
+<div class="actions">
 <button class="action danger" data-action="clearAll">Clear All</button>
 <button class="action" data-action="close">Close</button></div></header>
 <main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No matching clipboard items</div>') .. [[</main>
-<footer>Arrow keys: select · Enter: paste · Shift+Enter: paste rows above selected · Esc: close</footer>
+<footer>Arrow keys: select · Click: paste · Right-click an item for bulk paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query) => {
   try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query}); } catch (_) {}
 };
 document.addEventListener('click', event => {
+  const contextItem = event.target.closest('#clipboard-context-menu');
+  if (contextItem) return;
   const button = event.target.closest('[data-action]');
-  if (!button) return;
-  const selected = rows().find(item => item.classList.contains('selected'));
-  const index = Number((selected && selected.dataset.index) || button.dataset.index || 0);
-  bridge(button.dataset.action === 'pasteAll' ? 'pasteAllFrom' : button.dataset.action, index, '');
+  if (!button) {
+    const item = event.target.closest('.item');
+    if (item) {
+      event.preventDefault();
+      const index = Number(item.dataset.index || 0);
+      selectRow(rows().indexOf(item));
+      bridge('paste', index, '');
+    }
+    return;
+  }
+  const index = Number(button.dataset.index || 0);
+  bridge(button.dataset.action, index, '');
 });
 const search = document.getElementById('search');
 search.addEventListener('input', () => bridge('search', 0, search.value));
@@ -250,9 +260,37 @@ function selectRow(next) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
   items[selectedIndex].scrollIntoView({block:'nearest'});
 }
-document.addEventListener('click', event => {
+const contextMenu = document.createElement('div');
+contextMenu.id = 'clipboard-context-menu';
+contextMenu.innerHTML = '<button type="button">Paste All the rows above this row in the order from early to late, including this row</button>';
+contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
+contextMenu.querySelector('button').style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+document.body.appendChild(contextMenu);
+let contextRowIndex = 0;
+document.addEventListener('contextmenu', event => {
   const item = event.target.closest('.item');
-  if (item) { const items = rows(); selectRow(items.indexOf(item)); }
+  if (!item) return;
+  event.preventDefault();
+  contextRowIndex = Number(item.dataset.index || 0);
+  selectRow(rows().indexOf(item));
+  contextMenu.style.display = 'block';
+  const menuWidth = Math.min(460, window.innerWidth - 16);
+  const menuHeight = contextMenu.offsetHeight || 64;
+  contextMenu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)) + 'px';
+  contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)) + 'px';
+});
+contextMenu.querySelector('button').addEventListener('mouseenter', () => {
+  contextMenu.querySelector('button').style.background = '#3a4250';
+});
+contextMenu.querySelector('button').addEventListener('mouseleave', () => {
+  contextMenu.querySelector('button').style.background = 'transparent';
+});
+contextMenu.querySelector('button').addEventListener('click', () => {
+  contextMenu.style.display = 'none';
+  bridge('pasteAllFrom', contextRowIndex, '');
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
 });
 search.addEventListener('input', () => { selectedIndex = 0; setTimeout(() => selectRow(0), 0); });
 document.addEventListener('keydown', event => {
@@ -271,7 +309,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
     event.preventDefault();
     const item = items[selectedIndex];
-    if (item) bridge(event.shiftKey ? 'pasteAllFrom' : 'paste', Number(item.dataset.index || 0), '');
+    if (item) bridge('paste', Number(item.dataset.index || 0), '');
   }
 });
 setTimeout(() => selectRow(0), 0);
@@ -347,8 +385,6 @@ local function handleClipboardPanelMessage(message)
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
-    elseif body.action == "pasteAll" then
-        pasteSomeWithDelimiterFromStartRow(#menuData)
     elseif body.action == "clearAll" then
         clearClipboardHistory()
         if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()); clipboard_webview:show() end
@@ -471,9 +507,18 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
-    -- The web panel lists only real history rows, newest first. Reverse the
-    -- selected range to preserve the historical oldest-to-newest paste order.
-    pasteAllWithDelimiterRecursionVersion(startRow)
+    -- Restore the app that was frontmost before the panel opened before any
+    -- paste keystrokes are sent.
+    hs.timer.doAfter(0.15, function()
+        if previousApplication and previousApplication:isRunning() then
+            previousApplication:activate(true)
+        end
+        hs.timer.doAfter(0.35, function()
+            -- The web panel lists newest-first; the recursive routine walks
+            -- selected row -> newest row, which pastes oldest-to-newest.
+            pasteAllWithDelimiterRecursionVersion(startRow)
+        end)
+    end)
 end
 
 -- Function to show clipboard history
