@@ -4,7 +4,6 @@ obj.__index = obj
 local pasteboard = require("hs.pasteboard")
 local hotkey = require("hs.hotkey")
 local webview = require("hs.webview")
-local application = require("hs.application")
 local timer = require("hs.timer")
 local eventtap = require("hs.eventtap")
 local json = require("hs.json")
@@ -12,8 +11,6 @@ local json = require("hs.json")
 local toolbar = nil
 local captureHotkey = nil
 local selectedText = ""
-local previousApp = nil
-local previousWindow = nil
 
 local DOUbao_SHORTCUT = { "ctrl", "shift", "alt" }
 local DOUbao_KEY = "o"
@@ -133,15 +130,13 @@ local function buildToolbar(text)
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = true,
-        shadow = false,
-        windowStyle = { "borderless", "utility" },
-        level = "floating",
-        clickable = true
-    })
+        shadow = false
+    }, usercontent)
     toolbar:windowStyle({ "borderless", "utility" })
     toolbar:allowTextEntry(false)
     toolbar:windowTitle("Selection Actions")
-    toolbar:usercontent().callback = onToolbarMessage
+    local usercontent = hs.webview.usercontent.new("selectionToolbar")
+    usercontent:setCallback(onToolbarMessage)
     toolbar:html(getToolbarHTML(text))
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
@@ -160,13 +155,12 @@ function obj:start()
     if captureHotkey then captureHotkey:delete() end
     -- Select text, then press Ctrl+Alt+Shift+S to capture it and show actions.
     captureHotkey = hotkey.bind({ "ctrl", "alt", "shift" }, "s", function()
-        previousApp = application.frontmostApplication()
-        previousWindow = hs.window.frontmostWindow()
         local oldContents = pasteboard.getContents()
         -- Copy selection temporarily, then restore clipboard when no action needs it.
         eventtap.keyStroke({ "cmd" }, "c", 0.03)
         timer.doAfter(0.15, function()
             selectedText = trim(pasteboard.getContents())
+            if oldContents ~= nil then pasteboard.setContents(oldContents) end
             if selectedText == "" then
                 hs.alert.show("Select text first, then press Ctrl+Alt+Shift+S")
                 return
