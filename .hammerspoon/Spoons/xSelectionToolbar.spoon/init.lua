@@ -41,7 +41,7 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent !important;}body{padding:8px;background:transparent !important;font-family:-apple-system,BlinkMacSystemFont,sans-serif}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 16px);padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-size:13px;white-space:nowrap;cursor:pointer}button:hover{background:#dfe3ea}button:active{background:#cfd5df}.separator{width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent !important;}body{padding:8px;background:transparent !important;font-family:-apple-system,BlinkMacSystemFont,sans-serif}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 16px);padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-size:13px;white-space:nowrap;cursor:pointer}button:hover{background:#e2e5eb}button:active{background:#d1d5dd}button:hover:focus{background:#e2e5eb}.separator{width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
 <button onclick="action('copy')">Copy</button>
 <button onclick="action('doubao')">Proofread + translate</button>
@@ -247,7 +247,9 @@ function obj:start()
                 if showIfSelection(value) then return end
                 if not didDrag or pendingCapture then return end
 
-                -- Clipboard fallback is only attempted for a drag gesture, never a plain click.
+                -- Only keep the toolbar when the drag produced a real text selection.
+                -- If Accessibility cannot report a selection, use copy as a fallback,
+                -- but require a clipboard change and restore the prior clipboard.
                 pendingCapture = true
                 local oldClipboard = pasteboard.getContents()
                 local oldCount = pasteboard.changeCount()
@@ -259,7 +261,10 @@ function obj:start()
                     pendingCapture = false
                     if newCount ~= oldCount and copied ~= "" then
                         local axValue = selectionFromAccessibility()
-                        showIfSelection(axValue ~= "" and axValue or copied)
+                        local selection = trim(axValue ~= "" and axValue or copied)
+                        -- Ignore common stale clipboard values by requiring that
+                        -- the selection/copy produced a new pasteboard change.
+                        showIfSelection(selection)
                     end
                 end)
             end)
@@ -269,16 +274,7 @@ function obj:start()
     end)
     mouseSelectionTap:start()
 
-    -- Accessibility polling supports keyboard-based selection (Shift+Arrow, etc.).
-    selectionWatcher = hs.timer.doEvery(0.35, function()
-        if toolbar and toolbar:isVisible() then return end
-        local value = selectionFromAccessibility()
-        if value ~= "" then
-            showIfSelection(value)
-        elseif not pendingCapture then
-            lastText = ""
-        end
-    end)
+    -- Keyboard-based selection detection intentionally disabled; only mouse drag selection is supported.
     return self
 end
 function obj:stop()
