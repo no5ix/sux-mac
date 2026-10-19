@@ -6,6 +6,7 @@ local hotkey = require("hs.hotkey")
 local webview = require("hs.webview")
 local timer = require("hs.timer")
 local json = require("hs.json")
+local mouseSelectionTap = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -121,18 +122,15 @@ local function buildToolbar(text)
 end
 function obj:start()
     if selectionWatcher then selectionWatcher:stop() end
-    -- Accessibility exposes selected text in many, but not all, macOS apps.
-    -- Poll conservatively and show the toolbar when a non-empty selection changes.
-    local lastShownText = ""
+    if mouseSelectionTap then mouseSelectionTap:stop() end
+    local lastText = ""
     local lastShownAt = 0
-    selectionWatcher = hs.timer.doEvery(0.25, function()
-        if toolbar and toolbar:isVisible() then return end
-        local app = hs.application.frontmostApplication()
-        if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+    local lastMouseDown = false
+    local function selectionFromAccessibility()
         local ok, value = pcall(function()
-            local function selectedTextFrom(element)
+            local function walk(element)
                 local depth = 0
-                while element and depth < 8 do
+                while element and depth < 10 do
                     local selected = element:attributeValue("AXSelectedText")
                     if type(selected) == "string" and trim(selected) ~= "" then return selected end
                     element = element:attributeValue("AXParent")
@@ -140,29 +138,67 @@ function obj:start()
                 end
                 return nil
             end
-            local focused = hs.axuielement.systemElement():attributeValue("AXFocusedUIElement")
-            local selected = selectedTextFrom(focused)
-            if selected then return selected end
-            local underMouse = hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition())
-            return selectedTextFrom(underMouse)
+            local system = hs.axuielement.systemElement()
+            local focused = system and system:attributeValue("AXFocusedUIElement")
+            return walk(focused) or walk(hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition()))
         end)
-        if not ok then return end
-        value = trim(value)
+        return ok and trim(value) or ""
+    end
+    local function captureAfterMouseSelection()
+        if toolbar and toolbar:isVisible() then return end
+        local app = hs.application.frontmostApplication()
+        if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+        local value = selectionFromAccessibility()
         if value == "" then
-            lastShownText = ""
+            local oldClipboard = pasteboard.getContents()
+            local oldChangeCount = pasteboard.changeCount()
+            hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
+            timer.doAfter(0.12, function()
+                local copied = trim(pasteboard.getContents())
+                local currentCount = pasteboard.changeCount()
+                if oldClipboard ~= nil and currentCount ~= oldChangeCount then pasteboard.setContents(oldClipboard) end
+                if copied ~= "" and currentCount ~= oldChangeCount then value = copied end
+                if value ~= "" and value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
+                    selectedText = value
+                    lastText = value
+                    lastShownAt = hs.timer.secondsSinceEpoch()
+                    buildToolbar(value)
+                end
+            end)
             return
         end
-        if value ~= lastShownText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.7 then
+        if value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
             selectedText = value
-            lastShownText = value
+            lastText = value
             lastShownAt = hs.timer.secondsSinceEpoch()
-            buildToolbar(selectedText)
+            buildToolbar(value)
+        end
+    end
+    -- Observe mouse release rather than polling AXSelectedText alone. Text selection
+    -- in most apps is finalized when the mouse button is released.
+    mouseSelectionTap = hs.eventtap.new({ hs.eventtap.event.types.leftMouseUp }, function()
+        timer.doAfter(0.08, captureAfterMouseSelection)
+        return false
+    end)
+    mouseSelectionTap:start()
+    -- Also monitor Accessibility for apps where keyboard selection updates without mouse input.
+    selectionWatcher = hs.timer.doEvery(0.45, function()
+        if toolbar and toolbar:isVisible() then return end
+        local value = selectionFromAccessibility()
+        if value ~= "" and value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
+            selectedText = value
+            lastText = value
+            lastShownAt = hs.timer.secondsSinceEpoch()
+            buildToolbar(value)
+        elseif value == "" then
+            lastText = ""
         end
     end)
     return self
 end
 function obj:stop()
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
+    if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
     return self
 end
