@@ -83,8 +83,7 @@ local function getToolbarHTML(text)
             "<button class=\"custom-ai-button\" data-action=\"" .. htmlEscape(action) ..
             "\" aria-label=\"" .. htmlEscape(config.label) .. "\" title=\"" .. htmlEscape(config.label) ..
             "\" onclick=\"action('" .. htmlEscape(action) .. "')\"><span class=\"icon\" aria-hidden=\"true\">" ..
-            htmlEscape(config.icon) .. "</span><span class=\"custom-ai-label\">" ..
-            htmlEscape(config.label) .. "</span></button>"
+            htmlEscape(config.icon) .. "</span></button>"
     end
     local customButtonsHTML = table.concat(customButtons, "\n")
     local html = [=[
@@ -109,10 +108,9 @@ button:active{background-color:var(--toolbar-active)!important}
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
-<button data-action="translation" aria-label="Translation" title="Translate selected text" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span></button>
-<!-- Custom AI buttons are generated from CUSTOM_AI_BUTTONS in Lua. -->
-<span class="separator"></span>
+
 __CUSTOM_AI_BUTTONS__
+<span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
 </div><script>
@@ -490,10 +488,12 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
-            local buttonActions = { "copy", "chatgpt", "youdao-result", "youdao-word" }
+            local buttonActions = { "copy", "chatgpt" }
             for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
                 buttonActions[#buttonActions + 1] = customActionName(config)
             end
+            buttonActions[#buttonActions + 1] = "youdao-result"
+            buttonActions[#buttonActions + 1] = "youdao-word"
             for i, name in ipairs(buttonActions) do
                 local width = buttonWidths[i]
                 if rx >= cursor and rx <= cursor + width then
@@ -501,7 +501,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 2 then cursor = cursor + separatorWidthWithMargins + gap end
+                if i == 2 + #(CUSTOM_AI_BUTTONS or {}) then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
