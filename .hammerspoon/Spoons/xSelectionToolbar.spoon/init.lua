@@ -112,8 +112,36 @@ local function onToolbarMessage(message)
         local prompt = CHATGPT_PROMPT .. " " .. text
         pasteboard.setContents(prompt)
         hideToolbar()
-        hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
-        -- Give the browser/conversation a moment to activate before pasting.
+        -- Ask Safari to activate the exact existing tab when it is already open.
+        -- If no matching Safari tab exists, open the URL once. The fallback command
+        -- opens the URL through the user's default browser without forcing a reload
+        -- when the OS can route it to an existing tab.
+        local appleScript = [[
+            tell application "Safari"
+                activate
+                set targetURL to "]] .. CHATGPT_URL .. [["
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        if (URL of t) is targetURL then
+                            set current tab of w to t
+                            set index of w to 1
+                            return "FOUND"
+                        end if
+                    end repeat
+                end repeat
+                open location targetURL
+                return "OPENED"
+            end tell
+        ]]
+        local ok, task = pcall(function()
+            return hs.osascript.applescript(appleScript)
+        end)
+        if not ok or type(task) ~= "table" or task.ok == false then
+            -- Non-Safari default browser fallback. Avoid opening the URL twice
+            -- when Safari's script successfully found or opened the conversation.
+            hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
+        end
+        -- Let the selected conversation become active before pasting.
         timer.doAfter(1.8, function()
             eventtap.keyStroke({ "cmd" }, "v", 0.08)
         end)
@@ -156,54 +184,61 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
-    -- Once WebKit has laid out the inline-flex toolbar, size the native window
-    -- to the actual content width, then keep it inside the current screen.
-    timer.doAfter(0.08, function()
-        if not toolbar then return end
-        toolbar:evaluateJavaScript(
-            "({width: Math.ceil(document.querySelector('.bar').getBoundingClientRect().width), height: Math.ceil(document.querySelector('.bar').getBoundingClientRect().height)})",
-            function(size, err)
-                if err or type(size) ~= "table" or not tonumber(size.width) or not toolbar then return end
-                local actualWidth = math.max(100, math.min(tonumber(size.width), frame.w - 16))
-                local currentPoint = hs.mouse.absolutePosition()
-                local newX = math.max(frame.x + 8, math.min(currentPoint.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
-                local newY = currentPoint.y - height - 14
-                if newY < frame.y + 8 then newY = currentPoint.y + 18 end
-                newY = math.max(frame.y + 8, math.min(newY, frame.y + frame.h - height - 8))
-                toolbar:frame({ x = newX, y = newY, w = actualWidth, h = height })
-            end
-        )
-    end)
+    -- The toolbar is icon-only with four fixed-width buttons and two 1px
+    -- borders plus padding/gaps. Set the native frame explicitly rather than
+    -- depending on WebKit's asynchronous width measurement.
+    local buttonSize, gap, padding = 38, 4, 6
+    local buttonCount = 4
+    local separatorAndMargins = 5
+    local toolbarWidth = padding * 2 + buttonCount * buttonSize + (buttonCount - 1) * gap + separatorAndMargins + 2
+    local actualWidth = math.min(toolbarWidth, frame.w - 16)
+    x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
+    toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
 
-    -- Drive hover highlighting from native Hammerspoon mouse coordinates,
-    -- avoiding dependence on WKWebView CSS hover/mouse event delivery.
-    hoverWatcher = hs.timer.doEvery(0.035, function()
-        if not toolbar or not toolbar:isVisible() then
+    -- Native Hammerspoon polling only: use the toolbar's known layout and the
+    -- native mouse coordinates to determine the target button. No WebKit
+    -- JavaScript or DOM hover support is involved in hit testing.
+    local previousTarget = nil
+    hoverWatcher = hs.timer.doEvery(0.025, function()
+        local currentToolbar = toolbar
+        if not currentToolbar or not currentToolbar:isVisible() then
             if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
             return
         end
-        local p = hs.mouse.absolutePosition()
-        local f = toolbar:frame()
-        local lx, ly = p.x - f.x, p.y - f.y
-        -- WebKit JavaScript is asynchronous. Return button rectangles and the
-        -- hovered action in one callback, then apply a simple state update.
-        -- Use the native window coordinates against DOM rectangles; this remains
-        -- stable when the emoji fonts or toolbar width differ from expectations.
-        local script = string.format(
-            "(()=>{const x=%d,y=%d;return Array.from(document.querySelectorAll('.bar button')).map(b=>{const r=b.getBoundingClientRect();return {action:b.getAttribute('data-action'),left:r.left,top:r.top,right:r.right,bottom:r.bottom};}).find(r=>x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)?.action||'';})()",
-            math.floor(lx), math.floor(ly)
-        )
-        toolbar:evaluateJavaScript(script, function(actionUnderMouse, err)
-            if err or not toolbar then return end
-            local targetAction = type(actionUnderMouse) == "string" and actionUnderMouse or ""
-            local actionLiteral = string.format("%q", targetAction)
-            local highlightScript = "document.querySelectorAll('.bar button').forEach(function(b){" ..
-                "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
-                "b.classList.toggle('is-hovered',h);" ..
-                "b.setAttribute('data-hovered',h?'true':'false');" ..
-                "});"
-            toolbar:evaluateJavaScript(highlightScript)
-        end)
+
+        local mouse = hs.mouse.absolutePosition()
+        local bounds = currentToolbar:frame()
+        local rx, ry = mouse.x - bounds.x, mouse.y - bounds.y
+        local target = nil
+        if ry >= 7 and ry <= 51 then
+            local cursor = padding + 1
+            local buttonActions = { "copy", "chatgpt", "youdao-result", "youdao-word" }
+            for i, name in ipairs(buttonActions) do
+                if rx >= cursor and rx <= cursor + buttonSize then
+                    target = name
+                    break
+                end
+                cursor = cursor + buttonSize + gap
+                if i == 2 then cursor = cursor + separatorAndMargins end
+            end
+        end
+
+        if target ~= previousTarget then
+            previousTarget = target
+            local bg = target and "#d8dee9" or "transparent"
+            local outline = target and "inset 0 0 0 1px rgba(40,50,70,.18)" or "none"
+            local scripts = {}
+            for _, name in ipairs({ "copy", "chatgpt", "youdao-result", "youdao-word" }) do
+                local active = name == target
+                scripts[#scripts + 1] = string.format(
+                    "(()=>{const b=document.querySelector('[data-action=%q]');if(b){b.style.backgroundColor=%q;b.style.boxShadow=%q;}})();",
+                    name, active and bg or "transparent", active and outline or "none"
+                )
+            end
+            -- The hover watcher drives the effect using fixed native hit zones.
+            -- Apply CSS values only when the target changes to avoid constant churn.
+            currentToolbar:evaluateJavaScript(table.concat(scripts, ""))
+        end
     end)
 end
 function obj:start()
