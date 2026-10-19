@@ -106,7 +106,7 @@ local function buildToolbar(text)
     toolbar:allowTextEntry(false)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
-    toolbar:html(getToolbarHTML(text), "UTF-8")
+    toolbar:html(getToolbarHTML(text), "text/html", "UTF-8")
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
