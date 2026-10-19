@@ -653,7 +653,7 @@ local function buildToolbar(text)
     toolbar:bringToFront()
     -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
     local buttonWidths = { 38, 38, 38 }
-    for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         buttonWidths[#buttonWidths + 1] = customButtonWidth(config)
     end
     buttonWidths[#buttonWidths + 1] = 38 -- Youdao Result
@@ -685,7 +685,7 @@ local function buildToolbar(text)
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
             local buttonActions = { "copy", "chatgpt", "translation" }
-            for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+            for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
                 buttonActions[#buttonActions + 1] = customActionName(config)
             end
             buttonActions[#buttonActions + 1] = "youdao-result"
