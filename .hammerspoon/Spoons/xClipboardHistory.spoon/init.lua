@@ -135,7 +135,7 @@ function handleClipboardChange(content)
             -- receive "interesting" intact. Keep this callback payload unchanged;
             -- if the preview still contains missing letters, investigate clipboard
             -- writers or keyboard-remapping tools instead of altering stored text.
-            logger.i("Clipboard history watcher received text length=" .. tostring(#content))
+            logger.i("Clipboard history captured text: " .. string.format("%q", content))
 
             -- Don't add if it's the same as the last entry
             if #text_clipboard_history ~= 0 and 
