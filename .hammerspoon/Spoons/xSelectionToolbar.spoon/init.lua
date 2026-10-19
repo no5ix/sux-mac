@@ -171,7 +171,7 @@ local function buildToolbar(text)
         local script = "document.querySelectorAll('.bar button').forEach(function(b){" ..
             "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
             "b.classList.toggle('is-hovered',h);" ..
-            "b.style.setProperty('cursor',h?'pointer':'default','important');" ..
+            "b.style.setProperty('cursor','pointer','important');" ..
             "});"
         pcall(function() toolbar:evaluateJavaScript(script) end)
     end)
