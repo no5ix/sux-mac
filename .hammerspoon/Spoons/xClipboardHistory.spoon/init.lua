@@ -32,6 +32,14 @@ local function isImageDataURL(value)
     return type(value) == "string" and value:match("^data:image/") ~= nil
 end
 
+local function looksLikeImagePayload(value)
+    if type(value) ~= "string" then return false end
+    return isImageDataURL(value)
+        or value:match("^iVBORw0KGgo") ~= nil
+        or value:match("^/9j/") ~= nil
+        or value:match("^R0lGOD") ~= nil
+end
+
 local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
@@ -78,9 +86,16 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
-        -- Some apps expose the selected image as a data URL in the text flavor;
-        -- prefer the decoded image entry and never add the data URL to text history.
-        if isImageDataURL(content) and pasteboardImg ~= nil then content = nil end
+        -- Some apps expose image bytes or a data URL through the text flavor.
+        -- Never treat recognized image payloads as a user-entered text item.
+        if looksLikeImagePayload(content) then
+            if pasteboardImg ~= nil then
+                content = nil
+            else
+                logger and logger.w("Clipboard text resembles image data but has no readable image representation")
+                return
+            end
+        end
         if (content == nil) and (pasteboardImg ~= nil) then
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
