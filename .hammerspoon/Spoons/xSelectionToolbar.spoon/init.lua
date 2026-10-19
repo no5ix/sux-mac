@@ -144,6 +144,7 @@ local translationUsercontent = nil
 local translationAppearancePoll = nil
 local translationRequestTask = nil
 local translationRequestId = 0
+local translationWindowPinned = false
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
 local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
@@ -164,20 +165,39 @@ local function translationWindowHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 body{padding:16px}
-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 h1{font-size:15px;margin:0;font-weight:650;flex:1}
 .status{font-size:11px;color:var(--muted)}
+#pin{padding:5px 8px;min-width:32px;font-size:14px;line-height:1}
+#pin[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+#pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 .actions{display:flex;justify-content:flex-end;margin-top:10px}
 button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);padding:7px 11px;font:inherit;cursor:pointer}
 button:disabled{opacity:.4;cursor:default}
 </style></head><body>
-<header><h1>Translation</h1><span class="status" id="status">Translating locally…</span></header>
+<header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
 <textarea id="result" readonly placeholder="Translation will appear here"></textarea>
 <div class="actions"><button id="copy" disabled>Copy</button></div>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy');
+const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin');
+let pinned=false;
+pin.addEventListener('click',()=>{
+  pinned=!pinned;
+  pin.setAttribute('aria-pressed',pinned?'true':'false');
+  pin.setAttribute('aria-label',pinned?'Unpin window':'Pin window');
+  pin.title=pinned?'Allow window to close when clicking outside':'Keep window open when clicking outside';
+  pin.textContent=pinned?'📍':'📌';
+  bridge('pin',{pinned});
+});
+window.translationPinned=value=>{
+  pinned=!!value;
+  pin.setAttribute('aria-pressed',pinned?'true':'false');
+  pin.setAttribute('aria-label',pinned?'Unpin window':'Pin window');
+  pin.title=pinned?'Allow window to close when clicking outside':'Keep window open when clicking outside';
+  pin.textContent=pinned?'📍':'📌';
+};
 window.translationStatus=value=>status.textContent=value||'';
 window.translationResult=value=>{
   result.value=value||'';
@@ -302,6 +322,7 @@ end
 
 local function showCustomAIWindow(text, config)
     destroyTranslationWindow()
+    translationWindowPinned = false
     translationUsercontent = webview.usercontent.new("translationWindow")
     translationUsercontent:setCallback(function(message)
         message = normalizeMessage(message)
@@ -312,6 +333,13 @@ local function showCustomAIWindow(text, config)
             if type(body.text) == "string" and body.text ~= "" then
                 pasteboard.setContents(body.text)
                 destroyTranslationWindow()
+            end
+        elseif body.action == "pin" and type(body.pinned) == "boolean" then
+            translationWindowPinned = body.pinned
+            if translationWindow then
+                translationWindow:evaluateJavaScript(
+                    "window.translationPinned && window.translationPinned(" .. tostring(translationWindowPinned) .. ");"
+                )
             end
         elseif body.action == "resize" and type(body.contentHeight) == "number" then
             local currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
@@ -360,7 +388,7 @@ local function showCustomAIWindow(text, config)
     translationWindow:allowTextEntry(true)
     translationWindow:windowTitle(config.label)
     translationWindow:windowCallback(function(action, _, focused)
-        if action == "focusChange" and focused == false and translationWindow then
+        if action == "focusChange" and focused == false and translationWindow and not translationWindowPinned then
             destroyTranslationWindow()
         end
     end)
