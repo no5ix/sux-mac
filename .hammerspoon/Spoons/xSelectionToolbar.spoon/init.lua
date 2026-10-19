@@ -177,11 +177,52 @@ function obj:start()
         end
         local app = hs.application.frontmostApplication()
         if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
-        -- Only show the toolbar when Accessibility confirms a non-empty selection.
-        -- Do not synthesize Cmd+C on ordinary clicks: that can copy unrelated content.
+        -- Accessibility is the primary signal. Some apps (notably web views and
+        -- editor controls) expose selection only intermittently, so use a guarded
+        -- clipboard fallback only when the focused AX element is text-selectable.
         local value = selectionFromAccessibility()
         if value == "" then
-            lastText = ""
+            local ok, canSelect = pcall(function()
+                local system = hs.axuielement.systemElement()
+                local focused = system and system:attributeValue("AXFocusedUIElement")
+                if not focused then return false end
+                local role = focused:attributeValue("AXRole") or ""
+                local subrole = focused:attributeValue("AXSubrole") or ""
+                local editable = focused:attributeValue("AXEditable")
+                local settable, selected = focused:isAttributeSettable("AXSelectedText")
+                return role == "AXTextField" or role == "AXTextArea"
+                    or role == "AXTextView" or subrole == "AXTextField"
+                    or editable == true or settable == true
+            end)
+            if not ok or not canSelect then
+                lastText = ""
+                return
+            end
+
+            local previousClipboard = pasteboard.getContents()
+            local previousCount = pasteboard.changeCount()
+            hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
+            timer.doAfter(0.12, function()
+                local countAfter = pasteboard.changeCount()
+                local copied = trim(pasteboard.getContents())
+                if countAfter == previousCount or copied == "" then return end
+
+                -- Restore the user's clipboard before opening the toolbar. Preserve
+                -- all clipboard flavors when Hammerspoon exposes them as a table.
+                if previousClipboard ~= nil then
+                    pasteboard.setContents(previousClipboard)
+                end
+
+                local freshSelection = selectionFromAccessibility()
+                if freshSelection ~= "" then copied = freshSelection end
+                if copied ~= "" and copied ~= lastText
+                    and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
+                    selectedText = copied
+                    lastText = copied
+                    lastShownAt = hs.timer.secondsSinceEpoch()
+                    buildToolbar(copied)
+                end
+            end)
             return
         end
         if value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
