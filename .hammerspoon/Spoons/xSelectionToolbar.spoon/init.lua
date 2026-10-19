@@ -63,13 +63,13 @@ local function getToolbarHTML(text)
     for _, config in ipairs(CUSTOM_AI_BUTTONS) do
         local action = customActionName(config)
         customButtons[#customButtons + 1] =
-            '<button class="custom-ai-button" data-action="' .. htmlEscape(action) ..
-            '" aria-label="' .. htmlEscape(config.label) .. '" title="' .. htmlEscape(config.label) ..
-            '" onclick="action(\'' .. htmlEscape(action) .. '\')"><span class="icon" aria-hidden="true">' ..
-            htmlEscape(config.icon) .. '</span><span class="custom-ai-label">' ..
-            htmlEscape(config.label) .. '</span></button>'
+            "<button class=\"custom-ai-button\" data-action=\"" .. htmlEscape(action) ..
+            "\" aria-label=\"" .. htmlEscape(config.label) .. "\" title=\"" .. htmlEscape(config.label) ..
+            "\" onclick=\"action('" .. htmlEscape(action) .. "')\"><span class=\"icon\" aria-hidden=\"true\">" ..
+            htmlEscape(config.icon) .. "</span><span class=\"custom-ai-label\">" ..
+            htmlEscape(config.label) .. "</span></button>"
     end
-    local customButtonsHTML = table.concat(customButtons, "\\n")
+    local customButtonsHTML = table.concat(customButtons, "\n")
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -648,7 +648,7 @@ local function buildToolbar(text)
     buttonWidths[#buttonWidths + 1] = 38 -- Youdao Dictionary
     local gap, padding = 4, 6
     local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
-    local toolbarWidth = 2 + padding * 2 + gap * (#buttonWidths - 1) + separatorWidthWithMargins
+    local toolbarWidth = 2 + padding * 2 + gap * #buttonWidths + separatorWidthWithMargins
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 8
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
