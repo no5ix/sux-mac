@@ -144,10 +144,13 @@ local function buildToolbar(text)
     toolbar:bringToFront()
 end
 function obj:start()
-    if selectionWatcher then selectionWatcher:stop() end
-    if mouseSelectionTap then mouseSelectionTap:stop() end
+    if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
+    if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
+
     local lastText = ""
     local lastShownAt = 0
+    local pendingCapture = false
+
     local function selectionFromAccessibility()
         local ok, value = pcall(function()
             local function walk(element)
@@ -166,7 +169,23 @@ function obj:start()
         end)
         return ok and trim(value) or ""
     end
+
+    local function showIfSelection(value)
+        value = trim(value)
+        if value == "" then return false end
+        local now = hs.timer.secondsSinceEpoch()
+        if value ~= lastText and (now - lastShownAt) > 0.6 then
+            selectedText = value
+            lastText = value
+            lastShownAt = now
+            buildToolbar(value)
+            return true
+        end
+        return false
+    end
+
     local function captureAfterMouseSelection()
+        if pendingCapture then return end
         if toolbar and toolbar:isVisible() then
             local point = hs.mouse.absolutePosition()
             local frame = toolbar:frame()
@@ -175,80 +194,88 @@ function obj:start()
             if not inside then hideToolbar() end
             return
         end
+
         local app = hs.application.frontmostApplication()
         if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
-        -- Accessibility is the primary signal. Some apps (notably web views and
-        -- editor controls) expose selection only intermittently, so use a guarded
-        -- clipboard fallback only when the focused AX element is text-selectable.
+
+        -- First use native Accessibility selection, which does not touch the clipboard.
         local value = selectionFromAccessibility()
-        if value == "" then
-            local ok, canSelect = pcall(function()
-                local system = hs.axuielement.systemElement()
-                local focused = system and system:attributeValue("AXFocusedUIElement")
-                if not focused then return false end
-                local role = focused:attributeValue("AXRole") or ""
-                local subrole = focused:attributeValue("AXSubrole") or ""
-                local editable = focused:attributeValue("AXEditable")
-                local settable, selected = focused:isAttributeSettable("AXSelectedText")
-                return role == "AXTextField" or role == "AXTextArea"
-                    or role == "AXTextView" or subrole == "AXTextField"
-                    or editable == true or settable == true
-            end)
-            if not ok or not canSelect then
-                lastText = ""
-                return
-            end
+        if showIfSelection(value) then return end
 
-            local previousClipboard = pasteboard.getContents()
-            local previousCount = pasteboard.changeCount()
-            hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
-            timer.doAfter(0.12, function()
-                local countAfter = pasteboard.changeCount()
-                local copied = trim(pasteboard.getContents())
-                if countAfter == previousCount or copied == "" then return end
-
-                -- Restore the user's clipboard before opening the toolbar. Preserve
-                -- all clipboard flavors when Hammerspoon exposes them as a table.
-                if previousClipboard ~= nil then
-                    pasteboard.setContents(previousClipboard)
-                end
-
-                local freshSelection = selectionFromAccessibility()
-                if freshSelection ~= "" then copied = freshSelection end
-                if copied ~= "" and copied ~= lastText
-                    and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
-                    selectedText = copied
-                    lastText = copied
-                    lastShownAt = hs.timer.secondsSinceEpoch()
-                    buildToolbar(copied)
-                end
-            end)
-            return
-        end
-        if value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
-            selectedText = value
-            lastText = value
-            lastShownAt = hs.timer.secondsSinceEpoch()
-            buildToolbar(value)
-        end
+        -- Fallback only on a mouse-up following a real drag. Ordinary clicks and menu
+        -- clicks should never synthesize Cmd+C or open the toolbar.
+        -- eventtap's mouse-up callback below records whether the pointer moved while down.
     end
-    -- Observe mouse release rather than polling AXSelectedText alone. Text selection
-    -- in most apps is finalized when the mouse button is released.
-    mouseSelectionTap = hs.eventtap.new({ hs.eventtap.event.types.leftMouseUp }, function()
-        timer.doAfter(0.08, captureAfterMouseSelection)
+
+    local mouseDownPoint = nil
+    local mouseDragDistance = 0
+    mouseSelectionTap = hs.eventtap.new({
+        hs.eventtap.event.types.leftMouseDown,
+        hs.eventtap.event.types.leftMouseDragged,
+        hs.eventtap.event.types.leftMouseUp
+    }, function(event)
+        local eventType = event:getType()
+        if eventType == hs.eventtap.event.types.leftMouseDown then
+            local p = hs.mouse.absolutePosition()
+            mouseDownPoint = { x = p.x, y = p.y }
+            mouseDragDistance = 0
+            return false
+        elseif eventType == hs.eventtap.event.types.leftMouseDragged then
+            if mouseDownPoint then
+                local p = hs.mouse.absolutePosition()
+                local dx, dy = p.x - mouseDownPoint.x, p.y - mouseDownPoint.y
+                mouseDragDistance = math.max(mouseDragDistance, math.sqrt(dx * dx + dy * dy))
+            end
+            return false
+        elseif eventType == hs.eventtap.event.types.leftMouseUp then
+            local didDrag = mouseDragDistance >= 4
+            mouseDownPoint = nil
+            mouseDragDistance = 0
+            timer.doAfter(0.12, function()
+                if toolbar and toolbar:isVisible() then
+                    local p = hs.mouse.absolutePosition()
+                    local f = toolbar:frame()
+                    if p.x < f.x or p.x > f.x + f.w or p.y < f.y or p.y > f.y + f.h then
+                        hideToolbar()
+                    end
+                    return
+                end
+
+                local app = hs.application.frontmostApplication()
+                if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                local value = selectionFromAccessibility()
+                if showIfSelection(value) then return end
+                if not didDrag or pendingCapture then return end
+
+                -- Clipboard fallback is only attempted for a drag gesture, never a plain click.
+                pendingCapture = true
+                local oldClipboard = pasteboard.getContents()
+                local oldCount = pasteboard.changeCount()
+                hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
+                timer.doAfter(0.16, function()
+                    local newCount = pasteboard.changeCount()
+                    local copied = trim(pasteboard.getContents())
+                    if oldClipboard ~= nil and newCount ~= oldCount then pasteboard.setContents(oldClipboard) end
+                    pendingCapture = false
+                    if newCount ~= oldCount and copied ~= "" then
+                        local axValue = selectionFromAccessibility()
+                        showIfSelection(axValue ~= "" and axValue or copied)
+                    end
+                end)
+            end)
+            return false
+        end
         return false
     end)
     mouseSelectionTap:start()
-    -- Also monitor Accessibility for apps where keyboard selection updates without mouse input.
-    selectionWatcher = hs.timer.doEvery(0.45, function()
+
+    -- Accessibility polling supports keyboard-based selection (Shift+Arrow, etc.).
+    selectionWatcher = hs.timer.doEvery(0.35, function()
         if toolbar and toolbar:isVisible() then return end
         local value = selectionFromAccessibility()
-        if value ~= "" and value ~= lastText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.6 then
-            selectedText = value
-            lastText = value
-            lastShownAt = hs.timer.secondsSinceEpoch()
-            buildToolbar(value)
-        elseif value == "" then
+        if value ~= "" then
+            showIfSelection(value)
+        elseif not pendingCapture then
             lastText = ""
         end
     end)
