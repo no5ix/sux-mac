@@ -16,6 +16,7 @@ local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local previousApplication = nil
+local previousWindow = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
 local visibleIndices = {}
@@ -26,6 +27,38 @@ local panelScreenUUID = nil
 local function decodeImage(entry)
     if not entry or not entry.imageData then return nil end
     return hs.image.imageFromURL(entry.imageData)
+end
+
+-- Capture the exact focused window so paste can return to it without raising
+-- every window belonging to the same application.
+local function capturePreviousWindow()
+    local win = hs.window.frontmostWindow()
+    if win and win:application()
+        and win:application():bundleID() ~= "org.hammerspoon.Hammerspoon" then
+        previousWindow = win
+        previousApplication = win:application()
+    else
+        previousWindow = nil
+    end
+end
+
+local function restorePreviousWindow()
+    -- Prefer the exact window. Focusing it avoids application:activate(true),
+    -- which may raise other windows from the same application.
+    if previousWindow then
+        local ok = pcall(function()
+            if previousWindow:isValid() then
+                previousWindow:focus()
+            else
+                previousWindow = nil
+            end
+        end)
+        if ok and previousWindow then return end
+    end
+
+    -- If Hammerspoon could not focus the original window, rely on macOS's
+    -- normal app/window focus restoration rather than activating the whole app.
+    if clipboard_webview then clipboard_webview:hide() end
 end
 
 local function clearClipboardHistory()
@@ -343,17 +376,15 @@ local function pasteHistoryEntry(index)
     end
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
-        -- Restore focus to the app that was active before the history panel opened.
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
-        hs.timer.doAfter(0.35, function()
+        restorePreviousWindow()
+        hs.timer.doAfter(0.2, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
                 restoreNewestClipContent()
                 pasteboard_watcher:start()
                 menuData = {}
                 previousApplication = nil
+                previousWindow = nil
             end)
         end)
     end)
@@ -516,13 +547,11 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
-    -- Restore the app that was frontmost before the panel opened before any
-    -- paste keystrokes are sent.
+    -- Restore the exact previously focused window; do not activate the entire
+    -- application, which can bring all of its windows forward.
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
-        hs.timer.doAfter(0.35, function()
+        restorePreviousWindow()
+        hs.timer.doAfter(0.2, function()
             -- The web panel lists newest-first; the recursive routine walks
             -- selected row -> newest row, which pastes oldest-to-newest.
             pasteAllWithDelimiterRecursionVersion(startRow)
@@ -537,11 +566,13 @@ function showClipboardHistory()
     -- Remember the app that should receive a paste before the panel takes focus.
     local frontApp = application.frontmostApplication()
     if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
-        previousApplication = frontApp
+        capturePreviousWindow()
     elseif previousApplication and previousApplication:isRunning() then
-        -- Preserve the app remembered before an immediate repeated hotkey.
+        -- Preserve the saved destination if the shortcut is triggered again
+        -- while the clipboard panel is already the frontmost window.
     else
         previousApplication = nil
+        previousWindow = nil
     end
     suppressFocusDismiss = true
     menuData = {}
