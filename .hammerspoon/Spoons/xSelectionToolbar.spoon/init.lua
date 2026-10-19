@@ -25,6 +25,15 @@ local function hideToolbar()
     if toolbar then toolbar:hide() end
 end
 
+local function normalizeMessage(message)
+    -- hs.webview.usercontent passes a WKScriptMessage table; the posted JS
+    -- object is in message.body, not at the top level.
+    if type(message) == "table" and type(message.body) == "table" then
+        return message.body
+    end
+    return message
+end
+
 local function getToolbarHTML(text)
     -- Hammerspoon hs.json.encode expects a table, so encode the selection as
     -- a single-element array and extract the JSON-escaped string literal.
@@ -72,6 +81,7 @@ end
 
 local function onToolbarMessage(message)
     logger.i("Toolbar message received: " .. tostring(type(message)))
+    message = normalizeMessage(message)
     if type(message) ~= "table" then
         hs.alert.show("Toolbar message was not decoded")
         return
@@ -153,7 +163,14 @@ function obj:start()
         return ok and trim(value) or ""
     end
     local function captureAfterMouseSelection()
-        if toolbar and toolbar:isVisible() then return end
+        if toolbar and toolbar:isVisible() then
+            local point = hs.mouse.absolutePosition()
+            local frame = toolbar:frame()
+            local inside = point.x >= frame.x and point.x <= frame.x + frame.w
+                and point.y >= frame.y and point.y <= frame.y + frame.h
+            if not inside then hideToolbar() end
+            return
+        end
         local app = hs.application.frontmostApplication()
         if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
         local value = selectionFromAccessibility()
