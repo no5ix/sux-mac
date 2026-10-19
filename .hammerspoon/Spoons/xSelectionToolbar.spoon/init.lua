@@ -45,11 +45,11 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:14px;font-size:14px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:#202124;background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered,button[data-hovered="true"]{background-color:#d8dee9!important;box-shadow:inset 0 0 0 1px rgba(40,50,70,.18)!important;outline:none!important}button:active{background-color:#c5ccd8!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
-<button data-action="copy" onclick="action('copy')"><span class="icon" aria-hidden="true">⧉</span> Copy</button>
+<button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
-<button data-action="chatgpt" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">✦</span> ChatGPT</button>
+<button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
@@ -185,10 +185,12 @@ local function buildToolbar(text)
         local p = hs.mouse.absolutePosition()
         local f = toolbar:frame()
         local lx, ly = p.x - f.x, p.y - f.y
-        -- evaluateJavaScript is asynchronous in Hammerspoon, so use its callback
-        -- to read the hovered button and only then update highlight state.
+        -- WebKit JavaScript is asynchronous. Return button rectangles and the
+        -- hovered action in one callback, then apply a simple state update.
+        -- Use the native window coordinates against DOM rectangles; this remains
+        -- stable when the emoji fonts or toolbar width differ from expectations.
         local script = string.format(
-            "(()=>{const x=%d,y=%d;const e=document.elementFromPoint(x,y);const b=e&&e.closest('[data-action]');return b?b.getAttribute('data-action'):'';})()",
+            "(()=>{const x=%d,y=%d;return Array.from(document.querySelectorAll('.bar button')).map(b=>{const r=b.getBoundingClientRect();return {action:b.getAttribute('data-action'),left:r.left,top:r.top,right:r.right,bottom:r.bottom};}).find(r=>x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)?.action||'';})()",
             math.floor(lx), math.floor(ly)
         )
         toolbar:evaluateJavaScript(script, function(actionUnderMouse, err)
@@ -198,7 +200,7 @@ local function buildToolbar(text)
             local highlightScript = "document.querySelectorAll('.bar button').forEach(function(b){" ..
                 "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
                 "b.classList.toggle('is-hovered',h);" ..
-                "b.style.setProperty('cursor','pointer','important');" ..
+                "b.setAttribute('data-hovered',h?'true':'false');" ..
                 "});"
             toolbar:evaluateJavaScript(highlightScript)
         end)
