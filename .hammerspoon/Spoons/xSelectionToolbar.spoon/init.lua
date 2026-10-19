@@ -8,6 +8,7 @@ local json = require("hs.json")
 local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
+local hoverWatcher = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -43,37 +44,14 @@ local function getToolbarHTML(text)
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
-<button onclick="action('copy')">Copy</button>
-<button onclick="action('doubao')">Proofread + translate</button>
+<button data-action="copy" onclick="action('copy')">Copy</button>
+<button data-action="doubao" onclick="action('doubao')">Proofread + translate</button>
 <span class="separator"></span>
-<button onclick="action('youdao-result')">Youdao Result</button>
-<button onclick="action('youdao-word')">Youdao Dictionary</button>
+<button data-action="youdao-result" onclick="action('youdao-result')">Youdao Result</button>
+<button data-action="youdao-word" onclick="action('youdao-word')">Youdao Dictionary</button>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-const buttons = Array.from(document.querySelectorAll('.bar button'));
-function updateHoveredButton(event) {
-  const target = document.elementFromPoint(event.clientX, event.clientY);
-  buttons.forEach(button => {
-    const hit = target && (target === button || button.contains(target));
-    button.classList.toggle('is-hovered', Boolean(hit));
-    if (hit) button.style.setProperty('cursor', 'pointer', 'important');
-  });
-}
-document.addEventListener('mousemove', updateHoveredButton, true);
-document.addEventListener('mouseover', updateHoveredButton, true);
-document.addEventListener('mouseleave', () => buttons.forEach(b => b.classList.remove('is-hovered')), true);
-buttons.forEach(button => {
-  button.addEventListener('mouseenter', () => button.classList.add('is-hovered'));
-  button.addEventListener('mouseleave', () => button.classList.remove('is-hovered'));
-  button.addEventListener('click', () => {
-    button.classList.add('is-hovered');
-    button.style.setProperty('cursor', 'pointer', 'important');
-  });
-  button.style.setProperty('cursor', 'pointer', 'important');
-});
-document.documentElement.style.setProperty('cursor', 'default');
-
 </script></body></html>
 ]=]
     return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
@@ -135,7 +113,8 @@ local function onToolbarMessage(message)
     end
 end
 local function buildToolbar(text)
-    if toolbar then toolbar:delete() end
+    if toolbar then toolbar:delete(); toolbar = nil end
+    if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
@@ -162,8 +141,38 @@ local function buildToolbar(text)
     if y < frame.y + 8 then y = point.y + 18 end
     y = math.max(frame.y + 8, math.min(y, frame.y + frame.h - height - 8))
     toolbar:frame({ x = x, y = y, w = width, h = height })
+
     toolbar:show()
     toolbar:bringToFront()
+
+    -- Drive hover highlighting from native Hammerspoon mouse coordinates,
+    -- avoiding dependence on WKWebView CSS hover/mouse event delivery.
+    hoverWatcher = hs.timer.doEvery(0.035, function()
+        if not toolbar or not toolbar:isVisible() then
+            if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+            return
+        end
+        local p = hs.mouse.absolutePosition()
+        local f = toolbar:frame()
+        local lx, ly = p.x - f.x, p.y - f.y
+        local targetAction = ""
+        if ly >= 5 and ly <= 52 then
+            if lx >= 7 and lx <= 73 then
+                targetAction = "copy"
+            elseif lx >= 77 and lx <= 251 then
+                targetAction = "doubao"
+            elseif lx >= 255 and lx <= 378 then
+                targetAction = "youdao-result"
+            elseif lx >= 382 and lx <= 527 then
+                targetAction = "youdao-word"
+            end
+        end
+        local script = string.format(
+            "document.querySelectorAll('.bar button').forEach(function(b){var h=b.getAttribute('data-action')===%q;b.classList.toggle('is-hovered',h);b.style.setProperty('cursor',h?'pointer':'default','important');});",
+            targetAction
+        )
+        pcall(function() toolbar:evaluateJavaScript(script) end)
+    end)
 end
 function obj:start()
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
@@ -300,6 +309,7 @@ function obj:start()
     return self
 end
 function obj:stop()
+    if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
