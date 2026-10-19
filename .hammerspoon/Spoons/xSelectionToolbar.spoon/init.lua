@@ -263,7 +263,8 @@ local function showTranslationWindow(text)
         if body.action == "copy" then
             if type(body.text) == "string" and body.text ~= "" then
                 pasteboard.setContents(body.text)
-                hs.alert.show("Translation copied")
+                if translationAppearancePoll then translationAppearancePoll:stop(); translationAppearancePoll = nil end
+                if translationWindow then translationWindow:hide() end
             end
         elseif body.action == "translate" then
             local sourceText = trim(body.text)
@@ -274,7 +275,30 @@ local function showTranslationWindow(text)
             sendTranslationRequest(sourceText)
         end
     end)
-    translationWindow = webview.new({x=180,y=160,w=420,h=230}, {
+    local mousePoint = hs.mouse.absolutePosition()
+    local targetScreen = hs.mouse.getCurrentScreen()
+    if not targetScreen then
+        for _, screen in ipairs(hs.screen.allScreens()) do
+            local frame = screen:fullFrame()
+            if mousePoint.x >= frame.x and mousePoint.x < frame.x + frame.w
+                and mousePoint.y >= frame.y and mousePoint.y < frame.y + frame.h then
+                targetScreen = screen
+                break
+            end
+        end
+    end
+    targetScreen = targetScreen or hs.screen.mainScreen()
+    local screenFrame = targetScreen:frame()
+    local windowWidth, windowHeight = 420, 230
+    local windowX = math.max(screenFrame.x, math.min(mousePoint.x - windowWidth / 2, screenFrame.x + screenFrame.w - windowWidth))
+    local windowY = math.max(screenFrame.y, math.min(mousePoint.y - windowHeight - 18, screenFrame.y + screenFrame.h - windowHeight))
+    if windowY <= mousePoint.y - windowHeight - 18 then
+        -- Keep the popup above the pointer when space allows; otherwise show below it.
+        if mousePoint.y - windowHeight - 18 < screenFrame.y then
+            windowY = math.min(mousePoint.y + 18, screenFrame.y + screenFrame.h - windowHeight)
+        end
+    end
+    translationWindow = webview.new({x=windowX,y=windowY,w=windowWidth,h=windowHeight}, {
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = false,
