@@ -228,6 +228,11 @@ local function translationJSCall(functionName, value)
 end
 
 local function destroyTranslationWindow()
+    -- Restore the standard window level before clearing the pinned popup.
+    if translationWindow then
+        pcall(function() translationWindow:level(hs.drawing.windowLevels.normal) end)
+    end
+    translationWindowPinned = false
     -- Invalidate callbacks from any request associated with the old popup.
     translationRequestId = translationRequestId + 1
     if translationRequestTask then
@@ -337,6 +342,15 @@ local function showCustomAIWindow(text, config)
         elseif body.action == "pin" and type(body.pinned) == "boolean" then
             translationWindowPinned = body.pinned
             if translationWindow then
+                if translationWindowPinned then
+                    -- Raise the response above normal application windows and keep it there.
+                    translationWindow:level(hs.drawing.windowLevels.screenSaver)
+                    translationWindow:bringToFront(true)
+                    translationWindow:hswindow():focus()
+                else
+                    translationWindow:level(hs.drawing.windowLevels.normal)
+                    translationWindow:bringToFront(true)
+                end
                 translationWindow:evaluateJavaScript(
                     "window.translationPinned && window.translationPinned(" .. tostring(translationWindowPinned) .. ");"
                 )
@@ -387,6 +401,7 @@ local function showCustomAIWindow(text, config)
     translationWindow:windowStyle({"titled","closable","resizable"})
     translationWindow:allowTextEntry(true)
     translationWindow:windowTitle(config.label)
+    translationWindow:level(hs.drawing.windowLevels.normal)
     translationWindow:windowCallback(function(action, _, focused)
         if action == "focusChange" and focused == false and translationWindow and not translationWindowPinned then
             destroyTranslationWindow()
