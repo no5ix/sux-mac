@@ -559,9 +559,10 @@ end
 function showClipboardHistory()
     pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
 
-    -- Remember the app that should receive a paste before the panel takes focus.
-    local frontApp = application.frontmostApplication()
-    if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
+    -- Remember the exact window that should receive the paste before the panel takes focus.
+    local frontWindow = hs.window.frontmostWindow()
+    local frontApplication = frontWindow and frontWindow:application()
+    if frontApplication and frontApplication:bundleID() ~= "org.hammerspoon.Hammerspoon" then
         capturePreviousWindow()
     elseif previousWindow then
         -- Preserve the exact saved destination if the shortcut is triggered
