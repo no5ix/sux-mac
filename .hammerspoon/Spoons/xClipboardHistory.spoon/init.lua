@@ -211,13 +211,11 @@ local function historyItemHTML(entry, index)
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
     end
     local content = tostring(entry.data or "")
-    -- Keep the displayed text exactly as captured. Only collapse line breaks
-    -- for card preview; do not run any character filtering or normalization.
-    local previewText = content:gsub("\\r\\n", " "):gsub("[\\r\\n]", " ")
-    if #previewText > display_max_text_length then previewText = previewText:sub(1, display_max_text_length) .. "…" end
-    -- If an image MIME payload ever arrives as clipboard text, don't expose a
-    -- huge data:image URL as if it were ordinary text. Render a bounded marker.
-    if isImageDataURL(content) then
+    -- Render the captured clipboard string directly. Do not transform its
+    -- characters in Lua; CSS handles line wrapping and clipping in the card.
+    -- This makes the preview a faithful view of the actual saved clipboard data.
+    local previewText = content
+    if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
     end
     return '<button class="item text-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
@@ -269,7 +267,7 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 .meta { padding:9px 2px 1px; }
 .kind { font-size:10px; letter-spacing:.12em; color:#93b5ff; font-weight:700; }
 .stamp { color:#b8beca; font-size:11px; margin-top:5px; }
-.text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.45; }
+.text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:#8e96a5; font-size:10px; margin-top:8px; }
 .empty { color:#9ca3b1; text-align:center; padding:40px 12px; grid-column:1/-1; }
 footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-size:11px; }
