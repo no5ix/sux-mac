@@ -160,20 +160,19 @@ local function buildToolbar(text)
     -- to the actual content width, then keep it inside the current screen.
     timer.doAfter(0.08, function()
         if not toolbar then return end
-        local ok, size = pcall(function()
-            return toolbar:evaluateJavaScript(
-                "({width: Math.ceil(document.querySelector('.bar').getBoundingClientRect().width), height: Math.ceil(document.querySelector('.bar').getBoundingClientRect().height)})"
-            )
-        end)
-        if ok and type(size) == "table" and tonumber(size.width) then
-            local actualWidth = math.max(100, math.min(tonumber(size.width), frame.w - 16))
-            local currentPoint = hs.mouse.absolutePosition()
-            local newX = math.max(frame.x + 8, math.min(currentPoint.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
-            local newY = currentPoint.y - height - 14
-            if newY < frame.y + 8 then newY = currentPoint.y + 18 end
-            newY = math.max(frame.y + 8, math.min(newY, frame.y + frame.h - height - 8))
-            toolbar:frame({ x = newX, y = newY, w = actualWidth, h = height })
-        end
+        toolbar:evaluateJavaScript(
+            "({width: Math.ceil(document.querySelector('.bar').getBoundingClientRect().width), height: Math.ceil(document.querySelector('.bar').getBoundingClientRect().height)})",
+            function(size, err)
+                if err or type(size) ~= "table" or not tonumber(size.width) or not toolbar then return end
+                local actualWidth = math.max(100, math.min(tonumber(size.width), frame.w - 16))
+                local currentPoint = hs.mouse.absolutePosition()
+                local newX = math.max(frame.x + 8, math.min(currentPoint.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
+                local newY = currentPoint.y - height - 14
+                if newY < frame.y + 8 then newY = currentPoint.y + 18 end
+                newY = math.max(frame.y + 8, math.min(newY, frame.y + frame.h - height - 8))
+                toolbar:frame({ x = newX, y = newY, w = actualWidth, h = height })
+            end
+        )
     end)
 
     -- Drive hover highlighting from native Hammerspoon mouse coordinates,
@@ -186,22 +185,23 @@ local function buildToolbar(text)
         local p = hs.mouse.absolutePosition()
         local f = toolbar:frame()
         local lx, ly = p.x - f.x, p.y - f.y
-        local actionLiteral = string.format("%q", "")
-        -- Ask WebKit for each button's actual DOM rectangle, so hidden buttons and
-        -- adaptive toolbar sizing cannot invalidate hover hit testing.
+        -- evaluateJavaScript is asynchronous in Hammerspoon, so use its callback
+        -- to read the hovered button and only then update highlight state.
         local script = string.format(
             "(()=>{const x=%d,y=%d;const e=document.elementFromPoint(x,y);const b=e&&e.closest('[data-action]');return b?b.getAttribute('data-action'):'';})()",
             math.floor(lx), math.floor(ly)
         )
-        local ok, actionUnderMouse = pcall(function() return toolbar:evaluateJavaScript(script) end)
-        local targetAction = ok and type(actionUnderMouse) == "string" and actionUnderMouse or ""
-        local actionLiteral = string.format("%q", targetAction)
-        local highlightScript = "document.querySelectorAll('.bar button').forEach(function(b){" ..
-            "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
-            "b.classList.toggle('is-hovered',h);" ..
-            "b.style.setProperty('cursor','pointer','important');" ..
-            "});"
-        pcall(function() toolbar:evaluateJavaScript(highlightScript) end)
+        toolbar:evaluateJavaScript(script, function(actionUnderMouse, err)
+            if err or not toolbar then return end
+            local targetAction = type(actionUnderMouse) == "string" and actionUnderMouse or ""
+            local actionLiteral = string.format("%q", targetAction)
+            local highlightScript = "document.querySelectorAll('.bar button').forEach(function(b){" ..
+                "var h=b.getAttribute('data-action')===" .. actionLiteral .. ";" ..
+                "b.classList.toggle('is-hovered',h);" ..
+                "b.style.setProperty('cursor','pointer','important');" ..
+                "});"
+            toolbar:evaluateJavaScript(highlightScript)
+        end)
     end)
 end
 function obj:start()
