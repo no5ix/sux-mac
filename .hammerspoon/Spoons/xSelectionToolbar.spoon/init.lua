@@ -57,8 +57,9 @@ document.querySelectorAll('.bar button').forEach(button => {
     button.style.background = '#e0e3e9';
     button.style.cursor = 'pointer';
   });
-  button.addEventListener('mouseleave', () {
+  button.addEventListener('mouseleave', () => {
     button.style.background = 'transparent';
+    button.style.cursor = 'default';
   });
 });
 </script></body></html>
