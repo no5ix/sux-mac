@@ -415,22 +415,7 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
 end
 
 -- Function to show clipboard history
-function showClipboardHistory()
-    pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
-
-    -- Remember the app that should receive a paste before the panel takes focus.
-    local frontApp = application.frontmostApplication()
-    if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
-        previousApplication = frontApp
-    elseif previousApplication and previousApplication:isRunning() then
-        -- Preserve the app remembered before an immediate repeated hotkey.
-    else
-        previousApplication = nil
-    end
-    suppressFocusDismiss = true
-    menuData = {}
-
-    function insertToMenuData(v, type, unixTs)
+local function insertToMenuData(v, type, unixTs)
         -- print("unixTs " .. tostring(unixTs))
         local dateTimeStr = "[" .. os.date("%Y-%m-%d %H:%M:%S", unixTs) .. "] "
         if type == "text" then
@@ -451,7 +436,21 @@ function showClipboardHistory()
                 historyEntry = v
             })
         end
+end
+
+function showClipboardHistory()
+    pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
+
+    -- Remember the app that should receive a paste before the panel takes focus.
+    local frontApp = application.frontmostApplication()
+    if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
+        previousApplication = frontApp
+    elseif not (previousApplication and previousApplication:isRunning()) then
+        previousApplication = nil
     end
+    suppressFocusDismiss = true
+    menuData = {}
+
 
     -- add all the text and img history into the menuData
     local i = #text_clipboard_history
