@@ -44,7 +44,7 @@ local function getToolbarHTML(text)
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-family:inherit;font-size:13px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered{background-color:#e0e3e9!important;outline:none!important}button:active{background-color:#cbd0d9!important}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
-<button data-action="copy" style="cursor:pointer" onmouseenter="this.style.background='#e2e5eb';this.style.cursor='pointer'" onmouseleave="this.style.background='transparent'" onclick="action('copy')">Copy</button>
+<button data-action="copy" onclick="action('copy')">Copy</button>
 <button data-action="doubao" style="cursor:pointer" onmouseenter="this.style.background='#e2e5eb';this.style.cursor='pointer'" onmouseleave="this.style.background='transparent'" onclick="action('doubao')">Proofread + translate</button>
 <span class="separator"></span>
 <button data-action="youdao-result" style="cursor:pointer" onmouseenter="this.style.background='#e2e5eb';this.style.cursor='pointer'" onmouseleave="this.style.background='transparent'" onclick="action('youdao-result')">Youdao Result</button>
@@ -52,16 +52,16 @@ local function getToolbarHTML(text)
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-// Use the same event + direct style mutation that works in Clipboard History.
+// Same direct DOM handlers as the working Clipboard History context-menu button.
 document.querySelectorAll('.bar button').forEach(button => {
   button.style.cursor = 'pointer';
-  button.addEventListener('mouseenter', () => {
-    button.style.background = '#3a4250';
-    button.style.cursor = 'pointer';
+  button.addEventListener('mouseenter', function() {
+    this.style.background = '#e2e5eb';
+    this.style.cursor = 'pointer';
   });
-  button.addEventListener('mouseleave', () => {
-    button.style.background = 'transparent';
-    button.style.cursor = 'pointer';
+  button.addEventListener('mouseleave', function() {
+    this.style.background = 'transparent';
+    this.style.cursor = 'pointer';
   });
 });
 </script></body></html>
@@ -130,16 +130,19 @@ local function buildToolbar(text)
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
-        developerExtrasEnabled = false,
+        javaScriptEnabled = true,
         javaScriptCanOpenWindowsAutomatically = false,
+        privateBrowsing = true,
         transparent = true,
         shadow = false,
         opaque = false
-    }, usercontent)
-    toolbar:windowStyle(0)
-    toolbar:allowTextEntry(false)
+    }, usercontent):windowStyle({"titled"})
+    -- Match the working Clipboard History panel's webview initialization:
+    -- use a normal webview window so WebKit consistently receives pointer events.
+    toolbar:allowTextEntry(true)
     toolbar:transparent(true)
     toolbar:shadow(false)
+    toolbar:titleVisibility("hidden")
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
     toolbar:html(getToolbarHTML(text), "file:///")
