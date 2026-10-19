@@ -22,6 +22,22 @@ local DOUbao_PROMPT = [[Please proofread the following text. Make minimal change
 local CHATGPT_URL = "https://chatgpt.com/c/6ad59284-87fc-83ec-aeeb-282992cb1cb7"
 local CHATGPT_PROMPT = [[Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all "um/uh" fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: ]]
 
+local function htmlEscape(value)
+    return tostring(value or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+        :gsub('"', "&quot;"):gsub("'", "&#39;")
+end
+
+local function customActionName(config)
+    return "custom-" .. tostring(config.id or ""):gsub("[^%w_-]", "")
+end
+
+local function customButtonWidth(config)
+    local label = tostring(config.label or "")
+    local ok, count = pcall(function() return utf8.len(label) end)
+    count = ok and count or #label
+    return math.max(58, 42 + count * 7)
+end
+
 local function trim(value)
     return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
@@ -43,6 +59,17 @@ local function getToolbarHTML(text)
     -- a single-element array and extract the JSON-escaped string literal.
     local encoded = json.encode({ text })
     local encodedText = type(encoded) == "table" and encoded[1] or encoded or '""'
+    local customButtons = {}
+    for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+        local action = customActionName(config)
+        customButtons[#customButtons + 1] =
+            '<button class="custom-ai-button" data-action="' .. htmlEscape(action) ..
+            '" aria-label="' .. htmlEscape(config.label) .. '" title="' .. htmlEscape(config.label) ..
+            '" onclick="action(\'' .. htmlEscape(action) .. '\')"><span class="icon" aria-hidden="true">' ..
+            htmlEscape(config.icon) .. '</span><span class="custom-ai-label">' ..
+            htmlEscape(config.label) .. '</span></button>'
+    end
+    local customButtonsHTML = table.concat(customButtons, "\\n")
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -67,7 +94,7 @@ button:active{background-color:var(--toolbar-active)!important}
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
 <button data-action="translation" aria-label="Translation" title="Translate selected text" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span></button>
 <!-- Custom AI buttons are generated from CUSTOM_AI_BUTTONS in Lua. -->
-<button data-action="custom-correct" aria-label="Correct" title="Correct" onclick="action('custom-correct')"><span class="icon" aria-hidden="true">✏️</span></button>
+__CUSTOM_AI_BUTTONS__
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
@@ -76,6 +103,7 @@ const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 </script></body></html>
 ]=]
+    html = html:gsub("__CUSTOM_AI_BUTTONS__", function() return customButtonsHTML end)
     return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
 end
 local function urlEncode(text)
@@ -113,7 +141,7 @@ local CUSTOM_AI_BUTTONS = {
         id = "correct",
         label = "Correct",
         icon = "✏️",
-        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\\n\\n{{text}}",
+        prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\n\n{{text}}",
     },
 }
 
@@ -453,7 +481,7 @@ local function showCustomAIWindow(text, config)
             destroyTranslationWindow()
         end
     end)
-    translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. escapeHTML(config.label) .. "</h1>"), "file:///")
+    translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
     syncTranslationAppearance()
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
@@ -539,10 +567,15 @@ local function onToolbarMessage(message)
     elseif action == "translation" then
         hideToolbar()
         showTranslationWindow(text)
-    elseif action == "custom-correct" then
-        hideToolbar()
-        local config = CUSTOM_AI_BUTTONS[1]
-        if config then showCustomAIWindow(text, config) end
+    elseif type(action) == "string" and action:sub(1, 7) == "custom-" then
+        local actionId = action:sub(8)
+        for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+            if tostring(config.id) == actionId then
+                hideToolbar()
+                showCustomAIWindow(text, config)
+                break
+            end
+        end
     elseif action == "youdao-result" then
         hideToolbar()
         hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
@@ -607,10 +640,15 @@ local function buildToolbar(text)
     toolbar:show()
     toolbar:bringToFront()
     -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
-    local buttonWidths = { 38, 38, 38, 38, 38, 38 }
+    local buttonWidths = { 38, 38, 38 }
+    for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+        buttonWidths[#buttonWidths + 1] = customButtonWidth(config)
+    end
+    buttonWidths[#buttonWidths + 1] = 38 -- Youdao Result
+    buttonWidths[#buttonWidths + 1] = 38 -- Youdao Dictionary
     local gap, padding = 4, 6
     local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
-    local toolbarWidth = 2 + padding * 2 + gap * 6 + separatorWidthWithMargins
+    local toolbarWidth = 2 + padding * 2 + gap * (#buttonWidths - 1) + separatorWidthWithMargins
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 8
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
@@ -634,7 +672,12 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
-            local buttonActions = { "copy", "chatgpt", "translation", "custom-correct", "youdao-result", "youdao-word" }
+            local buttonActions = { "copy", "chatgpt", "translation" }
+            for _, config in ipairs(CUSTOM_AI_BUTTONS) do
+                buttonActions[#buttonActions + 1] = customActionName(config)
+            end
+            buttonActions[#buttonActions + 1] = "youdao-result"
+            buttonActions[#buttonActions + 1] = "youdao-word"
             for i, name in ipairs(buttonActions) do
                 local width = buttonWidths[i]
                 if rx >= cursor and rx <= cursor + width then
@@ -642,7 +685,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 4 then cursor = cursor + separatorWidthWithMargins + gap end
+                if i == 3 + #CUSTOM_AI_BUTTONS then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
