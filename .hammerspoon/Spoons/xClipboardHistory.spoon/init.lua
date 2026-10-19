@@ -7,7 +7,6 @@ local hotkey = require "hs.hotkey"
 local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
 local webview = require "hs.webview"
-local application = require "hs.application"
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
@@ -15,7 +14,6 @@ local menuData = {}  -- Clipboard history data
 local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
-local previousApplication = nil
 local previousWindow = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
@@ -36,7 +34,6 @@ local function capturePreviousWindow()
     if win and win:application()
         and win:application():bundleID() ~= "org.hammerspoon.Hammerspoon" then
         previousWindow = win
-        previousApplication = win:application()
     else
         previousWindow = nil
     end
@@ -383,7 +380,6 @@ local function pasteHistoryEntry(index)
                 restoreNewestClipContent()
                 pasteboard_watcher:start()
                 menuData = {}
-                previousApplication = nil
                 previousWindow = nil
             end)
         end)
@@ -476,7 +472,7 @@ local function finishPasteAll()
     menuData = {}
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
-    previousApplication = nil
+    previousWindow = nil
     hs.alert.show("The Paste task has finished.")
 end
 
@@ -567,11 +563,10 @@ function showClipboardHistory()
     local frontApp = application.frontmostApplication()
     if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
         capturePreviousWindow()
-    elseif previousApplication and previousApplication:isRunning() then
-        -- Preserve the saved destination if the shortcut is triggered again
-        -- while the clipboard panel is already the frontmost window.
+    elseif previousWindow then
+        -- Preserve the exact saved destination if the shortcut is triggered
+        -- again while the clipboard panel is already frontmost.
     else
-        previousApplication = nil
         previousWindow = nil
     end
     suppressFocusDismiss = true
