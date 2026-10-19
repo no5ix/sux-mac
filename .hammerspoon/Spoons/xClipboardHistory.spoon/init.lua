@@ -8,6 +8,7 @@ local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
 local webview = require "hs.webview"
 local application = require "hs.application"
+local logger = hs.logger.new("xClipboardHistory", "info")
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
