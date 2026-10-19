@@ -127,9 +127,15 @@ function handleClipboardChange(content)
             -- print("[handleClipboardChange] img.size.h = " .. content:size()["h"] .. ", img.size.w = " .. content:size()["w"])
             -- print("[handleClipboardChange] img")
         elseif content ~= nil then
-            -- Treat the pasteboard watcher's string as authoritative. Avoid any
-            -- lossy normalization: for example, "interesting" must stay exactly
-            -- "interesting" instead of being reconstructed from character events.
+            -- Read the string directly from the general pasteboard instead of
+            -- relying on a possibly stale/transformed watcher callback argument.
+            -- The watcher signals change-count updates; the pasteboard remains
+            -- the source of truth for the actual clipboard string.
+            local clipboardString = pasteboard.getContents()
+            if type(clipboardString) == "string" then
+                content = clipboardString
+            end
+
             -- Don't add if it's the same as the last entry
             if #text_clipboard_history ~= 0 and 
                 (#img_clipboard_history == 0 or (text_clipboard_history[#text_clipboard_history].ts > img_clipboard_history[#img_clipboard_history].ts)) then
