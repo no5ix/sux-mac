@@ -52,23 +52,17 @@ local function getToolbarHTML(text)
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-// Match the clipboard-history panel's proven direct style changes.
-// Mirror the exact direct-style hover pattern used by the working clipboard
-// history context-menu button. Use bubbling events as a fallback for WKWebView.
+// Use the same event + direct style mutation that works in Clipboard History.
 document.querySelectorAll('.bar button').forEach(button => {
-  const setHover = () => {
-    button.style.background = '#e2e5eb';
+  button.style.cursor = 'pointer';
+  button.addEventListener('mouseenter', () => {
+    button.style.background = '#3a4250';
     button.style.cursor = 'pointer';
-  };
-  const clearHover = () => {
+  });
+  button.addEventListener('mouseleave', () => {
     button.style.background = 'transparent';
     button.style.cursor = 'pointer';
-  };
-  button.addEventListener('mouseenter', setHover);
-  button.addEventListener('mouseover', setHover);
-  button.addEventListener('mouseleave', clearHover);
-  button.addEventListener('mouseout', clearHover);
-  button.style.cursor = 'pointer';
+  });
 });
 </script></body></html>
 ]=]
