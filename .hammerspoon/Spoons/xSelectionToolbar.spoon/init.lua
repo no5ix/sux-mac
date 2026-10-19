@@ -52,14 +52,16 @@ local function getToolbarHTML(text)
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
+// Match the clipboard-history panel's proven direct style changes.
 document.querySelectorAll('.bar button').forEach(button => {
-  button.addEventListener('mouseenter', () => {
-    button.style.background = '#e0e3e9';
-    button.style.cursor = 'pointer';
+  button.style.setProperty('cursor', 'pointer', 'important');
+  button.addEventListener('mouseenter', function() {
+    this.style.setProperty('background-color', '#e0e3e9', 'important');
+    this.style.setProperty('cursor', 'pointer', 'important');
   });
-  button.addEventListener('mouseleave', () => {
-    button.style.background = 'transparent';
-    button.style.cursor = 'default';
+  button.addEventListener('mouseleave', function() {
+    this.style.setProperty('background-color', 'transparent', 'important');
+    this.style.setProperty('cursor', 'pointer', 'important');
   });
 });
 </script></body></html>
