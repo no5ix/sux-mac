@@ -1,0 +1,187 @@
+local obj = {}
+obj.__index = obj
+
+local pasteboard = require("hs.pasteboard")
+local hotkey = require("hs.hotkey")
+local webview = require("hs.webview")
+local application = require("hs.application")
+local timer = require("hs.timer")
+local eventtap = require("hs.eventtap")
+local json = require("hs.json")
+
+local toolbar = nil
+local captureHotkey = nil
+local selectedText = ""
+local previousApp = nil
+local previousWindow = nil
+
+local DOUbao_SHORTCUT = { "ctrl", "shift", "alt" }
+local DOUbao_KEY = "o"
+local DOUbao_PROMPT = [[Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all "um/uh" fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly used in America.Avoid slang that is too extreme or hard to understand: ]]
+
+local function trim(value)
+    return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function hideToolbar()
+    if toolbar then toolbar:hide() end
+end
+
+local function escapeHTML(value)
+    return tostring(value or "")
+        :gsub("&", "&amp;")
+        :gsub("<", "&lt;")
+        :gsub(">", "&gt;")
+        :gsub('"', "&quot;")
+        :gsub("'", "&#39;")
+end
+
+local function scriptString(value)
+    return json.encode({value}) and (function()
+        local encoded = json.encode({ value })
+        return encoded:sub(2, -2)
+    end)() or '""'
+end
+
+local function getToolbarHTML(text)
+    local safeText = escapeHTML(text)
+    local encodedText = scriptString(text)
+    return [[
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin:0; padding:8px; background:transparent; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+.bar { display:flex; align-items:center; gap:4px; width:max-content; max-width:calc(100vw - 16px); padding:6px; border:1px solid rgba(0,0,0,.1); border-radius:12px; background:rgba(250,250,252,.98); box-shadow:0 8px 28px rgba(0,0,0,.22); }
+button { border:0; border-radius:8px; padding:9px 12px; color:#202124; background:transparent; font-size:13px; white-space:nowrap; cursor:pointer; }
+button:hover { background:#e6e8ed; }
+button:active { background:#d8dce4; }
+.separator { width:1px; height:24px; background:#d9dce2; margin:0 2px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button onclick="action('copy')">Copy</button>
+  <button onclick="action('doubao')">Proofread + translate</button>
+  <span class="separator"></span>
+  <button onclick="action('youdao-result')">Youdao Result</button>
+  <button onclick="action('youdao-word')">Youdao Dictionary</button>
+</div>
+<script>
+const selection = ]]==] .. encodedText .. [[===[;
+function action(name) {
+  window.webkit.messageHandlers.selectionToolbar.postMessage({ action: name, text: selection });
+}
+</script>
+</body>
+</html>
+]]
+end
+
+local function urlEncode(text)
+    return tostring(text or ""):gsub("([^%w%-_%.~])", function(ch)
+        return string.format("%%%02X", string.byte(ch))
+    end)
+end
+
+local function runDoubao(text)
+    -- Preserve the text in the pasteboard before switching applications.
+    -- The configured shortcut opens the Doubao window; then paste the prepared prompt.
+    local prompt = DOUbao_PROMPT .. " " .. text
+    pasteboard.setContents(prompt)
+    hideToolbar()
+    eventtap.keyStroke(DOUbao_SHORTCUT, DOUbao_KEY, 0.08)
+    timer.doAfter(0.45, function()
+        eventtap.keyStroke({ "cmd" }, "v", 0.08)
+    end)
+end
+
+local function openSafariURL(url)
+    hideToolbar()
+    hs.task.new("/usr/bin/open", nil, { "-a", "Safari", url }):start()
+end
+
+local function onToolbarMessage(_, message)
+    if type(message) ~= "table" then return end
+    local action = message.action
+    local text = trim(message.text or selectedText)
+    if text == "" then
+        hs.alert.show("No selected text")
+        return
+    end
+
+    if action == "copy" then
+        pasteboard.setContents(text)
+        hideToolbar()
+        hs.alert.show("Copied selection")
+    elseif action == "doubao" then
+        runDoubao(text)
+    elseif action == "youdao-result" then
+        openSafariURL("https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en")
+    elseif action == "youdao-word" then
+        openSafariURL("https://dict.youdao.com/w/" .. urlEncode(text))
+    end
+end
+
+local function buildToolbar(text)
+    if toolbar then toolbar:delete() end
+    toolbar = webview.new({ x = 0, y = 0, w = 550, h = 66 }, {
+        developerExtrasEnabled = false,
+        javaScriptCanOpenWindowsAutomatically = false,
+        transparent = true,
+        shadow = false,
+        windowStyle = { "borderless", "utility" },
+        level = "floating",
+        clickable = true
+    })
+    toolbar:windowStyle({ "borderless", "utility" })
+    toolbar:allowTextEntry(false)
+    toolbar:windowTitle("Selection Actions")
+    toolbar:usercontent().callback = onToolbarMessage
+    toolbar:html(getToolbarHTML(text))
+
+    local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    local frame = screen:fullFrame()
+    local point = hs.mouse.absolutePosition()
+    local width, height = 550, 66
+    local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
+    local y = point.y - height - 14
+    if y < frame.y + 8 then y = point.y + 18 end
+    y = math.max(frame.y + 8, math.min(y, frame.y + frame.h - height - 8))
+    toolbar:frame({ x = x, y = y, w = width, h = height })
+    toolbar:show()
+end
+
+function obj:start()
+    if captureHotkey then captureHotkey:delete() end
+    -- Select text, then press Ctrl+Alt+Shift+S to capture it and show actions.
+    captureHotkey = hotkey.bind({ "ctrl", "alt", "shift" }, "s", function()
+        previousApp = application.frontmostApplication()
+        previousWindow = hs.window.frontmostWindow()
+        local oldContents = pasteboard.getContents()
+        -- Copy selection temporarily, then restore clipboard when no action needs it.
+        eventtap.keyStroke({ "cmd" }, "c", 0.03)
+        timer.doAfter(0.15, function()
+            selectedText = trim(pasteboard.getContents())
+            if selectedText == "" then
+                hs.alert.show("Select text first, then press Ctrl+Alt+Shift+S")
+                return
+            end
+            buildToolbar(selectedText)
+            -- Keep the copied selection available for Copy action; other actions set their own clipboard.
+        end)
+    end)
+    return self
+end
+
+function obj:stop()
+    if captureHotkey then captureHotkey:delete(); captureHotkey = nil end
+    if toolbar then toolbar:delete(); toolbar = nil end
+    return self
+end
+
+return obj
