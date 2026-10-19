@@ -131,9 +131,11 @@ function handleClipboardChange(content)
             -- Trust the watcher callback's exact string. Re-reading the pasteboard
             -- here can race with another clipboard write and associate a different
             -- value with this callback. Keep capture and display byte-for-byte.
-            -- The pasteboard watcher provides the string value associated with
-            -- this change. Keep it verbatim and avoid a separate read that may race.
-            logger.i("Clipboard history captured text length=" .. tostring(#content))
+            -- Diagnostic capture showed that the watcher and pasteboard both
+            -- receive "interesting" intact. Keep this callback payload unchanged;
+            -- if the preview still contains missing letters, investigate clipboard
+            -- writers or keyboard-remapping tools instead of altering stored text.
+            logger.i("Clipboard history watcher received text length=" .. tostring(#content))
 
             -- Don't add if it's the same as the last entry
             if #text_clipboard_history ~= 0 and 
