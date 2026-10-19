@@ -9,7 +9,6 @@ local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
 local hoverWatcher = nil
-local appearanceWatcher = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -175,7 +174,6 @@ end
 local function buildToolbar(text)
     if toolbar then toolbar:delete(); toolbar = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
-    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 360, h = 58 }, {
@@ -192,23 +190,27 @@ local function buildToolbar(text)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
     toolbar:html(getToolbarHTML(text), "file:///")
-    -- WebKit normally follows macOS appearance through prefers-color-scheme.
-    -- Explicitly sync the initial appearance as well, then monitor changes.
+    -- CSS prefers-color-scheme follows the host appearance. Poll the appearance
+    -- explicitly as well because hs.host.interfaceStyle() is a getter, not a
+    -- watcher-registration API.
+    local lastAppearance = nil
     local function syncToolbarAppearance()
         if not toolbar then return end
         local dark = hs.host.interfaceStyle and hs.host.interfaceStyle() == "Dark"
         local appearance = dark and "dark" or "light"
+        if appearance == lastAppearance then return end
+        lastAppearance = appearance
         toolbar:evaluateJavaScript(
             "document.documentElement.setAttribute('data-appearance'," .. string.format("%q", appearance) .. ");" ..
             "document.documentElement.style.colorScheme=" .. string.format("%q", appearance) .. ";"
         )
     end
     syncToolbarAppearance()
-    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
-    if hs.host.interfaceStyle then
-        appearanceWatcher = hs.host.interfaceStyle(function()
-            syncToolbarAppearance()
-        end)
+    local appearancePoll = timer.doEvery(1, syncToolbarAppearance)
+    local previousHideToolbar = hideToolbar
+    hideToolbar = function()
+        if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
+        previousHideToolbar()
     end
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
