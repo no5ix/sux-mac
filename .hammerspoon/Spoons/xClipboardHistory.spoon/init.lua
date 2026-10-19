@@ -15,6 +15,7 @@ local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local previousWindow = nil
+local previousApplication = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
 local visibleIndices = {}
@@ -34,16 +35,18 @@ local function capturePreviousWindow()
     if win and win:application()
         and win:application():bundleID() ~= "org.hammerspoon.Hammerspoon" then
         previousWindow = win
+        previousApplication = win:application()
     else
         previousWindow = nil
+        previousApplication = nil
     end
 end
 
 local function restorePreviousWindow(callback)
     local targetWindow = previousWindow
+    local targetApplication = previousApplication
 
-    -- Hiding the WebView first lets macOS unwind its key-window status before
-    -- we explicitly focus the one window that owned focus before the panel.
+    -- Hide first so macOS can restore the previous key window naturally.
     if clipboard_webview then clipboard_webview:hide() end
 
     hs.timer.doAfter(0.12, function()
@@ -55,6 +58,32 @@ local function restorePreviousWindow(callback)
                 return hs.window.frontmostWindow() == targetWindow
             end)
             focused = ok and result == true
+        end
+
+        -- Some apps do not cooperate with hs.window:focus(). As a fallback,
+        -- activate the owning app without requesting that all of its windows
+        -- be raised, then re-focus the exact target window.
+        if not focused and targetApplication then
+            pcall(function() targetApplication:activate(false) end)
+            hs.timer.doAfter(0.12, function()
+                if targetWindow then
+                    pcall(function()
+                        if targetWindow:isValid() then targetWindow:focus() end
+                    end)
+                end
+                hs.timer.doAfter(0.08, function()
+                    focused = false
+                    if targetWindow then
+                        local ok, result = pcall(function()
+                            return targetWindow:isValid()
+                                and hs.window.frontmostWindow() == targetWindow
+                        end)
+                        focused = ok and result == true
+                    end
+                    if callback then callback(focused) end
+                end)
+            end)
+            return
         end
 
         if callback then callback(focused) end
@@ -387,6 +416,7 @@ local function pasteHistoryEntry(index)
                 pasteboard_watcher:start()
                 menuData = {}
                 previousWindow = nil
+                previousApplication = nil
             end)
         end)
     end)
@@ -479,6 +509,7 @@ local function finishPasteAll()
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
     previousWindow = nil
+    previousApplication = nil
     hs.alert.show("The Paste task has finished.")
 end
 
