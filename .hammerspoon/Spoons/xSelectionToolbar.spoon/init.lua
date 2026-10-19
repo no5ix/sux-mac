@@ -55,8 +55,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
-button[data-action="translation"]{width:auto;min-width:38px;padding:0 10px;gap:6px;font-size:13px;font-weight:600}
-.translation-label{font-size:12px;line-height:1}
 .icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}
 .separator{flex:0 0 1px;width:1px;height:24px;background:var(--toolbar-separator);margin:0 2px}
 :root,[data-appearance="light"]{--toolbar-bg:rgba(250,250,252,.98);--toolbar-fg:#202124;--toolbar-border:rgba(0,0,0,.12);--toolbar-hover:#d8dee9;--toolbar-hover-border:rgba(40,50,70,.18);--toolbar-active:#c5ccd8;--toolbar-separator:#d9dce2}
@@ -67,7 +65,7 @@ button[data-action="translation"]{width:auto;min-width:38px;padding:0 10px;gap:6
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
-<button data-action="translation" aria-label="Translation" title="Translation" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span><span class="translation-label">Translation</span></button>
+<button data-action="translation" aria-label="Translation" title="Translate selected text" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span></button>
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
@@ -99,6 +97,11 @@ end
 local translationWindow = nil
 local translationUsercontent = nil
 local translationAppearancePoll = nil
+local translationRequestTask = nil
+local translationRequestId = 0
+
+local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
+local TRANSLATION_MODEL = nil -- nil means use the model selected by the local server's default
 
 local function translationWindowHTML(text)
     local encoded = json.encode({ text })
@@ -114,35 +117,40 @@ html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:13p
 body{padding:18px}
 h1{font-size:17px;margin:0 0 14px;font-weight:650}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-select,textarea,button{font:inherit;border-radius:8px}
-select,textarea{width:100%;background:var(--field);color:var(--fg);border:1px solid var(--border);padding:10px;outline:none}
-select:focus,textarea:focus{border-color:var(--accent)}
-textarea{resize:vertical;line-height:1.5}
+textarea,button{font:inherit;border-radius:8px}
+textarea{width:100%;background:var(--field);color:var(--fg);border:1px solid var(--border);padding:10px;outline:none;resize:vertical;line-height:1.5}
+textarea:focus{border-color:var(--accent)}
 #source{min-height:100px;margin-bottom:14px}
-#result{min-height:150px;margin-top:7px}
-.row{display:flex;gap:10px;align-items:end}
-.field{flex:1;min-width:0}
+#result{min-height:200px;margin-top:7px}
 .actions{display:flex;gap:8px;margin-top:12px}
 button{border:1px solid var(--border);background:var(--panel);color:var(--fg);padding:9px 13px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:600}
 .status{min-height:17px;margin-top:8px;color:var(--muted);font-size:11px}
 </style></head><body>
 <h1>Translation</h1>
-<div class="row"><div class="field"><label for="direction">Translate from / to</label>
-<select id="direction"><option value="en-zh">English → Chinese</option><option value="zh-en">Chinese → English</option><option value="th-zh">Thai → Chinese</option></select></div></div>
-<label for="source" style="margin-top:14px">Selected text</label><textarea id="source"></textarea>
-<div class="actions"><button class="primary" id="translate">Translate in ChatGPT</button></div>
-<div class="status" id="status" role="status">Choose a direction, then translate. ChatGPT will display the result.</div>
+<label for="source">Selected text</label><textarea id="source"></textarea>
+<div class="actions"><button class="primary" id="translate">Translate</button><button id="copy" disabled>Copy result</button></div>
+<label for="result" style="margin-top:14px">Translation result</label><textarea id="result" readonly placeholder="Translation will appear here"></textarea>
+<div class="status" id="status" role="status">Detecting the source language automatically.</div>
 <script>
 const selectedText=__SELECTED_TEXT__;
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const source=document.getElementById('source'),direction=document.getElementById('direction'),status=document.getElementById('status');
+const source=document.getElementById('source'),result=document.getElementById('result'),status=document.getElementById('status'),translateButton=document.getElementById('translate'),copyButton=document.getElementById('copy');
 source.value=selectedText;
-document.getElementById('translate').addEventListener('click',()=>bridge('translate',{text:source.value,direction:direction.value}));
+translateButton.addEventListener('click',()=>bridge('translate',{text:source.value}));
+copyButton.addEventListener('click',()=>bridge('copy',{text:result.value}));
+window.translationStatus=(value)=>{status.textContent=value||'';};
+window.translationResult=(value)=>{result.value=value||'';copyButton.disabled=!value;};
 source.focus();
 </script></body></html>
 ]=]
     return (html:gsub("__SELECTED_TEXT__", function() return encodedText end))
+end
+
+local function translationJSCall(functionName, value)
+    local encoded = json.encode({ tostring(value or "") })
+    local literal = type(encoded) == "table" and encoded[1] or encoded or '""'
+    return "window." .. functionName .. "(" .. literal .. ");"
 end
 
 local function syncTranslationAppearance()
@@ -155,8 +163,109 @@ local function syncTranslationAppearance()
     )
 end
 
+local function detectTranslationDirection(text)
+    -- Lightweight script-based language detection is sufficient for the three
+    -- requested routes: Latin/English -> Chinese, CJK/Chinese -> English,
+    -- Thai script -> Chinese. Mixed/script-neutral text defaults to Chinese.
+    if text:match("[\\224-\\239][\\128-\\191][\\128-\\191]") then
+        -- UTF-8 byte patterns below count script characters more specifically.
+    end
+    local thaiCount, cjkCount = 0, 0
+    for _, codepoint in utf8.codes(text) do
+        if codepoint >= 0x0E00 and codepoint <= 0x0E7F then thaiCount = thaiCount + 1 end
+        if (codepoint >= 0x4E00 and codepoint <= 0x9FFF)
+            or (codepoint >= 0x3400 and codepoint <= 0x4DBF)
+            or (codepoint >= 0xF900 and codepoint <= 0xFAFF) then
+            cjkCount = cjkCount + 1
+        end
+    end
+    if thaiCount > 0 and thaiCount >= cjkCount then
+        return "Thai", "Chinese"
+    elseif cjkCount > 0 then
+        return "Chinese", "English"
+    else
+        return "English", "Chinese"
+    end
+end
+
+local function sendTranslationRequest(sourceText)
+    if translationRequestTask then
+        pcall(function() translationRequestTask:terminate() end)
+        translationRequestTask = nil
+    end
+    translationRequestId = translationRequestId + 1
+    local requestId = translationRequestId
+    local sourceLanguage, targetLanguage = detectTranslationDirection(sourceText)
+    local instruction = string.format(
+        "Translate the user text from %s to %s. Output only the translated text, with no explanation, no quotation marks, and no language label. Preserve meaning, tone, punctuation, and line breaks.\n\nText to translate:\n%s",
+        sourceLanguage, targetLanguage, sourceText
+    )
+    local messages = {
+        { role = "system", content = "You are a translation engine. Follow the requested source and target languages exactly. Return only the translation." },
+        { role = "user", content = instruction }
+    }
+    local body = {
+        messages = messages,
+        temperature = 0.1,
+        stream = false
+    }
+    if TRANSLATION_MODEL and TRANSLATION_MODEL ~= "" then body.model = TRANSLATION_MODEL end
+    local encodedBody = json.encode(body)
+    if type(encodedBody) == "table" then encodedBody = encodedBody[1] end
+    if type(encodedBody) ~= "string" then
+        translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not encode the translation request."))
+        return
+    end
+
+    translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Translating locally…"))
+    local task = hs.task.new(
+        "/usr/bin/curl",
+        function(exitCode, stdOut, stdErr)
+            if requestId ~= translationRequestId or not translationWindow then return end
+            translationRequestTask = nil
+            if exitCode ~= 0 then
+                local detail = trim(stdErr)
+                local message = "Local AI request failed. Is the server running at " .. TRANSLATION_API_BASE .. "?"
+                if detail ~= "" then message = message .. "\\n" .. detail end
+                translationWindow:evaluateJavaScript(translationJSCall("translationStatus", message))
+                return
+            end
+            local ok, response = pcall(function() return json.decode(stdOut or "") end)
+            if not ok or type(response) ~= "table" then
+                translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "The local AI server returned invalid JSON."))
+                return
+            end
+            local translated = response.choices and response.choices[1]
+                and response.choices[1].message and response.choices[1].message.content
+            if type(translated) ~= "string" or trim(translated) == "" then
+                local errMsg = response.error and (response.error.message or response.error) or "No translated text was returned."
+                translationWindow:evaluateJavaScript(translationJSCall("translationStatus", tostring(errMsg)))
+                return
+            end
+            translationWindow:evaluateJavaScript(
+                translationJSCall("translationResult", trim(translated)) ..
+                translationJSCall("translationStatus", "Translated locally · " .. sourceLanguage .. " → " .. targetLanguage)
+            )
+        end,
+        { "-sS", "--max-time", "120", "-X", "POST",
+          TRANSLATION_API_BASE .. "/chat/completions",
+          "-H", "Content-Type: application/json",
+          "--data-binary", encodedBody }
+    )
+    if not task then
+        translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not start curl for the local AI request."))
+        return
+    end
+    translationRequestTask = task
+    task:start()
+end
+
 local function showTranslationWindow(text)
     if translationAppearancePoll then translationAppearancePoll:stop(); translationAppearancePoll = nil end
+    if translationRequestTask then
+        pcall(function() translationRequestTask:terminate() end)
+        translationRequestTask = nil
+    end
     if translationWindow then translationWindow:delete(); translationWindow = nil end
     translationUsercontent = webview.usercontent.new("translationWindow")
     translationUsercontent:setCallback(function(message)
@@ -171,51 +280,11 @@ local function showTranslationWindow(text)
             end
         elseif body.action == "translate" then
             local sourceText = trim(body.text)
-            local direction = body.direction
-            local languageInstruction = ({
-                ["en-zh"] = "Translate the following text from English into natural, fluent Chinese. Preserve its meaning and tone.",
-                ["zh-en"] = "Translate the following text from Chinese into natural, fluent English. Preserve its meaning and tone.",
-                ["th-zh"] = "Translate the following text from Thai into natural, fluent Chinese. Preserve its meaning and tone."
-            })[direction]
-            if not languageInstruction then return end
             if sourceText == "" then
-                translationWindow:evaluateJavaScript("document.getElementById('status').textContent='Enter text to translate.'")
+                translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Select or enter text to translate."))
                 return
             end
-            local prompt = languageInstruction .. "\n\n" .. sourceText
-            pasteboard.setContents(prompt)
-            translationWindow:evaluateJavaScript("document.getElementById('status').textContent='Opening ChatGPT for translation…'")
-            -- Reuse the same ChatGPT conversation behavior as the toolbar button:
-            -- open/activate the conversation and paste the translation request.
-            local appleScript = [[
-                tell application "Safari"
-                    activate
-                    set targetURL to "]] .. CHATGPT_URL .. [["
-                    repeat with w in windows
-                        repeat with t in tabs of w
-                            if (URL of t) is targetURL then
-                                set current tab of w to t
-                                set index of w to 1
-                                return "FOUND"
-                            end if
-                        end repeat
-                    end repeat
-                    open location targetURL
-                    return "OPENED"
-                end tell
-            ]]
-            local callOk, scriptSucceeded = pcall(function()
-                return hs.osascript.applescript(appleScript)
-            end)
-            -- hs.osascript.applescript returns a boolean success value. Avoid
-            -- opening the URL a second time when Safari already handled it.
-            if not callOk or scriptSucceeded ~= true then
-                hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
-            end
-            timer.doAfter(1.8, function()
-                eventtap.keyStroke({ "cmd" }, "v", 0.08)
-                timer.doAfter(1.0, function() eventtap.keyStroke({}, "return", 0.08) end)
-            end)
+            sendTranslationRequest(sourceText)
         end
     end)
     translationWindow = webview.new({x=180,y=160,w=560,h=620}, {
@@ -233,6 +302,10 @@ local function showTranslationWindow(text)
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
     translationWindow:hswindow():focus()
+    -- Translate immediately on open, so the user only clicks the toolbar icon.
+    timer.doAfter(0.15, function()
+        if translationWindow then sendTranslationRequest(text) end
+    end)
 end
 
 local function openSafariURL(url)
@@ -374,16 +447,13 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
-    -- Set the native frame to the measured layout estimate. The Translation
-    -- button includes its word label and is wider than the icon-only buttons.
-    -- Match the HTML toolbar geometry: 4 icon buttons and one wider
-    -- "🌐 Translation" button, plus the separator between ChatGPT and Translation.
-    local buttonWidths = { 38, 38, 116, 38, 38 }
+    -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
+    local buttonWidths = { 38, 38, 38, 38, 38 }
     local gap, padding = 4, 6
     local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
     local toolbarWidth = 2 + padding * 2 + gap * 5 + separatorWidthWithMargins
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
-    toolbarWidth = toolbarWidth + 8 -- safety allowance for WebKit subpixel rounding
+    toolbarWidth = toolbarWidth + 8
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
