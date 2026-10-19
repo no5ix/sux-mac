@@ -5,6 +5,7 @@ local pasteboard = require("hs.pasteboard")
 local webview = require("hs.webview")
 local timer = require("hs.timer")
 local json = require("hs.json")
+local eventtap = require("hs.eventtap")
 local mouseSelectionTap = nil
 
 local toolbar = nil
@@ -40,7 +41,7 @@ local function getToolbarHTML(text)
 <button onclick="action('youdao-word')">Youdao Dictionary</button>
 </div><script>
 const selection = __SELECTION_JSON__;
-function action(name){window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}
+function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 </script></body></html>
 ]=]
     return html:gsub("__SELECTION_JSON__", function() return encodedText end)
@@ -106,7 +107,7 @@ local function buildToolbar(text)
     toolbar:allowTextEntry(false)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
-    toolbar:html(getToolbarHTML(text), "text/html")
+    toolbar:html(getToolbarHTML(text), "file:///")
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
