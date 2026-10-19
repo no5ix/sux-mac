@@ -240,6 +240,7 @@ document.addEventListener('click', event => {
     const item = event.target.closest('.item');
     if (item) {
       event.preventDefault();
+      event.stopPropagation();
       const index = Number(item.dataset.index || 0);
       selectRow(rows().indexOf(item));
       bridge('paste', index, '');
@@ -285,16 +286,24 @@ contextMenu.querySelector('button').addEventListener('mouseenter', () => {
 contextMenu.querySelector('button').addEventListener('mouseleave', () => {
   contextMenu.querySelector('button').style.background = 'transparent';
 });
-contextMenu.querySelector('button').addEventListener('click', () => {
+contextMenu.querySelector('button').addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  const rowIndex = contextRowIndex;
   contextMenu.style.display = 'none';
-  bridge('pasteAllFrom', contextRowIndex, '');
+  bridge('pasteAllFrom', rowIndex, '');
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
 });
 search.addEventListener('input', () => { selectedIndex = 0; setTimeout(() => selectRow(0), 0); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') { event.preventDefault(); bridge('close', 0, ''); return; }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (contextMenu.style.display !== 'none') contextMenu.style.display = 'none';
+    else bridge('close', 0, '');
+    return;
+  }
   const items = rows();
   if (['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
     event.preventDefault();
@@ -437,6 +446,7 @@ local function finishPasteAll()
     menuData = {}
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
+    previousApplication = nil
     hs.alert.show("The Paste task has finished.")
 end
 
