@@ -211,7 +211,9 @@ local function historyItemHTML(entry, index)
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
     end
     local content = tostring(entry.data or "")
-    local previewText = content:gsub("[\\r\\n]+", " ")
+    -- Keep the displayed text exactly as captured. Only collapse line breaks
+    -- for card preview; do not run any character filtering or normalization.
+    local previewText = content:gsub("\\r\\n", " "):gsub("[\\r\\n]", " ")
     if #previewText > display_max_text_length then previewText = previewText:sub(1, display_max_text_length) .. "…" end
     -- If an image MIME payload ever arrives as clipboard text, don't expose a
     -- huge data:image URL as if it were ordinary text. Render a bounded marker.
