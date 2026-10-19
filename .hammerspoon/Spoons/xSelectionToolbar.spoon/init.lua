@@ -9,6 +9,7 @@ local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
 local hoverWatcher = nil
+local appearanceWatcher = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -45,7 +46,21 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:#202124;background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}button.is-hovered,button[data-hovered="true"]{background-color:#d8dee9!important;box-shadow:inset 0 0 0 1px rgba(40,50,70,.18)!important;outline:none!important}button:active{background-color:#c5ccd8!important}.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}.separator{flex:0 0 1px;width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
+.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
+button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
+button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
+button:active{background-color:var(--toolbar-active)!important}
+.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}
+.separator{flex:0 0 1px;width:1px;height:24px;background:var(--toolbar-separator);margin:0 2px}
+:root,[data-appearance="light"]{--toolbar-bg:rgba(250,250,252,.98);--toolbar-fg:#202124;--toolbar-border:rgba(0,0,0,.12);--toolbar-hover:#d8dee9;--toolbar-hover-border:rgba(40,50,70,.18);--toolbar-active:#c5ccd8;--toolbar-separator:#d9dce2}
+[data-appearance="dark"]{--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}
+@media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
+</style>
 </head><body><div class="bar">
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
@@ -156,6 +171,7 @@ end
 local function buildToolbar(text)
     if toolbar then toolbar:delete(); toolbar = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 360, h = 58 }, {
@@ -172,6 +188,24 @@ local function buildToolbar(text)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
     toolbar:html(getToolbarHTML(text), "file:///")
+    -- WebKit normally follows macOS appearance through prefers-color-scheme.
+    -- Explicitly sync the initial appearance as well, then monitor changes.
+    local function syncToolbarAppearance()
+        if not toolbar then return end
+        local dark = hs.host.interfaceStyle and hs.host.interfaceStyle() == "Dark"
+        local appearance = dark and "dark" or "light"
+        toolbar:evaluateJavaScript(
+            "document.documentElement.setAttribute('data-appearance'," .. string.format("%q", appearance) .. ");" ..
+            "document.documentElement.style.colorScheme=" .. string.format("%q", appearance) .. ";"
+        )
+    end
+    syncToolbarAppearance()
+    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
+    if hs.host.interfaceStyle then
+        appearanceWatcher = hs.host.interfaceStyle(function()
+            syncToolbarAppearance()
+        end)
+    end
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
@@ -378,6 +412,7 @@ function obj:start()
 end
 function obj:stop()
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+    if appearanceWatcher then appearanceWatcher:stop(); appearanceWatcher = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
