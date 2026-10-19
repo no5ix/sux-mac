@@ -132,8 +132,9 @@ local function buildToolbar(text)
         transparent = true,
         shadow = false
     }, usercontent)
-    toolbar:windowStyle({ "borderless", "utility" })
+    toolbar:windowStyle(0)
     toolbar:allowTextEntry(false)
+    toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(onToolbarMessage)
