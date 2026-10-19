@@ -154,7 +154,7 @@ end
 
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    local selectedClass = (visibleIndices[selectedVisibleIndex] == index) and " selected" or ""
+    local selectedClass = ""
     if entry.type == "image" then
         local src = entry.historyEntry and entry.historyEntry.thumbnailData or ""
         local preview
@@ -235,7 +235,9 @@ const bridge = (action, index, query) => {
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
-  bridge(button.dataset.action, Number(button.dataset.index || 0), '');
+  const selected = rows().find(item => item.classList.contains('selected'));
+  const index = Number((selected && selected.dataset.index) || button.dataset.index || 0);
+  bridge(button.dataset.action === 'pasteAll' ? 'pasteAllFrom' : button.dataset.action, index, '');
 });
 const search = document.getElementById('search');
 search.addEventListener('input', () => bridge('search', 0, search.value));
@@ -258,8 +260,12 @@ document.addEventListener('keydown', event => {
   const items = rows();
   if (['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
     event.preventDefault();
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') selectRow(selectedIndex + 1);
-    else selectRow(selectedIndex - 1);
+    if (event.key === 'ArrowRight') selectRow(selectedIndex + 1);
+    else if (event.key === 'ArrowLeft') selectRow(selectedIndex - 1);
+    else {
+      const columns = Math.max(1, Math.round(document.querySelector('main').clientWidth / 250));
+      selectRow(selectedIndex + (event.key === 'ArrowDown' ? columns : -columns));
+    }
     return;
   }
   if (event.key === 'Enter') {
