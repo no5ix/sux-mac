@@ -102,7 +102,7 @@ local function onToolbarMessage(message)
         local prompt = DOUbao_PROMPT .. " " .. text
         pasteboard.setContents(prompt)
         hideToolbar()
-        eventtap.keyStroke(DOUBAO_SHORTCUT, DOUBAO_KEY, 0.08)
+        eventtap.keyStroke(DOUbao_SHORTCUT, DOUbao_KEY, 0.08)
         timer.doAfter(0.6, function() eventtap.keyStroke({ "cmd" }, "v", 0.08) end)
     elseif action == "youdao-result" then
         hideToolbar()
