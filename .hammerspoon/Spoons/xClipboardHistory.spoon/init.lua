@@ -17,6 +17,9 @@ local clipboard_usercontent = nil
 local clipboard_search = ""
 local previousApplication = nil
 local suppressFocusDismiss = false
+local selectedVisibleIndex = 1
+local visibleIndices = {}
+local panelScreenUUID = nil
 
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
@@ -151,6 +154,7 @@ end
 
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
+    local selectedClass = (visibleIndices[selectedVisibleIndex] == index) and " selected" or ""
     if entry.type == "image" then
         local src = entry.historyEntry and entry.historyEntry.thumbnailData or ""
         local preview
@@ -159,14 +163,14 @@ local function historyItemHTML(entry, index)
         else
             preview = '<div class="preview placeholder">Image preview unavailable</div>'
         end
-        return '<button class="item image-item" data-action="paste" data-index="' .. index .. '">' ..
+        return '<button class="item image-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
             preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
     end
     local content = tostring(entry.data or "")
     local previewText = content:gsub("[\\r\\n]+", " ")
     if #previewText > display_max_text_length then previewText = previewText:sub(1, display_max_text_length) .. "…" end
-    return '<button class="item text-item" data-action="paste" data-index="' .. index .. '">' ..
+    return '<button class="item text-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div></button>'
@@ -174,12 +178,14 @@ end
 
 function clipboardPanelHTML()
     local cards = {}
+    visibleIndices = {}
     local filter = string.lower(clipboard_search or "")
     for index, entry in ipairs(menuData or {}) do
         if entry.type == "text" or entry.type == "image" then
             local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
                 tostring(entry.data or "") .. " " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
             if filter == "" or searchable:find(filter, 1, true) then
+                visibleIndices[#visibleIndices + 1] = index
                 cards[#cards + 1] = historyItemHTML(entry, index)
             end
         end
@@ -203,6 +209,7 @@ input:focus { border-color:#7da6ff; }
 main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 .item:hover { border-color:#85aaff; background:#30343d; }
+.item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
 .image-item .preview { width:100%; height:160px; object-fit:contain; display:block; background:#191b20; border-radius:7px; }
 .preview.placeholder { display:flex; align-items:center; justify-content:center; color:#9ba2af; }
 .meta { padding:9px 2px 1px; }
@@ -212,14 +219,15 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 .hint { color:#8e96a5; font-size:10px; margin-top:8px; }
 .empty { color:#9ca3b1; text-align:center; padding:40px 12px; grid-column:1/-1; }
 footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-size:11px; }
+body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><h1>Clipboard History</h1><span class="count">]] .. tostring(#cards) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
-<div class="actions"><button class="action primary" data-action="pasteAll">Paste All</button>
+<div class="actions"><button class="action primary" data-action="pasteAll">Paste All Above Selected</button>
 <button class="action danger" data-action="clearAll">Clear All</button>
 <button class="action" data-action="close">Close</button></div></header>
 <main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No matching clipboard items</div>') .. [[</main>
-<footer>Enter: paste first match · Esc: close · Larger image previews</footer>
+<footer>Arrow keys: select · Enter: paste · Shift+Enter: paste rows above selected · Esc: close</footer>
 <script>
 const bridge = (action, index, query) => {
   try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query}); } catch (_) {}
@@ -231,13 +239,36 @@ document.addEventListener('click', event => {
 });
 const search = document.getElementById('search');
 search.addEventListener('input', () => bridge('search', 0, search.value));
+let selectedIndex = 0;
+function rows() { return Array.from(document.querySelectorAll('.item')); }
+function selectRow(next) {
+  const items = rows();
+  if (!items.length) { selectedIndex = 0; return; }
+  selectedIndex = Math.max(0, Math.min(items.length - 1, next));
+  items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
+  items[selectedIndex].scrollIntoView({block:'nearest'});
+}
+document.addEventListener('click', event => {
+  const item = event.target.closest('.item');
+  if (item) { const items = rows(); selectRow(items.indexOf(item)); }
+});
+search.addEventListener('input', () => { selectedIndex = 0; setTimeout(() => selectRow(0), 0); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') bridge('close', 0, '');
+  if (event.key === 'Escape') { event.preventDefault(); bridge('close', 0, ''); return; }
+  const items = rows();
+  if (['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
+    event.preventDefault();
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') selectRow(selectedIndex + 1);
+    else selectRow(selectedIndex - 1);
+    return;
+  }
   if (event.key === 'Enter') {
-    const first = document.querySelector('.item');
-    if (first) bridge('paste', Number(first.dataset.index || 0), '');
+    event.preventDefault();
+    const item = items[selectedIndex];
+    if (item) bridge(event.shiftKey ? 'pasteAllFrom' : 'paste', Number(item.dataset.index || 0), '');
   }
 });
+setTimeout(() => selectRow(0), 0);
 search.focus();
 </script></body></html>]]
     return html
@@ -286,12 +317,15 @@ local function handleClipboardPanelMessage(message)
         -- Filter the visible cards in-place so the search field keeps focus.
         local filter = string.lower(clipboard_search)
         local cards = {}
+        visibleIndices = {}
+        selectedVisibleIndex = 1
         for index, entry in ipairs(menuData or {}) do
             if entry.type == "text" or entry.type == "image" then
                 local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
                     tostring(entry.data or "") .. " " ..
                     os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
                 if filter == "" or searchable:find(filter, 1, true) then
+                    visibleIndices[#visibleIndices + 1] = index
                     cards[#cards + 1] = historyItemHTML(entry, index)
                 end
             end
@@ -307,11 +341,33 @@ local function handleClipboardPanelMessage(message)
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAll" then
         pasteSomeWithDelimiterFromStartRow(#menuData)
+    elseif body.action == "pasteAllFrom" then
+        pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "clearAll" then
         clearClipboardHistory()
         if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()); clipboard_webview:show() end
         pasteboard_watcher:start()
         hs.alert.show("Clipboard history cleared")
+    end
+end
+
+local function positionPanelOnCurrentScreen()
+    local screens = hs.screen.allScreens()
+    local pointer = hs.mouse.absolutePosition()
+    local target = hs.screen.mainScreen()
+    for _, screen in ipairs(screens) do
+        local f = screen:fullFrame()
+        if pointer.x >= f.x and pointer.x < f.x + f.w and pointer.y >= f.y and pointer.y < f.y + f.h then
+            target = screen
+            break
+        end
+    end
+    if target then
+        panelScreenUUID = target:getUUID()
+        local f = target:frame()
+        local current = clipboard_webview and clipboard_webview:frame() or {w=980,h=760}
+        local w, h = math.min(current.w or 980, f.w), math.min(current.h or 760, f.h)
+        clipboard_webview:frame({x=f.x + math.max(0,(f.w-w)/2), y=f.y + math.max(0,(f.h-h)/2), w=w, h=h})
     end
 end
 
@@ -478,8 +534,10 @@ function showClipboardHistory()
 
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
+    positionPanelOnCurrentScreen()
     clipboard_webview:show()
     clipboard_webview:hswindow():focus()
+    clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
     -- Clear this guard after the initial key-window transition settles.
     hs.timer.doAfter(0.25, function() suppressFocusDismiss = false end)
 
