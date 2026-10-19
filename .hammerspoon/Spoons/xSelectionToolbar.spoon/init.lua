@@ -41,7 +41,7 @@ local function getToolbarHTML(text)
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;padding:8px;background:transparent !important;font-family:-apple-system,BlinkMacSystemFont,sans-serif}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 16px);padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-size:13px;white-space:nowrap;cursor:pointer}button:hover{background:#e6e8ed}.separator{width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
+<style>:root{color-scheme:light}*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent !important;}body{padding:8px;background:transparent !important;font-family:-apple-system,BlinkMacSystemFont,sans-serif}.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 16px);padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)}button{border:0;border-radius:8px;padding:9px 12px;color:#202124;background:transparent;font-size:13px;white-space:nowrap;cursor:pointer}button:hover{background:#e6e8ed}.separator{width:1px;height:24px;background:#d9dce2;margin:0 2px}</style>
 </head><body><div class="bar">
 <button onclick="action('copy')">Copy</button>
 <button onclick="action('doubao')">Proofread + translate</button>
@@ -86,7 +86,11 @@ local function onToolbarMessage(message)
         return
     end
     local action = message.action
-    local text = trim(message.text or selectedText)
+    local textValue = message.text or selectedText
+    if type(textValue) == "table" then
+        textValue = textValue[1] or textValue.text or ""
+    end
+    local text = trim(textValue)
     logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
     if text == "" then hs.alert.show("No selected text"); return end
 
@@ -116,7 +120,8 @@ local function buildToolbar(text)
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = true,
-        shadow = false
+        shadow = false,
+        opaque = false
     }, usercontent)
     toolbar:windowStyle(0)
     toolbar:allowTextEntry(false)
