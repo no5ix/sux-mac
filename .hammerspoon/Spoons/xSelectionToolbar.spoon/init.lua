@@ -99,7 +99,7 @@ local function onToolbarMessage(message)
         pasteboard.setContents(text)
         hideToolbar()
     elseif action == "doubao" then
-        local prompt = DOUBAO_PROMPT .. " " .. text
+        local prompt = DOUbao_PROMPT .. " " .. text
         pasteboard.setContents(prompt)
         hideToolbar()
         eventtap.keyStroke(DOUBAO_SHORTCUT, DOUBAO_KEY, 0.08)
