@@ -318,7 +318,7 @@ local function openSafariURL(url)
 end
 
 local function onToolbarMessage(message)
-    logger.i("Toolbar message received: " .. tostring(type(message)))
+    -- logger.i("Toolbar message received: " .. tostring(type(message)))
     message = normalizeMessage(message)
     if type(message) ~= "table" then
         hs.alert.show("Toolbar message was not decoded")
@@ -330,7 +330,7 @@ local function onToolbarMessage(message)
         textValue = textValue[1] or textValue.text or ""
     end
     local text = trim(textValue)
-    logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
+    -- logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
     if text == "" then hs.alert.show("No selected text"); return end
 
     if action == "copy" then
