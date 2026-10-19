@@ -55,6 +55,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
+button[data-action="translation"]{width:auto;min-width:38px;padding:0 10px;gap:6px;font-size:13px;font-weight:600}
+.translation-label{font-size:12px;line-height:1}
 .icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}
 .separator{flex:0 0 1px;width:1px;height:24px;background:var(--toolbar-separator);margin:0 2px}
 :root,[data-appearance="light"]{--toolbar-bg:rgba(250,250,252,.98);--toolbar-fg:#202124;--toolbar-border:rgba(0,0,0,.12);--toolbar-hover:#d8dee9;--toolbar-hover-border:rgba(40,50,70,.18);--toolbar-active:#c5ccd8;--toolbar-separator:#d9dce2}
@@ -65,6 +67,7 @@ button:active{background-color:var(--toolbar-active)!important}
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
+<button data-action="translation" aria-label="Translation" title="Translation" onclick="action('translation')"><span class="icon" aria-hidden="true">🌐</span><span class="translation-label">Translation</span></button>
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
@@ -91,6 +94,143 @@ local function runDoubao(text)
     timer.doAfter(0.45, function()
         eventtap.keyStroke({ "cmd" }, "v", 0.08)
     end)
+end
+
+local translationWindow = nil
+local translationUsercontent = nil
+local translationAppearancePoll = nil
+
+local function translationWindowHTML(text)
+    local encoded = json.encode({ text })
+    local encodedText = type(encoded) == "table" and encoded[1] or encoded or '""'
+    local html = [=[
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--fg:#202124;--muted:#626b78;--border:#d9dde5;--accent:#2563eb;--field:#fff}
+:root[data-appearance="dark"]{--bg:#1d1f24;--panel:#272a31;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--field:#15171b}
+@media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--bg:#1d1f24;--panel:#272a31;--fg:#f5f6f8;--muted:#a4acba;--border:#414650;--accent:#8cb1ff;--field:#15171b}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+body{padding:18px}
+h1{font-size:17px;margin:0 0 14px;font-weight:650}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+select,textarea,button{font:inherit;border-radius:8px}
+select,textarea{width:100%;background:var(--field);color:var(--fg);border:1px solid var(--border);padding:10px;outline:none}
+select:focus,textarea:focus{border-color:var(--accent)}
+textarea{resize:vertical;line-height:1.5}
+#source{min-height:100px;margin-bottom:14px}
+#result{min-height:150px;margin-top:7px}
+.row{display:flex;gap:10px;align-items:end}
+.field{flex:1;min-width:0}
+.actions{display:flex;gap:8px;margin-top:12px}
+button{border:1px solid var(--border);background:var(--panel);color:var(--fg);padding:9px 13px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:600}
+.status{min-height:17px;margin-top:8px;color:var(--muted);font-size:11px}
+</style></head><body>
+<h1>Translation</h1>
+<div class="row"><div class="field"><label for="direction">Translate from / to</label>
+<select id="direction"><option value="en-zh">English → Chinese</option><option value="zh-en">Chinese → English</option><option value="th-zh">Thai → Chinese</option></select></div></div>
+<label for="source" style="margin-top:14px">Selected text</label><textarea id="source"></textarea>
+<div class="actions"><button class="primary" id="translate">Translate</button><button id="copy">Copy result</button></div>
+<label for="result" style="margin-top:14px">Translation result</label><textarea id="result" readonly placeholder="Your translation will appear here"></textarea>
+<div class="status" id="status" role="status"></div>
+<script>
+const selectedText=__SELECTED_TEXT__;
+const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
+const source=document.getElementById('source'),direction=document.getElementById('direction'),result=document.getElementById('result'),status=document.getElementById('status');
+source.value=selectedText;
+document.getElementById('translate').addEventListener('click',()=>bridge('translate',{text:source.value,direction:direction.value}));
+document.getElementById('copy').addEventListener('click',()=>bridge('copy',{text:result.value}));
+source.focus();
+</script></body></html>
+]=]
+    return (html:gsub("__SELECTED_TEXT__", function() return encodedText end))
+end
+
+local function syncTranslationAppearance()
+    if not translationWindow then return end
+    local style = hs.host.interfaceStyle and hs.host.interfaceStyle()
+    local appearance = style == "Dark" and "dark" or "light"
+    translationWindow:evaluateJavaScript(
+        "document.documentElement.setAttribute('data-appearance'," .. string.format("%q", appearance) .. ");" ..
+        "document.documentElement.style.colorScheme=" .. string.format("%q", appearance) .. ";"
+    )
+end
+
+local function showTranslationWindow(text)
+    if translationAppearancePoll then translationAppearancePoll:stop(); translationAppearancePoll = nil end
+    if translationWindow then translationWindow:delete(); translationWindow = nil end
+    translationUsercontent = webview.usercontent.new("translationWindow")
+    translationUsercontent:setCallback(function(message)
+        message = normalizeMessage(message)
+        if type(message) ~= "table" then return end
+        local body = message.body or message
+        if type(body) ~= "table" then return end
+        if body.action == "copy" then
+            if type(body.text) == "string" and body.text ~= "" then
+                pasteboard.setContents(body.text)
+                hs.alert.show("Translation copied")
+            end
+        elseif body.action == "translate" then
+            local sourceText = trim(body.text)
+            local direction = body.direction
+            local languageInstruction = ({
+                ["en-zh"] = "Translate the following text from English into natural, fluent Chinese. Preserve its meaning and tone.",
+                ["zh-en"] = "Translate the following text from Chinese into natural, fluent English. Preserve its meaning and tone.",
+                ["th-zh"] = "Translate the following text from Thai into natural, fluent Chinese. Preserve its meaning and tone."
+            })[direction]
+            if not languageInstruction then return end
+            if sourceText == "" then
+                translationWindow:evaluateJavaScript("document.getElementById('status').textContent='Enter text to translate.'")
+                return
+            end
+            local prompt = languageInstruction .. "\n\n" .. sourceText
+            pasteboard.setContents(prompt)
+            translationWindow:evaluateJavaScript("document.getElementById('status').textContent='Opening ChatGPT for translation…'")
+            -- Reuse the same ChatGPT conversation behavior as the toolbar button:
+            -- open/activate the conversation and paste the translation request.
+            local appleScript = [[
+                tell application "Safari"
+                    activate
+                    set targetURL to "]] .. CHATGPT_URL .. [["
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if (URL of t) is targetURL then
+                                set current tab of w to t
+                                set index of w to 1
+                                return "FOUND"
+                            end if
+                        end repeat
+                    end repeat
+                    open location targetURL
+                    return "OPENED"
+                end tell
+            ]]
+            local ok, result = pcall(function() return hs.osascript.applescript(appleScript) end)
+            if not ok or type(result) ~= "table" or result.ok == false then
+                hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
+            end
+            timer.doAfter(1.8, function()
+                eventtap.keyStroke({ "cmd" }, "v", 0.08)
+                timer.doAfter(1.0, function() eventtap.keyStroke({}, "return", 0.08) end)
+            end)
+        end
+    end)
+    translationWindow = webview.new({x=180,y=160,w=560,h=620}, {
+        developerExtrasEnabled = false,
+        javaScriptCanOpenWindowsAutomatically = false,
+        transparent = false,
+        shadow = true,
+        opaque = true
+    }, translationUsercontent)
+    translationWindow:windowStyle({"titled","closable","resizable"})
+    translationWindow:allowTextEntry(true)
+    translationWindow:windowTitle("Translation")
+    translationWindow:html(translationWindowHTML(text), "file:///")
+    syncTranslationAppearance()
+    translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
+    translationWindow:show()
+    translationWindow:hswindow():focus()
 end
 
 local function openSafariURL(url)
@@ -164,6 +304,9 @@ local function onToolbarMessage(message)
                 eventtap.keyStroke({ "" }, "return", 0.08)
             end)
         end)
+    elseif action == "translation" then
+        hideToolbar()
+        showTranslationWindow(text)
     elseif action == "youdao-result" then
         hideToolbar()
         hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
@@ -231,7 +374,7 @@ local function buildToolbar(text)
     -- borders plus padding/gaps. Set the native frame explicitly rather than
     -- depending on WebKit's asynchronous width measurement.
     local buttonSize, gap, padding = 38, 6, 8
-    local buttonCount = 4
+    local buttonCount = 5
     -- Include the two borders, both outer paddings, button gaps, and the
     -- separator plus its margins. Add a small safety allowance for WebKit's
     -- subpixel rounding so the final icon can't be clipped at the right edge.
@@ -259,7 +402,7 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1
-            local buttonActions = { "copy", "chatgpt", "youdao-result", "youdao-word" }
+            local buttonActions = { "copy", "chatgpt", "translation", "youdao-result", "youdao-word" }
             for i, name in ipairs(buttonActions) do
                 if rx >= cursor and rx <= cursor + buttonSize then
                     target = name
