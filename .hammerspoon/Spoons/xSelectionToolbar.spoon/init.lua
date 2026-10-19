@@ -5,11 +5,10 @@ local pasteboard = require("hs.pasteboard")
 local hotkey = require("hs.hotkey")
 local webview = require("hs.webview")
 local timer = require("hs.timer")
-local eventtap = require("hs.eventtap")
 local json = require("hs.json")
 
 local toolbar = nil
-local captureHotkey = nil
+local selectionWatcher = nil
 local selectedText = ""
 
 local DOUbao_SHORTCUT = { "ctrl", "shift", "alt" }
@@ -121,28 +120,44 @@ local function buildToolbar(text)
     toolbar:show()
 end
 function obj:start()
-    if captureHotkey then captureHotkey:delete() end
-    -- Select text, then press Ctrl+Alt+Shift+S to capture it and show actions.
-    captureHotkey = hotkey.bind({ "ctrl", "alt", "shift" }, "s", function()
-        local oldContents = pasteboard.getContents()
-        -- Copy selection temporarily, then restore clipboard when no action needs it.
-        eventtap.keyStroke({ "cmd" }, "c", 0.03)
-        timer.doAfter(0.15, function()
-            selectedText = trim(pasteboard.getContents())
-            if oldContents ~= nil then pasteboard.setContents(oldContents) end
-            if selectedText == "" then
-                hs.alert.show("Select text first, then press Ctrl+Alt+Shift+S")
-                return
+    if selectionWatcher then selectionWatcher:stop() end
+    -- Accessibility exposes selected text in many, but not all, macOS apps.
+    -- Poll conservatively and show the toolbar when a non-empty selection changes.
+    local lastShownText = ""
+    local lastShownAt = 0
+    selectionWatcher = hs.timer.doEvery(0.35, function()
+        if toolbar and toolbar:isVisible() then return end
+        local app = hs.application.frontmostApplication()
+        if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+        local ok, value = pcall(function()
+            local element = hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition())
+            if not element then return nil end
+            local selected = element:attributeValue("AXSelectedText")
+            if type(selected) == "string" and selected ~= "" then return selected end
+            local parent = element:attributeValue("AXParent")
+            if parent then
+                selected = parent:attributeValue("AXSelectedText")
+                if type(selected) == "string" and selected ~= "" then return selected end
             end
-            buildToolbar(selectedText)
-            -- Keep the copied selection available for Copy action; other actions set their own clipboard.
+            return nil
         end)
+        if not ok then return end
+        value = trim(value)
+        if value == "" then
+            lastShownText = ""
+            return
+        end
+        if value ~= lastShownText and (hs.timer.secondsSinceEpoch() - lastShownAt) > 0.7 then
+            selectedText = value
+            lastShownText = value
+            lastShownAt = hs.timer.secondsSinceEpoch()
+            buildToolbar(selectedText)
+        end
     end)
     return self
 end
-
 function obj:stop()
-    if captureHotkey then captureHotkey:delete(); captureHotkey = nil end
+    if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
     return self
 end
