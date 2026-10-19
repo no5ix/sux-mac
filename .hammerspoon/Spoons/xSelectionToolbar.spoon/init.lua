@@ -131,16 +131,14 @@ button.primary{background:var(--accent);border-color:var(--accent);color:white;f
 <div class="row"><div class="field"><label for="direction">Translate from / to</label>
 <select id="direction"><option value="en-zh">English → Chinese</option><option value="zh-en">Chinese → English</option><option value="th-zh">Thai → Chinese</option></select></div></div>
 <label for="source" style="margin-top:14px">Selected text</label><textarea id="source"></textarea>
-<div class="actions"><button class="primary" id="translate">Translate</button><button id="copy">Copy result</button></div>
-<label for="result" style="margin-top:14px">Translation result</label><textarea id="result" readonly placeholder="Your translation will appear here"></textarea>
-<div class="status" id="status" role="status"></div>
+<div class="actions"><button class="primary" id="translate">Translate in ChatGPT</button></div>
+<div class="status" id="status" role="status">Choose a direction, then translate. ChatGPT will display the result.</div>
 <script>
 const selectedText=__SELECTED_TEXT__;
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const source=document.getElementById('source'),direction=document.getElementById('direction'),result=document.getElementById('result'),status=document.getElementById('status');
+const source=document.getElementById('source'),direction=document.getElementById('direction'),status=document.getElementById('status');
 source.value=selectedText;
 document.getElementById('translate').addEventListener('click',()=>bridge('translate',{text:source.value,direction:direction.value}));
-document.getElementById('copy').addEventListener('click',()=>bridge('copy',{text:result.value}));
 source.focus();
 </script></body></html>
 ]=]
@@ -374,7 +372,7 @@ local function buildToolbar(text)
     -- button includes its word label and is wider than the icon-only buttons.
     -- Match the HTML toolbar geometry: 4 icon buttons and one wider
     -- "🌐 Translation" button, plus the separator between ChatGPT and Translation.
-    local buttonWidths = { 38, 38, 108, 38, 38 }
+    local buttonWidths = { 38, 38, 116, 38, 38 }
     local gap, padding = 4, 6
     local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
     local toolbarWidth = 2 + padding * 2 + gap * 5 + separatorWidthWithMargins
@@ -409,7 +407,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 2 then cursor = cursor + separatorWidthWithMargins end
+                if i == 3 then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
