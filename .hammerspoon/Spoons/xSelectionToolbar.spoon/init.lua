@@ -38,7 +38,6 @@ local function scriptString(value)
 end
 
 local function getToolbarHTML(text)
-    local safeText = escapeHTML(text)
     local encodedText = scriptString(text)
     return [[
 <!doctype html>
