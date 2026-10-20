@@ -126,6 +126,14 @@ local function trim(value)
     return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local function looksLikeImagePayload(value)
+    if type(value) ~= "string" then return false end
+    return value:match("^data:image/") ~= nil
+        or value:match("^iVBORw0KGgo") ~= nil
+        or value:match("^/9j/") ~= nil
+        or value:match("^R0lGOD") ~= nil
+end
+
 local function hideToolbar()
     if toolbar then toolbar:hide() end
 end
