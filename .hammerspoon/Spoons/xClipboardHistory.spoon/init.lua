@@ -304,8 +304,10 @@ function clipboardPanelHTML()
 body { margin:0; background:#1d1f24; color:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; }
 header { position:sticky; top:0; z-index:5; padding:14px 16px 12px; background:#202329; border-bottom:1px solid #3c4049; }
 .top { display:flex; align-items:center; gap:10px; }
-h1 { margin:0; font-size:17px; font-weight:650; flex:1; }
-.count { color:#aab0bd; font-size:12px; }
+.title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
+h1 { margin:0; font-size:17px; font-weight:650; }
+.header-clear { flex-shrink:0; }
+.count { color:#aab0bd; font-size:12px; margin-left:auto; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid #454a55; background:#15171b; color:#f5f6f8; font-size:13px; outline:none; }
 input:focus { border-color:#7da6ff; }
 main:focus { outline:none; }
@@ -335,12 +337,11 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
-<header><div class="top"><h1>Clipboard History</h1><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
+<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
 <div class="actions">
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
-<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
-<button class="action danger" data-action="clearAll">Clear All</button></div></header>
+<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button></div></header>
 <main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
 <footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
