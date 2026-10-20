@@ -415,6 +415,9 @@ function selectRow(next) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
   items[selectedIndex].scrollIntoView({block:'nearest'});
 }
+function clearRowSelection() {
+  rows().forEach(item => item.classList.remove('selected'));
+}
 resultsPanel.addEventListener('focus', () => {
   const items = rows();
   if (items.length) {
@@ -422,6 +425,12 @@ resultsPanel.addEventListener('focus', () => {
     items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
   }
 });
+resultsPanel.addEventListener('blur', () => {
+  // The blue selection border is keyboard-navigation feedback only. Hide it
+  // whenever focus leaves the results area (for example, back to search).
+  clearRowSelection();
+});
+search.addEventListener('focus', clearRowSelection);
 resultsPanel.addEventListener('focusout', event => {
   if (event.relatedTarget === search) return;
 });
@@ -434,8 +443,7 @@ document.addEventListener('focusin', event => {
 });
 window.resetClipboardSelection = () => {
   selectedIndex = 0;
-  const items = rows();
-  items.forEach((item, i) => item.classList.toggle('selected', i === 0));
+  clearRowSelection();
 };
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu';
