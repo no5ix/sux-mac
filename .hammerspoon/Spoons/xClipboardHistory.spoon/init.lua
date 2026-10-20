@@ -478,7 +478,7 @@ local function pasteHistoryEntry(index)
     end)
 end
 
-local local function updateClipboardPanel(query, kind, offset, append)
+local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
