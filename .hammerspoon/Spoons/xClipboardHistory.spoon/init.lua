@@ -16,9 +16,11 @@ local menuData = {}  -- Clipboard history data
 local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
-local clipboard_type_filter = "all" -- "all", "text", or "image"
+local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
 local panelCacheKey = nil
 local panelCacheHTML = nil
+local ignoreNextPasteboardChange = false
+local lastAcceptedClipboardValue = nil
 local previousApplication = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
@@ -96,7 +98,25 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
-    pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
+    -- Ignore the selection toolbar's synthetic Cmd+C, which is used only to
+    -- detect selected text and must not appear as a clipboard-history entry.
+    local syntheticUntil = tonumber(_G.xSelectionToolbarSyntheticCopyUntil) or 0
+    if hs.timer.secondsSinceEpoch() <= syntheticUntil then
+        return
+    end
+    if ignoreNextPasteboardChange then
+        ignoreNextPasteboardChange = false
+        return
+    end
+
+    pasteboard_watcher:start()
+
+    -- A text clipboard callback is accepted only when it represents a real value
+    -- change. This prevents accessibility selection updates or repeated watcher
+    -- notifications from creating phantom history entries.
+    if type(content) == "string" and content ~= "" then
+        if content == lastAcceptedClipboardValue then return end
+    end
 
     -- cur_change_cnt = pasteboard.changeCount()
     -- print("[handleClipboardChange] start, cur_change_cnt = " .. tostring(cur_change_cnt) .. ", last_change = " .. tostring(last_change))
@@ -126,6 +146,7 @@ function handleClipboardChange(content)
             -- local sss = content:encodeAsURLString()
             -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
             pasteboardToClipboard("image", pasteboardImg)
+            lastAcceptedClipboardValue = pasteboardImg:encodeAsURLString()
             -- Trim history if it gets too long
             if #img_clipboard_history > max_history_size_for_img then
                 table.remove(img_clipboard_history, 1)
@@ -151,6 +172,7 @@ function handleClipboardChange(content)
                     end
             end
             pasteboardToClipboard("text", content)
+            lastAcceptedClipboardValue = content
             -- Trim history if it gets too long
             if #text_clipboard_history > max_history_size_for_text then
                 table.remove(text_clipboard_history, 1)
@@ -716,7 +738,8 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
-    pasteboard_watcher:start()  -- if u don't add this line, it will stop in some seconds for no reason, idk why
+    -- Starting the watcher does not synthesize any clipboard operations.
+    pasteboard_watcher:start()
 
     -- Remember the app that should receive a paste before the panel takes focus.
     local frontApp = application.frontmostApplication()
