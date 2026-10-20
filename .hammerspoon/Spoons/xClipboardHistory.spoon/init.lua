@@ -409,13 +409,16 @@ resultsPanel.setAttribute('aria-label', 'Clipboard history results');
 
 let selectedIndex = 0;
 function rows() { return Array.from(document.querySelectorAll('main .item')).filter(item => !item.hidden && item.dataset.action === 'paste'); }
-function selectRow(next) {
+function selectRow(next, shouldScroll = false) {
   const items = rows();
   if (!items.length) { selectedIndex = 0; return; }
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
-  // Selection/highlight must never move the grid on its own. The user controls
-  // viewport position by scrolling; keyboard navigation only changes the row state.
+  // Tab/focus changes leave the viewport untouched. Explicit arrow-key
+  // navigation passes shouldScroll=true to reveal the newly selected card.
+  if (shouldScroll && items[selectedIndex]) {
+    items[selectedIndex].scrollIntoView({block:'nearest'});
+  }
 }
 function clearRowSelection() {
   rows().forEach(item => item.classList.remove('selected'));
@@ -517,11 +520,11 @@ document.addEventListener('keydown', event => {
   const items = rows();
   if (resultsPanel.contains(event.target) && ['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
     event.preventDefault();
-    if (event.key === 'ArrowRight') selectRow(selectedIndex + 1);
-    else if (event.key === 'ArrowLeft') selectRow(selectedIndex - 1);
+    if (event.key === 'ArrowRight') selectRow(selectedIndex + 1, true);
+    else if (event.key === 'ArrowLeft') selectRow(selectedIndex - 1, true);
     else {
       const columns = Math.max(1, Math.round(document.querySelector('main').clientWidth / 250));
-      selectRow(selectedIndex + (event.key === 'ArrowDown' ? columns : -columns));
+      selectRow(selectedIndex + (event.key === 'ArrowDown' ? columns : -columns), true);
     }
     const selected = rows()[selectedIndex];
     if (selected) selected.focus({preventScroll:true});
