@@ -325,14 +325,16 @@ main:focus { outline:none; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
-.item { position:relative; }
-.hover-detail { display:none; position:fixed; z-index:10000; max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:#f5f6f8; background:#17191e; border:1px solid #697386; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
-.item:hover .hover-detail, .item:focus-visible .hover-detail { display:block; }
+.item { position:relative; cursor:pointer; }
+.item, .item * { cursor:pointer; }
+.item:hover { border-color:#85aaff; background:#30343d; }
+.hover-detail { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:#f5f6f8; background:#17191e; border:1px solid #697386; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
+.item.detail-open .hover-detail { display:block; }
 .text-detail { width:min(560px, calc(100vw - 32px)); }
 .hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
 .hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
 .image-detail { padding:8px; width:min(680px, calc(100vw - 32px)); height:min(70vh, 640px); display:none; align-items:center; justify-content:center; }
-.item:hover .image-detail, .item:focus-visible .image-detail { display:flex; }
+.item.detail-open .image-detail { display:flex; }
 .hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; }
 .hover-image-placeholder { color:#9ca3af; padding:20px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
@@ -396,42 +398,58 @@ document.addEventListener('click', event => {
   selectRow(rows().indexOf(item));
   bridge('paste', index, '');
 });
-// Place hover details within the visible window and flip them when the
-// pointer is near an edge. The tooltip is fixed-position so it never changes
-// the grid layout or pushes neighboring cards around.
-function positionHoverDetail(item, detail) {
-  const rect = item.getBoundingClientRect();
-  const gap = 12;
-  const margin = 12;
-  const width = Math.min(detail.offsetWidth || 560, window.innerWidth - margin * 2);
-  const height = Math.min(detail.offsetHeight || 240, window.innerHeight - margin * 2);
-  let left = rect.right + gap;
-  if (left + width > window.innerWidth - margin) left = rect.left - width - gap;
-  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
-  let top = rect.top;
-  if (top + height > window.innerHeight - margin) top = window.innerHeight - height - margin;
-  top = Math.max(margin, top);
-  detail.style.left = left + 'px';
-  detail.style.top = top + 'px';
+// Show the preview only after a continuous three-second hover, and keep
+// the preview centered in the clipboard-history window. Moving to another card
+// or leaving a card cancels the pending timer so previews don't flicker.
+let hoverDetailTimer = null;
+let pendingHoverItem = null;
+function hideHoverDetail(item) {
+  if (item) item.classList.remove('detail-open');
+}
+function cancelPendingHoverDetail() {
+  if (hoverDetailTimer !== null) {
+    clearTimeout(hoverDetailTimer);
+    hoverDetailTimer = null;
+  }
+  if (pendingHoverItem) hideHoverDetail(pendingHoverItem);
+  pendingHoverItem = null;
+}
+function scheduleHoverDetail(item) {
+  if (!item || !item.querySelector('.hover-detail')) return;
+  if (pendingHoverItem === item && hoverDetailTimer !== null) return;
+  cancelPendingHoverDetail();
+  pendingHoverItem = item;
+  hoverDetailTimer = setTimeout(() => {
+    hoverDetailTimer = null;
+    if (pendingHoverItem !== item || !item.isConnected) return;
+    item.classList.add('detail-open');
+  }, 3000);
 }
 document.addEventListener('pointerover', event => {
-  const item = event.target.closest('.item');
+  const item = event.target.closest && event.target.closest('#clipboard-items .item');
   if (!item) return;
-  const detail = item.querySelector('.hover-detail');
-  if (detail) positionHoverDetail(item, detail);
+  if (event.relatedTarget && item.contains(event.relatedTarget)) return;
+  scheduleHoverDetail(item);
+});
+document.addEventListener('pointerout', event => {
+  const item = event.target.closest && event.target.closest('#clipboard-items .item');
+  if (!item) return;
+  if (event.relatedTarget && item.contains(event.relatedTarget)) return;
+  if (pendingHoverItem === item) cancelPendingHoverDetail();
+  else hideHoverDetail(item);
 });
 document.addEventListener('focusin', event => {
-  const item = event.target.closest && event.target.closest('.item');
+  const item = event.target.closest && event.target.closest('#clipboard-items .item');
   if (!item) return;
-  const detail = item.querySelector('.hover-detail');
-  if (detail) positionHoverDetail(item, detail);
+  // Keyboard focus should not open details immediately; the three-second
+  // delay is specifically based on the pointer hovering over the card.
 });
-window.addEventListener('resize', () => {
-  const item = document.querySelector('.item:hover, .item:focus-visible');
-  if (!item) return;
-  const detail = item.querySelector('.hover-detail');
-  if (detail) positionHoverDetail(item, detail);
+document.addEventListener('pointermove', event => {
+  const item = event.target.closest && event.target.closest('#clipboard-items .item');
+  if (!item && pendingHoverItem) cancelPendingHoverDetail();
 });
+window.addEventListener('blur', cancelPendingHoverDetail);
+window.addEventListener('resize', cancelPendingHoverDetail);
 const search = document.getElementById('search');
 let searchTimer = null;
 const activeTypeFilters = new Set();
