@@ -97,7 +97,8 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
-.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:4px;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:0 5px 18px rgba(0,0,0,.24),0 1px 4px rgba(0,0,0,.14)!important;-webkit-box-shadow:0 5px 18px rgba(0,0,0,.24),0 1px 4px rgba(0,0,0,.14)!important;transition:background-color .12s,border-color .12s}
+.shadow-shell{display:inline-flex;flex:0 0 auto;margin:0;border-radius:22px;background:var(--toolbar-bg);box-shadow:0 8px 24px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.10);-webkit-box-shadow:0 8px 24px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.10);overflow:visible}
+.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:14px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
@@ -107,7 +108,7 @@ button:active{background-color:var(--toolbar-active)!important}
 [data-appearance="dark"]{--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
 </style>
-</head><body><div class="bar">
+</head><body><div class="shadow-shell"><div class="bar">
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
 <button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
@@ -116,7 +117,7 @@ __CUSTOM_AI_BUTTONS__
 <span class="separator"></span>
 <button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
 <button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
-</div><script>
+</div></div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 </script></body></html>
@@ -671,7 +672,9 @@ function obj:start()
         value = trim(value)
         if value == "" then return false end
         local now = hs.timer.secondsSinceEpoch()
-        if value ~= lastText and (now - lastShownAt) > 0.6 then
+        -- Suppress duplicate detections from the same gesture, but don't suppress
+        -- later selections just because the selected text matches the previous one.
+        if (now - lastShownAt) > 0.35 then
             selectedText = value
             lastText = value
             lastShownAt = now
