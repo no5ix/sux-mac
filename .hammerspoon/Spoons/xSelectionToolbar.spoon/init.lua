@@ -401,6 +401,7 @@ local function showCustomAIWindow(text, config)
         developerExtrasEnabled = false, javaScriptCanOpenWindowsAutomatically = false,
         transparent = false, shadow = true, opaque = true
     }, translationUsercontent)
+    translationWindow:shadow(true)
     translationWindow:windowStyle({"titled","closable","resizable"})
     translationWindow:allowTextEntry(true)
     translationWindow:windowTitle(config.label)
