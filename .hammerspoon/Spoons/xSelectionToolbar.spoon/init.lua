@@ -398,8 +398,11 @@ local function showCustomAIWindow(text, config)
     if mousePoint.y - h - 18 < f.y + 20 then y = math.min(mousePoint.y + 18, f.y + f.h - h - 20) end
     y = math.max(f.y + 20, math.min(y, f.y + f.h - h - 20))
     translationWindow = webview.new({x=x,y=y,w=w,h=h}, {
-        developerExtrasEnabled = false, javaScriptCanOpenWindowsAutomatically = false,
-        transparent = false, shadow = true, opaque = true
+        developerExtrasEnabled = false, 
+        javaScriptCanOpenWindowsAutomatically = false,
+        transparent = false, 
+        shadow = true,
+        opaque = true
     }, translationUsercontent)
     translationWindow:shadow(true)
     translationWindow:windowStyle({"titled","closable","resizable"})
