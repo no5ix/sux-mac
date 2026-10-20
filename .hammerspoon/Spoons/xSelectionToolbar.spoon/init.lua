@@ -843,6 +843,9 @@ function obj:start()
                 pendingCapture = true
                 local oldClipboard = pasteboard.getContents()
                 local oldCount = pasteboard.changeCount()
+                -- The clipboard-history Spoon can use this marker to ignore the
+                -- temporary copy used only to detect selected text.
+                _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.5
                 hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
                 timer.doAfter(0.16, function()
                     local newCount = pasteboard.changeCount()
