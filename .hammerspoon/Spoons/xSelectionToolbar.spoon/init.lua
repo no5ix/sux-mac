@@ -236,7 +236,9 @@ header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 h1{font-size:15px;margin:0;font-weight:650;flex:1}
 .status{font-size:11px;color:var(--muted)}
 #pin{padding:5px 8px;min-width:32px;font-size:14px;line-height:1}
-#pin[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+#pin[aria-pressed="true"]{background:#dbeafe;border-color:#bfdbfe;color:#334155}
+:root[data-appearance="dark"] #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}
+@media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 .actions{display:flex;justify-content:flex-end;margin-top:10px}
