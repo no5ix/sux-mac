@@ -293,6 +293,7 @@ main:focus { outline:none; }
 .action.danger { color:#ff9b9b; }
 main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
+#clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
 .item:hover { border-color:#85aaff; background:#30343d; }
 .item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:#191b20; border-radius:7px; }
@@ -455,7 +456,10 @@ document.addEventListener('keydown', event => {
     resultsPanel.focus();
     return;
   }
-  if (event.key === 'Tab' && event.target === resultsPanel && event.shiftKey) {
+  if (event.key === 'Tab' && event.shiftKey &&
+      (event.target === resultsPanel ||
+       (event.target.classList && event.target.classList.contains('item') &&
+        resultsPanel.contains(event.target)))) {
     event.preventDefault();
     search.focus();
     search.setSelectionRange(search.value.length, search.value.length);
