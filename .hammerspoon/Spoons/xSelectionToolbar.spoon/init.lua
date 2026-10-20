@@ -249,16 +249,24 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
-.actions{display:flex;justify-content:flex-end;margin-top:10px}
+#followup{display:block;width:100%;height:42px;min-height:42px;resize:none;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#followup:focus{outline:2px solid var(--accent);outline-offset:1px}
+.actions{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}
+.actions-left{display:flex;gap:8px}
 button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);padding:7px 11px;font:inherit;cursor:pointer}
 button:disabled{opacity:.4;cursor:default}
 </style></head><body>
 <header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
 <textarea id="result" readonly placeholder="Translation will appear here"></textarea>
-<div class="actions"><button id="copy" disabled>Copy</button></div>
+<textarea id="followup" aria-label="Follow-up instruction" placeholder="Ask a follow-up question… (Enter to send, Shift+Enter for a new line)"></textarea>
+<div class="actions"><div class="actions-left"><button id="send-followup">Send</button></div><button id="copy" disabled>Copy</button></div>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin');
+const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),sendFollowup=document.getElementById('send-followup');
+const sendFollowupMessage=()=>{const text=followup.value.trim();if(!text)return;bridge('followup',{text});followup.value='';};
+sendFollowup.addEventListener('click',sendFollowupMessage);
+followup.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();bridge('close');return;}if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendFollowupMessage();}});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();bridge('close');}});
 let pinned=false;
 pin.addEventListener('click',()=>{
   pinned=!pinned;
@@ -416,6 +424,18 @@ local function showCustomAIWindow(text, config)
                 pasteboard.setContents(body.text)
                 destroyTranslationWindow()
             end
+        elseif body.action == "close" then
+            destroyTranslationWindow()
+        elseif body.action == "followup" then
+            local followupText = trim(body.text)
+            if followupText ~= "" and translationWindow then
+                local title = config.label or "AI"
+                sendLocalPromptRequest(
+                    text .. "\\n\\nFollow-up question: " .. followupText,
+                    "{{text}}",
+                    title
+                )
+            end
         elseif body.action == "pin" and type(body.pinned) == "boolean" then
             translationWindowPinned = body.pinned
             if translationWindow then
@@ -437,7 +457,7 @@ local function showCustomAIWindow(text, config)
             if translationWindow and currentScreen then
                 local screenFrame = currentScreen:frame()
                 local maxWindowHeight = math.max(180, screenFrame.h - 40)
-                local targetHeight = math.min(maxWindowHeight, math.max(230, body.contentHeight + 148))
+                local targetHeight = math.min(maxWindowHeight, math.max(300, body.contentHeight + 220))
                 local windowFrame = translationWindow:frame()
                 local y = math.max(screenFrame.y + 20,
                     math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
@@ -453,7 +473,7 @@ local function showCustomAIWindow(text, config)
                 end
                 -- Keep the native window width exactly as it was; change height only.
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                local maxResultHeight = math.max(90, targetHeight - 148)
+                local maxResultHeight = math.max(90, targetHeight - 220)
                 translationWindow:evaluateJavaScript(
                     "window.setPopupResultHeight && window.setPopupResultHeight(" .. tostring(maxResultHeight) .. ");"
                 )
@@ -486,6 +506,13 @@ local function showCustomAIWindow(text, config)
     translationWindow:windowCallback(function(action, _, focused)
         if action == "focusChange" and focused == false and translationWindow and not translationWindowPinned then
             destroyTranslationWindow()
+        elseif action == "keyDown" then
+            -- Hammerspoon may deliver Escape at the native window level even
+            -- when WebKit focus is not inside a text field.
+            local event = _
+            if event and event:getKeyCode() == hs.keycodes.map.escape then
+                destroyTranslationWindow()
+            end
         end
     end)
     translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
@@ -493,7 +520,7 @@ local function showCustomAIWindow(text, config)
         if translationWindow then
             translationWindow:evaluateJavaScript(
                 "window.setPopupResultHeight && window.setPopupResultHeight(" ..
-                tostring(math.max(90, h - 148)) .. ");"
+                tostring(math.max(90, h - 220)) .. ");"
             )
         end
     end)
