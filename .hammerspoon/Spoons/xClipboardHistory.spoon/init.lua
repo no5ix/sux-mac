@@ -230,6 +230,7 @@ local function historyItemHTML(entry, index)
 end
 
 local function clipboardEntryMatches(entry, query, kind)
+    if kind == "none" then return false end
     if kind ~= "all" and entry.type ~= kind then return false end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     local searchableText = entry.type == "image" and "[image]" or tostring(entry.data or "")
@@ -308,10 +309,9 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <header><div class="top"><h1>Clipboard History</h1><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
 <div class="actions">
-<button class="action danger" data-action="clearAll">Clear All</button>
-<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Text</button>
-<button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Images</button>
-<button class="action" data-action="close">Close</button></div></header>
+<button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
+<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
+<button class="action danger" data-action="clearAll">Clear All</button></div></header>
 <main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
 <footer>Arrow keys: select · Click: paste · Right-click an item for bulk paste · Esc: close</footer>
 <script>
@@ -350,16 +350,23 @@ document.addEventListener('click', event => {
 });
 const search = document.getElementById('search');
 let searchTimer = null;
-let activeTypeFilter = 'all';
+const activeTypeFilters = new Set();
+function currentTypeFilter() {
+  if (activeTypeFilters.size === 0) return 'all';
+  if (activeTypeFilters.size === 2) return 'none';
+  return activeTypeFilters.has('text') ? 'text' : 'image';
+}
 function applyFilters() {
-  bridge('search', 0, search.value, activeTypeFilter);
+  bridge('search', 0, search.value, currentTypeFilter());
 }
 function setActiveFilter(button) {
-  activeTypeFilter = button.dataset.filter || 'all';
+  const kind = button.dataset.filter;
+  if (activeTypeFilters.has(kind)) activeTypeFilters.delete(kind);
+  else activeTypeFilters.add(kind);
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
-    other.setAttribute('aria-pressed', other === button ? 'true' : 'false');
+    other.setAttribute('aria-pressed', activeTypeFilters.has(other.dataset.filter) ? 'true' : 'false');
   });
-  bridge('search', 0, search.value, activeTypeFilter);
+  bridge('search', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
   if (searchTimer) clearTimeout(searchTimer);
@@ -480,7 +487,7 @@ end
 
 local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
-    if kind ~= "text" and kind ~= "image" then kind = "all" end
+    if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
     local hasMore = renderedCount < matchingCount
     local loadMoreHTML = hasMore and
@@ -501,7 +508,7 @@ local function updateClipboardPanel(query, kind, offset, append)
     script = script ..
         "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
         "var active=" .. jsStringLiteral(kind) .. ";" ..
-        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===active?'true':'false')});" ..
+        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',(active==='none'||b.dataset.filter===active)?'true':'false')});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
     clipboard_webview:evaluateJavaScript(script)
     clipboard_search = query
