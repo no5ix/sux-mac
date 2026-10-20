@@ -478,9 +478,10 @@ clipboard_usercontent = webview.usercontent.new("clipboardHistory")
 clipboard_usercontent:setCallback(handleClipboardPanelMessage)
 clipboard_webview = webview.new(
     {x = 120, y = 80, w = 980, h = 760},
-    {javaScriptEnabled = true, privateBrowsing = true},
+    {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
     clipboard_usercontent
 ):windowStyle({"titled", "closable", "resizable"})
+clipboard_webview:shadow(true)
 clipboard_webview:allowTextEntry(true)
 clipboard_webview:windowCallback(function(action, _, focused)
     if action == "focusChange" and focused == false and not suppressFocusDismiss then
