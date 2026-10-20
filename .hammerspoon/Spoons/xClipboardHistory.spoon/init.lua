@@ -283,6 +283,9 @@ h1 { margin:0; font-size:17px; font-weight:650; flex:1; }
 .count { color:#aab0bd; font-size:12px; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid #454a55; background:#15171b; color:#f5f6f8; font-size:13px; outline:none; }
 input:focus { border-color:#7da6ff; }
+main:focus { outline:none; }
+.item:focus-visible { outline:2px solid #8cb1ff; outline-offset:2px; }
+.item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; gap:8px; margin-top:10px; }
 .action { border:1px solid #4a505b; border-radius:8px; padding:7px 10px; background:#30343d; color:#f7f7f9; cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; }
@@ -313,7 +316,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 <button class="action danger" data-action="clearAll">Clear All</button></div></header>
 <main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
-<footer>Arrow keys: select · Click: paste · Right-click an item for bulk paste · Esc: close</footer>
+<footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query, kind) => {
   try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind}); } catch (_) {}
@@ -372,6 +375,11 @@ search.addEventListener('input', () => {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(applyFilters, 160);
 });
+const resultsPanel = document.getElementById('clipboard-items');
+resultsPanel.tabIndex = 0;
+resultsPanel.setAttribute('role', 'listbox');
+resultsPanel.setAttribute('aria-label', 'Clipboard history results');
+
 let selectedIndex = 0;
 function rows() { return Array.from(document.querySelectorAll('main .item')).filter(item => !item.hidden && item.dataset.action === 'paste'); }
 function selectRow(next) {
@@ -381,6 +389,23 @@ function selectRow(next) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
   items[selectedIndex].scrollIntoView({block:'nearest'});
 }
+resultsPanel.addEventListener('focus', () => {
+  const items = rows();
+  if (items.length) {
+    selectedIndex = Math.max(0, Math.min(items.length - 1, selectedIndex));
+    items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
+  }
+});
+resultsPanel.addEventListener('focusout', event => {
+  if (event.relatedTarget === search) return;
+});
+document.addEventListener('focusin', event => {
+  if (event.target.classList && event.target.classList.contains('item')) {
+    const items = rows();
+    const index = items.indexOf(event.target);
+    if (index >= 0) selectRow(index);
+  }
+});
 window.resetClipboardSelection = () => {
   selectedIndex = 0;
   const items = rows();
@@ -423,6 +448,22 @@ document.addEventListener('click', event => {
 });
 
 document.addEventListener('keydown', event => {
+  // Keep arrow keys in the search input native, so the caret can move through
+  // the query. Tab moves to the results container; Shift+Tab returns to search.
+  if (event.key === 'Tab' && event.target === search && !event.shiftKey) {
+    event.preventDefault();
+    resultsPanel.focus();
+    return;
+  }
+  if (event.key === 'Tab' && event.target === resultsPanel && event.shiftKey) {
+    event.preventDefault();
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+    return;
+  }
+  if (event.target === search && ['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
+    return;
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
     if (contextMenu.style.display !== 'none') contextMenu.style.display = 'none';
@@ -430,7 +471,7 @@ document.addEventListener('keydown', event => {
     return;
   }
   const items = rows();
-  if (['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
+  if (resultsPanel.contains(event.target) && ['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)) {
     event.preventDefault();
     if (event.key === 'ArrowRight') selectRow(selectedIndex + 1);
     else if (event.key === 'ArrowLeft') selectRow(selectedIndex - 1);
@@ -438,6 +479,8 @@ document.addEventListener('keydown', event => {
       const columns = Math.max(1, Math.round(document.querySelector('main').clientWidth / 250));
       selectRow(selectedIndex + (event.key === 'ArrowDown' ? columns : -columns));
     }
+    const selected = rows()[selectedIndex];
+    if (selected) selected.focus({preventScroll:true});
     return;
   }
   if (event.key === 'Enter') {
