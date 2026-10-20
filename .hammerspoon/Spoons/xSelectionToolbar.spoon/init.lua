@@ -312,7 +312,29 @@ local function translationJSCall(functionName, value)
     return "window." .. functionName .. "(" .. literal .. ");"
 end
 
+local translationEscapeTap = nil
+
+local function stopTranslationEscapeTap()
+    if translationEscapeTap then
+        translationEscapeTap:stop()
+        translationEscapeTap = nil
+    end
+end
+
+local function startTranslationEscapeTap()
+    stopTranslationEscapeTap()
+    translationEscapeTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
+        if event:getKeyCode() == hs.keycodes.map.escape and translationWindow then
+            destroyTranslationWindow()
+            return true
+        end
+        return false
+    end)
+    if translationEscapeTap then translationEscapeTap:start() end
+end
+
 local function destroyTranslationWindow()
+    stopTranslationEscapeTap()
     -- Restore the standard window level before clearing the pinned popup.
     if translationWindow then
         pcall(function() translationWindow:level(hs.drawing.windowLevels.normal) end)
@@ -506,13 +528,6 @@ local function showCustomAIWindow(text, config)
     translationWindow:windowCallback(function(action, _, focused)
         if action == "focusChange" and focused == false and translationWindow and not translationWindowPinned then
             destroyTranslationWindow()
-        elseif action == "keyDown" then
-            -- Hammerspoon may deliver Escape at the native window level even
-            -- when WebKit focus is not inside a text field.
-            local event = _
-            if event and event:getKeyCode() == hs.keycodes.map.escape then
-                destroyTranslationWindow()
-            end
         end
     end)
     translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
@@ -528,6 +543,7 @@ local function showCustomAIWindow(text, config)
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
     translationWindow:hswindow():focus()
+    startTranslationEscapeTap()
     timer.doAfter(0.15, function()
         if translationWindow then sendLocalPromptRequest(text, config.prompt, config.label) end
     end)
