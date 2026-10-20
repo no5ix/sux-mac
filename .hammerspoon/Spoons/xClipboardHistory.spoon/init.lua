@@ -413,7 +413,11 @@ function selectRow(next) {
   if (!items.length) { selectedIndex = 0; return; }
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
-  items[selectedIndex].scrollIntoView({block:'nearest'});
+  // Do not scroll when Tab merely moves focus to the result container.
+  // Arrow-key navigation explicitly focuses a row and can still scroll as needed.
+  if (document.activeElement !== search && document.activeElement !== resultsPanel) {
+    items[selectedIndex].scrollIntoView({block:'nearest'});
+  }
 }
 function clearRowSelection() {
   rows().forEach(item => item.classList.remove('selected'));
@@ -526,7 +530,9 @@ document.addEventListener('keydown', event => {
     if (item) bridge('paste', Number(item.dataset.index || 0), '');
   }
 });
-setTimeout(() => selectRow(0), 0);
+// Do not preselect the first card or scroll the grid on open. Tab should
+// only move focus to the results container; the user chooses a row with arrows.
+clearRowSelection();
 search.focus();
 </script></body></html>]]
     return html
@@ -749,8 +755,15 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
-    -- Starting the watcher does not synthesize any clipboard operations.
+    -- Initialize defensively in case the watcher was torn down during reload.
+    if not pasteboard_watcher then
+        pasteboard_watcher = pbwatcher.new(handleClipboardChange)
+    end
     pasteboard_watcher:start()
+    if not clipboard_webview then
+        logger.e("Clipboard history panel is unavailable; cannot show it")
+        return
+    end
 
     -- Remember the app that should receive a paste before the panel takes focus.
     local frontApp = application.frontmostApplication()
@@ -787,26 +800,39 @@ function showClipboardHistory()
         end
     end
 
-    -- add all the text and img history into the menuData
+    -- Merge newest-first snapshots defensively. Clipboard callbacks may trim
+    -- history while the panel is being assembled, so never index an absent entry.
     local i = #text_clipboard_history
     local j = #img_clipboard_history
     while i >= 1 and j >= 1 do
-        if text_clipboard_history[i].ts > img_clipboard_history[j].ts then
-            insertToMenuData(text_clipboard_history[i].content, "text", text_clipboard_history[i].ts)
+        local textEntry = text_clipboard_history[i]
+        local imageEntry = img_clipboard_history[j]
+        if not textEntry then
+            i = i - 1
+        elseif not imageEntry then
+            j = j - 1
+        elseif textEntry.ts > imageEntry.ts then
+            insertToMenuData(textEntry.content, "text", textEntry.ts)
             i = i - 1
         else
-            insertToMenuData(img_clipboard_history[j], "image", img_clipboard_history[j].ts)
+            insertToMenuData(imageEntry, "image", imageEntry.ts)
             j = j - 1
         end
     end
 
     while i >= 1 do
-        insertToMenuData(text_clipboard_history[i].content, "text", text_clipboard_history[i].ts)
+        local textEntry = text_clipboard_history[i]
+        if textEntry then
+            insertToMenuData(textEntry.content, "text", textEntry.ts)
+        end
         i = i - 1
     end
 
     while j >= 1 do
-        insertToMenuData(img_clipboard_history[j], "image", img_clipboard_history[j].ts)
+        local imageEntry = img_clipboard_history[j]
+        if imageEntry then
+            insertToMenuData(imageEntry, "image", imageEntry.ts)
+        end
         j = j - 1
     end
 
