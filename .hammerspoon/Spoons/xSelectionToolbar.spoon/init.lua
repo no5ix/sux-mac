@@ -719,8 +719,19 @@ function obj:start()
             local function walk(element)
                 local depth = 0
                 while element and depth < 10 do
+                    -- Only accept actual selected text from text-capable controls.
+                    -- Finder file selections and generic AXSelectedText-like values
+                    -- must not trigger the floating text toolbar.
+                    local role = element:attributeValue("AXRole")
+                    local subrole = element:attributeValue("AXSubrole")
                     local selected = element:attributeValue("AXSelectedText")
-                    if type(selected) == "string" and trim(selected) ~= "" then return selected end
+                    local textRole = role == "AXTextField" or role == "AXTextArea"
+                        or role == "AXTextView" or role == "AXComboBox"
+                        or role == "AXWebArea" or role == "AXSearchField"
+                    local textSubrole = subrole == "AXSearchField"
+                    if textRole or textSubrole then
+                        if type(selected) == "string" and trim(selected) ~= "" then return selected end
+                    end
                     element = element:attributeValue("AXParent")
                     depth = depth + 1
                 end
@@ -728,7 +739,7 @@ function obj:start()
             end
             local system = hs.axuielement.systemElement()
             local focused = system and system:attributeValue("AXFocusedUIElement")
-            return walk(focused) or walk(hs.axuielement.systemElementAtPosition(hs.mouse.absolutePosition()))
+            return walk(focused)
         end)
         return ok and trim(value) or ""
     end
@@ -812,9 +823,15 @@ function obj:start()
                 if showIfSelection(value) then return end
                 if not didDrag or pendingCapture then return end
 
-                -- Only keep the toolbar when the drag produced a real text selection.
-                -- If Accessibility cannot report a selection, use copy as a fallback,
-                -- but require a clipboard change and restore the prior clipboard.
+                -- Do not synthesize Cmd+C for Finder or other file-oriented apps:
+                -- a drag there usually selects files, and their clipboard payload is
+                -- not a text selection.
+                local appName = string.lower(app:name() or "")
+                local bundleID = string.lower(app:bundleID() or "")
+                if bundleID == "com.apple.finder" or appName == "finder" then return end
+
+                -- If Accessibility cannot report selected text, fallback to Cmd+C,
+                -- but accept only a new plain-text clipboard string and restore the prior clipboard.
                 pendingCapture = true
                 local oldClipboard = pasteboard.getContents()
                 local oldCount = pasteboard.changeCount()
@@ -824,12 +841,18 @@ function obj:start()
                     local copied = trim(pasteboard.getContents())
                     if oldClipboard ~= nil and newCount ~= oldCount then pasteboard.setContents(oldClipboard) end
                     pendingCapture = false
-                    if newCount ~= oldCount and copied ~= "" then
+                    -- Text toolbar is only for newly copied plain text. If the
+                    -- copy command produces a file URL, image payload, or no clipboard
+                    -- change, do not display the toolbar.
+                    local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
+                        and not copied:match("^file://")
+                        and not copied:match("^/[^%s]+$")
+                    if newCount ~= oldCount and isPlainText then
                         local axValue = selectionFromAccessibility()
                         local selection = trim(axValue ~= "" and axValue or copied)
-                        -- Ignore common stale clipboard values by requiring that
-                        -- the selection/copy produced a new pasteboard change.
-                        showIfSelection(selection)
+                        if selection ~= "" and not looksLikeImagePayload(selection) then
+                            showIfSelection(selection)
+                        end
                     end
                 end)
             end)
