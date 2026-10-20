@@ -259,13 +259,17 @@ local function renderClipboardBatch(query, kind, offset)
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
     visibleIndices = matches
-    return table.concat(cards, "\\n"), #matches, last
+    return table.concat(cards, "\n"), #matches, last
 end
 
 function clipboardPanelHTML()
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
     clipboard_search = ""
     clipboard_type_filter = "all"
+    local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
+    local loadMoreHTML = renderedCount < matchingCount and
+        '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -308,7 +312,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Text</button>
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Images</button>
 <button class="action" data-action="close">Close</button></div></header>
-<main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No clipboard items</div>') .. [[</main>
+<main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
 <footer>Arrow keys: select · Click: paste · Right-click an item for bulk paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query, kind) => {
@@ -472,7 +476,6 @@ end
 
 local local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
-    kind = kind == "text" or kind == "image" and kind or "all"
     if kind ~= "text" and kind ~= "image" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
     local hasMore = renderedCount < matchingCount
