@@ -313,6 +313,7 @@ local function translationJSCall(functionName, value)
 end
 
 local translationEscapeTap = nil
+local destroyTranslationWindow
 
 local function stopTranslationEscapeTap()
     if translationEscapeTap then
@@ -325,7 +326,9 @@ local function startTranslationEscapeTap()
     stopTranslationEscapeTap()
     translationEscapeTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         if event:getKeyCode() == hs.keycodes.map.escape and translationWindow then
-            destroyTranslationWindow()
+            -- Use the forward-declared local so the callback resolves the
+            -- function assigned below, not a nonexistent global.
+            if destroyTranslationWindow then destroyTranslationWindow() end
             return true
         end
         return false
@@ -333,7 +336,7 @@ local function startTranslationEscapeTap()
     if translationEscapeTap then translationEscapeTap:start() end
 end
 
-local function destroyTranslationWindow()
+destroyTranslationWindow = function()
     stopTranslationEscapeTap()
     -- Restore the standard window level before clearing the pinned popup.
     if translationWindow then
