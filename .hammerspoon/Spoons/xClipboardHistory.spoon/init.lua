@@ -227,31 +227,36 @@ end
 
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    local selectedClass = ""
     if entry.type == "image" then
-        local src = entry.historyEntry and entry.historyEntry.thumbnailData or ""
+        local historyEntry = entry.historyEntry
+        local thumbnail = historyEntry and historyEntry.thumbnailData or ""
+        local fullImage = historyEntry and historyEntry.imageData or thumbnail
         local preview
-        if src ~= "" then
-            preview = '<img class="preview" src="' .. escapeHTML(src) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">'
+        if thumbnail ~= "" then
+            preview = '<img class="preview" src="' .. escapeHTML(thumbnail) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">'
         else
             preview = '<div class="preview placeholder">Image preview unavailable</div>'
         end
-        return '<button class="item image-item' .. selectedClass .. '" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
+        local fullPreview = fullImage ~= "" and
+            '<img class="hover-image" src="' .. escapeHTML(fullImage) .. '" alt="Full clipboard image preview">' or
+            '<div class="hover-image-placeholder">Image preview unavailable</div>'
+        return '<button class="item image-item" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
             preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
-            escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
+            escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div>' ..
+            '<div class="hover-detail image-detail" role="tooltip">' .. fullPreview .. '</div></button>'
     end
     local content = tostring(entry.data or "")
-    -- Render the captured clipboard string directly. Do not transform its
-    -- characters in Lua; CSS handles line wrapping and clipping in the card.
-    -- This makes the preview a faithful view of the actual saved clipboard data.
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
     end
-    return '<button class="item text-item' .. selectedClass .. '" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower(content .. " " .. stamp)) .. '">' ..
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower(content .. " " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
-        '</div><div class="hint">Click to paste</div></button>'
+        '</div><div class="hint">Click to paste</div>' ..
+        '<div class="hover-detail text-detail" role="tooltip">' ..
+        '<div class="hover-detail-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
+        '<div class="hover-full-text">' .. escapeHTML(previewText) .. '</div></div></button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -320,6 +325,16 @@ main:focus { outline:none; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+.item { position:relative; }
+.hover-detail { display:none; position:fixed; z-index:10000; max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:#f5f6f8; background:#17191e; border:1px solid #697386; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
+.item:hover .hover-detail, .item:focus-visible .hover-detail { display:block; }
+.text-detail { width:min(560px, calc(100vw - 32px)); }
+.hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
+.hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
+.image-detail { padding:8px; width:min(680px, calc(100vw - 32px)); height:min(70vh, 640px); display:none; align-items:center; justify-content:center; }
+.item:hover .image-detail, .item:focus-visible .image-detail { display:flex; }
+.hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; }
+.hover-image-placeholder { color:#9ca3af; padding:20px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
 #clipboard-items .item { position:relative; margin:0; }
@@ -380,6 +395,42 @@ document.addEventListener('click', event => {
   const index = Number(item.dataset.index || 0);
   selectRow(rows().indexOf(item));
   bridge('paste', index, '');
+});
+// Place hover details within the visible window and flip them when the
+// pointer is near an edge. The tooltip is fixed-position so it never changes
+// the grid layout or pushes neighboring cards around.
+function positionHoverDetail(item, detail) {
+  const rect = item.getBoundingClientRect();
+  const gap = 12;
+  const margin = 12;
+  const width = Math.min(detail.offsetWidth || 560, window.innerWidth - margin * 2);
+  const height = Math.min(detail.offsetHeight || 240, window.innerHeight - margin * 2);
+  let left = rect.right + gap;
+  if (left + width > window.innerWidth - margin) left = rect.left - width - gap;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  let top = rect.top;
+  if (top + height > window.innerHeight - margin) top = window.innerHeight - height - margin;
+  top = Math.max(margin, top);
+  detail.style.left = left + 'px';
+  detail.style.top = top + 'px';
+}
+document.addEventListener('pointerover', event => {
+  const item = event.target.closest('.item');
+  if (!item) return;
+  const detail = item.querySelector('.hover-detail');
+  if (detail) positionHoverDetail(item, detail);
+});
+document.addEventListener('focusin', event => {
+  const item = event.target.closest && event.target.closest('.item');
+  if (!item) return;
+  const detail = item.querySelector('.hover-detail');
+  if (detail) positionHoverDetail(item, detail);
+});
+window.addEventListener('resize', () => {
+  const item = document.querySelector('.item:hover, .item:focus-visible');
+  if (!item) return;
+  const detail = item.querySelector('.hover-detail');
+  if (detail) positionHoverDetail(item, detail);
 });
 const search = document.getElementById('search');
 let searchTimer = null;
@@ -859,7 +910,12 @@ function showClipboardHistory()
     clipboard_webview:html(clipboardPanelHTML())
     positionPanelOnCurrentScreen()
     clipboard_webview:show()
-    clipboard_webview:hswindow():focus()
+    local hsWindow = clipboard_webview:hswindow()
+    if hsWindow then
+        hsWindow:focus()
+    else
+        logger.e("Clipboard history window is unavailable; skipped explicit window focus")
+    end
     clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
     -- Clear this guard after the initial key-window transition settles.
     hs.timer.doAfter(0.25, function() suppressFocusDismiss = false end)
