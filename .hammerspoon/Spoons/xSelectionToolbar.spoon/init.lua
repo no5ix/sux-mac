@@ -29,16 +29,80 @@ local CUSTOM_AI_BUTTONS = {
     {
         id = "translation",
         label = "Translation",
-        icon = "🌐",
-        -- prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
-        prompt = "If there is only one sentence, don’t provide a bilingual translation with the original foreign-language text and Chinese side by side. If there are multiple sentences, provide a bilingual translation with each sentence in the original foreign language followed by its Chinese translation. If there is any Thai text, translate only the Thai text and don’t translate the English. If the text is entirely in English, translate it directly into Chinese. For English text, explain any words above the B1 level at the end of each sentence and include their IPA pronunciations: \\n\\n{{text}}",
+        icon = "🌏",
+        prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
+        -- prompt = "If there is only one sentence, don’t provide a bilingual translation with the original foreign-language text and Chinese side by side. If there are multiple sentences, provide a bilingual translation with each sentence in the original foreign language followed by its Chinese translation. If there is any Thai text, translate only the Thai text and don’t translate the English. If the text is entirely in English, translate it directly into Chinese. For English text, explain any words above the B1 level at the end of each sentence and include their IPA pronunciations: \\n\\n{{text}}",
+        -- prompt = [[Please process the text below according to the following rules.
+
+        --     **1. Translation Format**
+        --     - If the input contains only one sentence, provide the Chinese translation directly without displaying the original foreign-language sentence alongside it.
+        --     - If the input contains multiple sentences, provide a bilingual translation, with each sentence in the original foreign language followed immediately by its Chinese translation.
+        --     - If the input contains any Thai text, translate only the Thai text into Chinese and leave all English text untranslated.
+        --     - If the input is entirely in English, translate the English text directly into Chinese.
+
+        --     **2. Vocabulary Explanations for English Text**
+        --     - For English text, identify words above the B1 level in each sentence and explain their meanings in Chinese.
+        --     - Include the IPA pronunciation of each identified word.
+        --     - Place the vocabulary explanations immediately after the Chinese translation of the corresponding sentence.
+        --     - If a sentence contains no words above the B1 level, do not add a vocabulary explanation for that sentence.
+        --     - Avoid explaining the same word repeatedly unless its meaning differs by context.
+
+        --     **3. Important Rules**
+        --     - Preserve the original meaning and context when translating.
+        --     - Use natural, colloquial Chinese rather than stiff, word-for-word translations.
+        --     - Follow the sentence-by-sentence format consistently when the input contains multiple sentences.
+        --     - Do not add introductions, conclusions, or unrelated commentary.
+
+        --     **Text to Process:**
+
+        --     {{text}}
+        -- ]],
     },
     {
         id = "correct",
         label = "Correct",
         icon = "✏️",
         -- prompt = "Proofread the text below. Fix grammar, spelling, punctuation, and missing words with minimal changes. Preserve the original meaning, wording, and sentence structure. Output only the corrected text.\\n\\n{{text}}",
-        prompt = "Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all 'um/uh' fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: \\n\\n{{text}}",
+        prompt = [[Please process the text below according to the following instructions.
+
+            **1. Corrected English**
+
+            Proofread the original text and fix grammar, spelling, punctuation, and missing words with minimal changes. Strictly preserve the original meaning, word choices, and sentence structure. Do not rewrite, paraphrase, or improve the writing style. Only make changes necessary for grammatical correctness and natural readability. Remove all “um” and “uh” fillers and unnecessary pauses, and merge sentence fragments into complete, natural sentences where necessary.
+
+            **2. Colloquial Chinese Translation**
+
+            Translate the corrected English into very colloquial, natural-sounding Chinese, as people would actually speak in everyday life. Preserve the original meaning, tone, and intent rather than translating word for word. Make the Chinese easy to understand and conversational.
+
+            **3. Natural American Expression**
+
+            Rewrite the corrected English to show how a native American English speaker would naturally express the same meaning in everyday conversation. You may rephrase sentences more freely in this section, but preserve the original meaning. Use natural, conversational American English without excessive slang, overly formal expressions, or unnecessarily complicated vocabulary.
+
+            **Output Format**
+
+            For each section, use the following format:
+
+            **1. Corrected English**
+            [The minimally corrected English text]
+
+            **2. Colloquial Chinese Translation**
+            [The natural, conversational Chinese translation]
+
+            **3. Natural American Expression**
+            [The natural, everyday American English version]
+
+            **Important Rules**
+            - Keep the three sections in the exact order specified above.
+            - Do not omit any meaningful information from the original text.
+            - Do not add explanations, grammar notes, commentary, or extra sections.
+            - If the original text contains multiple sentences or paragraphs, preserve the original organization as much as possible.
+            - Make the first section as conservative as possible and reserve freer rephrasing for the third section.
+            - If the text contains Chinese words embedded in English sentences, translate those Chinese words into appropriate English in Sections 1 and 3 while preserving their intended meaning.
+
+            **Text to Process:**
+
+            {{text}}
+        ]],
+        -- prompt = "Please proofread the following text. Make minimal changes to fix grammar and missing components. Strictly preserve my original word choices and sentence patterns. Do not “improve” the style—only fix the mistakes and Remove all 'um/uh' fillers and pauses. Merge fragments into complete, natural spoken sentences. just make it grammatically correct and smooth to read. Then, you need to translate your corrected text into very colloquial Chinese, and please don’t use any periods at the end. 你可以适当加一点中国人常用的口头禅，甚至是粗鄙一点的口头禅都可以，比如说像，“那差别可太他妈大了”，这种。Finally, give me a Natural American Expression that Shows how a native American English speaker would naturally say the same thing in daily life.This section can rewrite the sentence more freely to sound native and conversational.Keep the meaning the same, but make it sound realistic and commonly spoken in America.Avoid slang that is too extreme or hard to understand: \\n\\n{{text}}",
     },
 }
 
@@ -114,8 +178,8 @@ button:active{background-color:var(--toolbar-active)!important}
 
 __CUSTOM_AI_BUTTONS__
 <span class="separator"></span>
-<button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔎</span></button>
-<button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📖</span></button>
+<button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔍</span></button>
+<button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📚</span></button>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
@@ -671,7 +735,9 @@ function obj:start()
         value = trim(value)
         if value == "" then return false end
         local now = hs.timer.secondsSinceEpoch()
-        if value ~= lastText and (now - lastShownAt) > 0.6 then
+        -- Suppress duplicate detections from the same gesture, but don't suppress
+        -- later selections just because the selected text matches the previous one.
+        if (now - lastShownAt) > 0.35 then
             selectedText = value
             lastText = value
             lastShownAt = now
