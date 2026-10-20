@@ -16,6 +16,9 @@ local menuData = {}  -- Clipboard history data
 local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
+local clipboard_type_filter = "all" -- "all", "text", or "image"
+local panelCacheKey = nil
+local panelCacheHTML = nil
 local previousApplication = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
@@ -80,10 +83,11 @@ function pasteboardToClipboard(item_type, item)
             local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
             thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
         end
+        local fullImageURL = item:encodeAsURLString()
         table.insert(img_clipboard_history, {
             ts=cur_ts,
-            imageData=item:encodeAsURLString(),
-            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or item:encodeAsURLString()
+            imageData=fullImageURL,
+            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or fullImageURL
         })
         thumbnail = nil
     end
@@ -206,7 +210,7 @@ local function historyItemHTML(entry, index)
         else
             preview = '<div class="preview placeholder">Image preview unavailable</div>'
         end
-        return '<button class="item image-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
+        return '<button class="item image-item' .. selectedClass .. '" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
             preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div></button>'
     end
@@ -218,25 +222,21 @@ local function historyItemHTML(entry, index)
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
     end
-    return '<button class="item text-item' .. selectedClass .. '" data-action="paste" data-index="' .. index .. '">' ..
+    return '<button class="item text-item' .. selectedClass .. '" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower(content .. " " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div></button>'
 end
 
 function clipboardPanelHTML()
+    -- Build the card list once per history snapshot. Search and type filtering
+    -- run client-side so typing does not trigger a Lua scan or DOM replacement.
     local cards = {}
     visibleIndices = {}
-    local filter = string.lower(clipboard_search or "")
     for index, entry in ipairs(menuData or {}) do
         if entry.type == "text" or entry.type == "image" then
-            local searchableText = isImageDataURL(entry.data) and "[image data]" or tostring(entry.data or "")
-            local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
-                searchableText .. " " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
-            if filter == "" or searchable:find(filter, 1, true) then
-                visibleIndices[#visibleIndices + 1] = index
-                cards[#cards + 1] = historyItemHTML(entry, index)
-            end
+            visibleIndices[#visibleIndices + 1] = index
+            cards[#cards + 1] = historyItemHTML(entry, index)
         end
     end
     local html = [[
@@ -254,6 +254,7 @@ input:focus { border-color:#7da6ff; }
 .actions { display:flex; gap:8px; margin-top:10px; }
 .action { border:1px solid #4a505b; border-radius:8px; padding:7px 10px; background:#30343d; color:#f7f7f9; cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; }
+.action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
 main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
@@ -277,8 +278,10 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
 <div class="actions">
 <button class="action danger" data-action="clearAll">Clear All</button>
+<button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
+<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 <button class="action" data-action="close">Close</button></div></header>
-<main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No matching clipboard items</div>') .. [[</main>
+<main>]] .. (#cards > 0 and table.concat(cards, "\n") or '<div class="empty">No clipboard items</div>') .. [[</main>
 <footer>Arrow keys: select · Click: paste · Right-click an item for bulk paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query) => {
@@ -302,7 +305,51 @@ document.addEventListener('click', event => {
   bridge('paste', index, '');
 });
 const search = document.getElementById('search');
-search.addEventListener('input', () => bridge('search', 0, search.value));
+let searchTimer = null;
+let activeTypeFilter = 'all';
+function applyFilters() {
+  const query = search.value.toLocaleLowerCase();
+  let count = 0;
+  const items = Array.from(document.querySelectorAll('main .item'));
+  items.forEach(item => {
+    const kind = item.dataset.kind || 'text';
+    const matchesKind = activeTypeFilter === 'all' || kind === activeTypeFilter;
+    const matchesQuery = !query || (item.dataset.search || '').includes(query);
+    const visible = matchesKind && matchesQuery;
+    item.hidden = !visible;
+    if (visible) count++;
+  });
+  const empty = document.getElementById('no-matches');
+  if (empty) empty.hidden = count !== 0;
+  document.querySelector('.count').textContent = count + ' matching items';
+  selectedIndex = 0;
+  selectRow(0);
+}
+function showEmptyState() {
+  let empty = document.getElementById('no-matches');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'no-matches';
+    empty.className = 'empty';
+    empty.textContent = 'No matching clipboard items';
+    document.querySelector('main').appendChild(empty);
+  }
+  return empty;
+}
+showEmptyState();
+document.querySelectorAll('[data-action="filter"]').forEach(button => {
+  button.addEventListener('click', () => {
+    activeTypeFilter = button.dataset.filter || 'all';
+    document.querySelectorAll('[data-action="filter"]').forEach(other => {
+      other.setAttribute('aria-pressed', other === button ? 'true' : 'false');
+    });
+    applyFilters();
+  });
+});
+search.addEventListener('input', () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyFilters, 45);
+});
 let selectedIndex = 0;
 function rows() { return Array.from(document.querySelectorAll('.item')); }
 function selectRow(next) {
@@ -347,7 +394,7 @@ contextMenu.querySelector('button').addEventListener('click', event => {
 document.addEventListener('click', event => {
   if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
 });
-search.addEventListener('input', () => { selectedIndex = 0; setTimeout(() => selectRow(0), 0); });
+
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -417,31 +464,8 @@ local function handleClipboardPanelMessage(message)
     if body.action == "close" then
         if clipboard_webview then clipboard_webview:hide() end
     elseif body.action == "search" then
+        -- Search is handled entirely inside the WebView for low-latency typing.
         clipboard_search = tostring(body.query or "")
-        -- Filter the visible cards in-place so the search field keeps focus.
-        local filter = string.lower(clipboard_search)
-        local cards = {}
-        visibleIndices = {}
-        selectedVisibleIndex = 1
-        for index, entry in ipairs(menuData or {}) do
-            if entry.type == "text" or entry.type == "image" then
-                local searchableText = isImageDataURL(entry.data) and "[image data]" or tostring(entry.data or "")
-                local searchable = string.lower((entry.type == "image" and "[image] " or "") ..
-                    searchableText .. " " ..
-                    os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time()))
-                if filter == "" or searchable:find(filter, 1, true) then
-                    visibleIndices[#visibleIndices + 1] = index
-                    cards[#cards + 1] = historyItemHTML(entry, index)
-                end
-            end
-        end
-        local cardsHTML = #cards > 0 and table.concat(cards, "\n")
-            or '<div class="empty">No matching clipboard items</div>'
-        clipboard_webview:evaluateJavaScript(
-            "document.querySelector('main').innerHTML = " .. jsStringLiteral(cardsHTML) .. ";" ..
-            "document.querySelector('.count').textContent = " ..
-            jsStringLiteral(tostring(#cards) .. " matching items") .. ";"
-        )
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
