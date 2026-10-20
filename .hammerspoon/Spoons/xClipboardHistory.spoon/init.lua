@@ -319,9 +319,11 @@ main:focus { outline:none; }
 .action.primary { background:#3267d6; border-color:#3267d6; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
-main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; align-content:start; }
+main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; align-content:start; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
+#clipboard-items .item { position:relative; margin:0; }
+#clipboard-items .item.selected { z-index:1; }
 .item:hover { border-color:#85aaff; background:#30343d; }
 .item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:#191b20; border-radius:7px; }
@@ -415,10 +417,20 @@ function selectRow(next, shouldScroll = false) {
   if (!items.length) { selectedIndex = 0; return; }
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
-  // Tab/focus changes leave the viewport untouched. Explicit arrow-key
-  // navigation passes shouldScroll=true to reveal the newly selected card.
+  // Keep cards clear of the fixed header and footer when navigating.
+  // Scroll only the results grid (never the whole document/window).
   if (shouldScroll && items[selectedIndex]) {
-    items[selectedIndex].scrollIntoView({block:'nearest'});
+    const container = resultsPanel;
+    const item = items[selectedIndex];
+    const containerRect = container.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const topInset = 16;
+    const bottomInset = 16;
+    if (itemRect.top < containerRect.top + topInset) {
+      container.scrollTop -= (containerRect.top + topInset) - itemRect.top;
+    } else if (itemRect.bottom > containerRect.bottom - bottomInset) {
+      container.scrollTop += itemRect.bottom - (containerRect.bottom - bottomInset);
+    }
   }
 }
 function clearRowSelection() {
