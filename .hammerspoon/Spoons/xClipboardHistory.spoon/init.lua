@@ -338,7 +338,7 @@ footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-siz
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
-<input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off">
+<input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
 <button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button></div></header>
@@ -414,11 +414,8 @@ function selectRow(next) {
   if (!items.length) { selectedIndex = 0; return; }
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
-  // Do not scroll when Tab merely moves focus to the result container.
-  // Arrow-key navigation explicitly focuses a row and can still scroll as needed.
-  if (document.activeElement !== search && document.activeElement !== resultsPanel) {
-    items[selectedIndex].scrollIntoView({block:'nearest'});
-  }
+  // Selection/highlight must never move the grid on its own. The user controls
+  // viewport position by scrolling; keyboard navigation only changes the row state.
 }
 function clearRowSelection() {
   rows().forEach(item => item.classList.remove('selected'));
@@ -491,7 +488,12 @@ document.addEventListener('keydown', event => {
   // the query. Tab moves to the results container; Shift+Tab returns to search.
   if (event.key === 'Tab' && event.target === search && !event.shiftKey) {
     event.preventDefault();
-    resultsPanel.focus();
+    // Prevent WebKit from revealing the focused results container/card by
+    // scrolling the document. Keep the search field's current viewport stable.
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    resultsPanel.focus({preventScroll:true});
+    window.scrollTo(scrollX, scrollY);
     return;
   }
   if (event.key === 'Tab' && event.shiftKey &&
