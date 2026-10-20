@@ -301,8 +301,9 @@ function clipboardPanelHTML()
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 * { box-sizing: border-box; }
-body { margin:0; background:#1d1f24; color:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; }
-header { position:sticky; top:0; z-index:5; padding:14px 16px 12px; background:#202329; border-bottom:1px solid #3c4049; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; }
+body { background:#1d1f24; color:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; display:flex; flex-direction:column; }
+header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:#202329; border-bottom:1px solid #3c4049; }
 .top { display:flex; align-items:center; gap:10px; }
 .title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
 h1 { margin:0; font-size:17px; font-weight:650; }
@@ -318,7 +319,7 @@ main:focus { outline:none; }
 .action.primary { background:#3267d6; border-color:#3267d6; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
-main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; }
+main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; align-items:start; align-content:start; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
 .item:hover { border-color:#85aaff; background:#30343d; }
@@ -334,7 +335,7 @@ main { padding:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:#8e96a5; font-size:10px; margin-top:8px; }
 .empty { color:#9ca3b1; text-align:center; padding:40px 12px; grid-column:1/-1; }
-footer { padding:8px 16px; color:#9299a7; border-top:1px solid #393d46; font-size:11px; }
+footer { flex:0 0 auto; padding:8px 16px; color:#9299a7; background:#1d1f24; border-top:1px solid #393d46; font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
