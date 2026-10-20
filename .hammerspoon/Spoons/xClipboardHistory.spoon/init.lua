@@ -361,6 +361,10 @@ function setActiveFilter(button) {
   });
   bridge('search', 0, search.value, activeTypeFilter);
 }
+search.addEventListener('input', () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyFilters, 160);
+});
 let selectedIndex = 0;
 function rows() { return Array.from(document.querySelectorAll('main .item')).filter(item => !item.hidden && item.dataset.action === 'paste'); }
 function selectRow(next) {
