@@ -98,12 +98,15 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
-    -- Ignore the selection toolbar's synthetic Cmd+C, which is used only to
-    -- detect selected text and must not appear as a clipboard-history entry.
+    -- The selection toolbar sets this marker only for its temporary Cmd+C.
+    -- Consume only a clipboard notification that occurs inside that short window;
+    -- never suppress unrelated clipboard changes indefinitely.
     local syntheticUntil = tonumber(_G.xSelectionToolbarSyntheticCopyUntil) or 0
-    if hs.timer.secondsSinceEpoch() <= syntheticUntil then
+    if syntheticUntil > 0 and hs.timer.secondsSinceEpoch() <= syntheticUntil then
+        _G.xSelectionToolbarSyntheticCopyUntil = nil
         return
     end
+    _G.xSelectionToolbarSyntheticCopyUntil = nil
     if ignoreNextPasteboardChange then
         ignoreNextPasteboardChange = false
         return
