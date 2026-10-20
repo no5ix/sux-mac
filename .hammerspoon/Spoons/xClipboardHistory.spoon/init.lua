@@ -423,7 +423,7 @@ function scheduleHoverDetail(item) {
     hoverDetailTimer = null;
     if (pendingHoverItem !== item || !item.isConnected) return;
     item.classList.add('detail-open');
-  }, 3000);
+  }, 1000);
 }
 document.addEventListener('pointerover', event => {
   const item = event.target.closest && event.target.closest('#clipboard-items .item');
