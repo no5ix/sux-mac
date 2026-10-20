@@ -489,7 +489,7 @@ local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
-    local hasMore = renderedCount < matchingCount
+    local hasMore = kind ~= "none" and renderedCount < matchingCount
     local loadMoreHTML = hasMore and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
@@ -508,7 +508,7 @@ local function updateClipboardPanel(query, kind, offset, append)
     script = script ..
         "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
         "var active=" .. jsStringLiteral(kind) .. ";" ..
-        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',(active==='none'||b.dataset.filter===active)?'true':'false')});" ..
+        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',active==='none'?'true':(b.dataset.filter===active?'true':'false'))});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
     clipboard_webview:evaluateJavaScript(script)
     clipboard_search = query
