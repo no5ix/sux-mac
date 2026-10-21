@@ -961,10 +961,8 @@ function showClipboardHistory()
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
     end
     pasteboard_watcher:start()
-    if not clipboard_webview then
-        logger.e("Clipboard history panel is unavailable; cannot show it")
-        return
-    end
+    -- A native close can clear the current webview handle. The reopen path below
+    -- deliberately creates a replacement instead of aborting on a nil handle.
 
     -- Remember the app that should receive a paste before the panel takes focus.
     local frontApp = application.frontmostApplication()
