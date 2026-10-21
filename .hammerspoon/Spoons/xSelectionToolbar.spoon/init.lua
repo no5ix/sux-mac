@@ -248,13 +248,15 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 :root[data-appearance="dark"] #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#conversation{width:100%;max-height:calc(100vh - 250px);overflow:auto;display:flex;flex-direction:column;gap:12px}
-.conversation-message{background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+#conversation{width:100%;max-height:none;overflow:visible;display:flex;flex-direction:column;gap:12px;padding-bottom:2px}
+.conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px 12px 42px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
 .conversation-message.assistant{margin-right:2%}
 .message-role{font-size:11px;color:var(--muted);font-weight:650;margin-bottom:6px}
 .message-content{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
-#followup{display:none;width:100%;height:42px;min-height:42px;resize:vertical;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+.message-copy{position:absolute;right:8px;bottom:6px;width:28px;height:28px;padding:0;border-radius:6px;font-size:19px;line-height:1;color:var(--muted)}
+.message-copy:hover{background:var(--bg);color:var(--fg)}
+#followup{display:none;width:100%;height:42px;min-height:42px;resize:vertical;line-height:1.4;overflow:auto;margin-top:8px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 #followup.visible{display:block}
 #followup:focus{outline:2px solid var(--accent);outline-offset:1px}
 .actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
@@ -263,11 +265,10 @@ button:disabled{opacity:.4;cursor:default}
 </style></head><body>
 <header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
 <div id="conversation" aria-live="polite"></div>
-<div class="actions"><button id="copy" disabled>Copy</button></div>
 <textarea id="followup" aria-label="Follow-up instruction" placeholder="follow up ... press enter to send"></textarea>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),conversation=document.getElementById('conversation');
+const status=document.getElementById('status'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),conversation=document.getElementById('conversation');
 let latestAssistantText='';
 let messageSequence=0;
 const addMessage=(role,text)=>{
@@ -280,9 +281,20 @@ const addMessage=(role,text)=>{
   content.className='message-content';
   content.textContent=text||'';
   card.append(label,content);
+  if(role==='assistant'){
+    const copyButton=document.createElement('button');
+    copyButton.className='message-copy';
+    copyButton.type='button';
+    copyButton.textContent='⧉';
+    copyButton.title='Copy this response';
+    copyButton.setAttribute('aria-label','Copy this AI response');
+    copyButton.addEventListener('click',()=>{
+      bridge('copy',{text:content.textContent||''});
+    });
+    card.appendChild(copyButton);
+  }
   conversation.appendChild(card);
   card.dataset.messageId=String(++messageSequence);
-  conversation.scrollTop=conversation.scrollHeight;
   return card;
 };
 let currentAssistantCard=addMessage('assistant','');
@@ -319,11 +331,12 @@ window.translationResult=value=>{
   latestAssistantText=currentAssistantText;
   const content=currentAssistantCard.querySelector('.message-content');
   if(content)content.textContent=currentAssistantText;
-  copy.disabled=!latestAssistantText;
+  const copyButton=currentAssistantCard.querySelector('.message-copy');
+  if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
   requestAnimationFrame(()=>{
-    const desiredHeight=Math.max(90,conversation.scrollHeight);
-    bridge('resize',{contentHeight:desiredHeight});
+    bridge('resize',{contentHeight:conversation.scrollHeight});
+    // Let the native window fit complete responses instead of clipping them in a fixed-height area.
     conversation.scrollTop=conversation.scrollHeight;
   });
 };
@@ -535,8 +548,8 @@ Follow-up question:
             local currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
             if translationWindow and currentScreen then
                 local screenFrame = currentScreen:frame()
-                local maxWindowHeight = math.max(180, screenFrame.h - 40)
-                local targetHeight = math.min(maxWindowHeight, math.max(300, body.contentHeight + 220))
+                local maxWindowHeight = math.max(300, screenFrame.h - 28)
+                local targetHeight = math.min(maxWindowHeight, math.max(260, body.contentHeight + 92))
                 local windowFrame = translationWindow:frame()
                 local y = math.max(screenFrame.y + 20,
                     math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
@@ -552,10 +565,7 @@ Follow-up question:
                 end
                 -- Keep the native window width exactly as it was; change height only.
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                local maxResultHeight = math.max(90, targetHeight - 220)
-                translationWindow:evaluateJavaScript(
-                    "window.setPopupResultHeight && window.setPopupResultHeight(" .. tostring(maxResultHeight) .. ");"
-                )
+                -- Conversation messages use their full natural height; no fixed result textarea to clamp.
             end
         end
     end)
@@ -592,7 +602,7 @@ Follow-up question:
         if translationWindow then
             translationWindow:evaluateJavaScript(
                 "window.setPopupResultHeight && window.setPopupResultHeight(" ..
-                tostring(math.max(90, h - 220)) .. ");"
+                tostring(math.max(90, h - 92)) .. ");"
             )
         end
     end)
