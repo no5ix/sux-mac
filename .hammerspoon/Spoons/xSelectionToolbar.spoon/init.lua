@@ -253,15 +253,15 @@ body{padding:16px;overflow:visible}
 #conversation{width:100%;max-height:none;overflow:visible;display:flex;flex-direction:column;gap:8px;padding:0;scroll-behavior:auto;overscroll-behavior:contain}
 #followup{margin:0}
 
-.conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px 12px 34px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
-.conversation-message.assistant{margin-right:2%;padding-top:38px}
+.conversation-message.assistant{margin-right:2%;padding-top:42px;padding-right:44px;padding-bottom:36px}
 .message-role{font-size:11px;color:var(--muted);font-weight:650;margin-bottom:6px}
-.conversation-message.assistant .message-role{position:absolute;top:10px;left:12px;margin:0}
+.conversation-message.assistant .message-role{position:absolute;top:12px;left:12px;margin:0}
 .message-content{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
 .message-copy{position:absolute;right:8px;top:6px;width:28px;height:28px;padding:0;border-radius:6px;font-size:19px;line-height:1;color:var(--muted)}
 .message-copy:hover{background:var(--bg);color:var(--fg)}
-#followup{display:none;width:100%;height:38px;min-height:38px;max-height:38px;resize:none;line-height:1.4;overflow:auto;margin-top:4px;margin-bottom:0;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:8px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#followup{display:none;width:100%;height:38px;min-height:38px;max-height:38px;resize:none;line-height:1.4;overflow:auto;margin-top:12px;margin-bottom:0;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:8px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 #followup.visible{display:block}
 #followup:focus{outline:1px solid var(--accent);outline-offset:0}
 .actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
