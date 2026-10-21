@@ -86,7 +86,7 @@ function pasteboardToClipboard(item_type, item)
         local width = tonumber(size and size.w) or 0
         local height = tonumber(size and size.h) or 0
         if width > 0 and height > 0 then
-            local scale = math.min(1, 320 / width, 320 / height)
+            local scale = math.min(1, 240 / width, 240 / height)
             local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
             local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
             local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
@@ -287,7 +287,10 @@ local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
     offset = math.max(0, tonumber(offset) or 0)
-    local last = math.min(#matches, offset + CLIPBOARD_RENDER_BATCH_SIZE)
+    -- Image elements carry larger payloads even with lazy decoding, so start
+    -- with a smaller first batch and let the existing Load more action paginate.
+    local batchSize = kind == "image" and 18 or CLIPBOARD_RENDER_BATCH_SIZE
+    local last = math.min(#matches, offset + batchSize)
     for position = offset + 1, last do
         local index = matches[position]
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
