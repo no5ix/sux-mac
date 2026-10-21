@@ -816,29 +816,42 @@ local function showClipboardNativeWindow()
     return true
 end
 
-clipboard_usercontent = webview.usercontent.new("clipboardHistory")
-clipboard_usercontent:setCallback(handleClipboardPanelMessage)
-clipboard_webview = webview.new(
-    {x = 120, y = 80, w = 980, h = 760},
-    {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
-    clipboard_usercontent
-):windowStyle({"titled", "closable", "resizable"})
--- Keep this window auxiliary to the active Space without opting into
--- canJoinAllSpaces, which can make it appear on the Space where it was created.
-pcall(function()
-    clipboard_webview:behavior({"fullScreenAuxiliary"})
-    clipboard_webview:level(hs.drawing.windowLevels.floating)
-end)
-clipboard_webview:shadow(true)
-clipboard_webview:allowTextEntry(true)
-clipboard_webview:windowCallback(function(action, _, focused)
-    if action == "focusChange" and focused == false and not suppressFocusDismiss then
-        -- Clicking another app or elsewhere dismisses the floating history panel.
-        hs.timer.doAfter(0.1, function()
-            if clipboard_webview then clipboard_webview:hide() end
-        end)
+local function createClipboardWebview()
+    -- A hidden Hammerspoon WebView can remain attached to the Space where its
+    -- native NSWindow was first created. Destroy it and create a fresh native
+    -- window for each shortcut invocation so AppKit creates it on the active
+    -- Space instead of trying to move a stale window between Spaces.
+    if clipboard_webview then
+        pcall(function() clipboard_webview:delete() end)
+        clipboard_webview = nil
     end
-end)
+
+    clipboard_usercontent = webview.usercontent.new("clipboardHistory")
+    clipboard_usercontent:setCallback(handleClipboardPanelMessage)
+    clipboard_webview = webview.new(
+        {x = 120, y = 80, w = 980, h = 760},
+        {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
+        clipboard_usercontent
+    ):windowStyle({"titled", "closable", "resizable"})
+
+    pcall(function()
+        clipboard_webview:behavior({"fullScreenAuxiliary"})
+        clipboard_webview:level(hs.drawing.windowLevels.floating)
+    end)
+    clipboard_webview:shadow(true)
+    clipboard_webview:allowTextEntry(true)
+    clipboard_webview:windowCallback(function(action, _, focused)
+        if action == "focusChange" and focused == false and not suppressFocusDismiss then
+            -- Clicking another app or elsewhere dismisses the floating history panel.
+            hs.timer.doAfter(0.1, function()
+                if clipboard_webview then clipboard_webview:hide() end
+            end)
+        end
+    end)
+    return clipboard_webview
+end
+
+createClipboardWebview()
 
 -- Paste clipboard-history rows from the oldest selected item to the newest.
 -- The chooser is displayed newest-first, so walk the selected range backwards.
@@ -939,6 +952,11 @@ function showClipboardHistory()
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
     end
     pasteboard_watcher:start()
+
+    -- Recreate the native window for this invocation. macOS Spaces cannot
+    -- reliably be changed by moving/raising a hidden NSWindow after creation.
+    -- A fresh WebView lets AppKit associate the panel with the current Space.
+    createClipboardWebview()
     if not clipboard_webview then
         logger.e("Clipboard history panel is unavailable; cannot show it")
         return
