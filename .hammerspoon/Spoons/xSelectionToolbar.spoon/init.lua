@@ -255,7 +255,7 @@ body{padding:16px;overflow:visible}
 
 .conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
-.conversation-message.assistant{margin-right:2%;padding-top:42px;padding-right:44px;padding-bottom:36px}
+.conversation-message.assistant{margin-right:2%;padding-top:42px;padding-right:44px;padding-bottom:12px}
 .message-role{font-size:11px;color:var(--muted);font-weight:650;margin-bottom:6px}
 .conversation-message.assistant .message-role{position:absolute;top:12px;left:12px;margin:0}
 .message-content{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -340,12 +340,34 @@ window.translationResult=value=>{
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
 
-  // The document height is measured without a fixed-height inner scroller, so
-  // every response remains fully visible. The native window is then resized to
-  // that height, subject only to the physical screen bounds.
+  // Resize the native window to fit when possible. If the monitor bottom limits
+  // growth, reveal the newest response by scrolling the outer WebView document.
   requestAnimationFrame(()=>{
     bridge('resize',{contentHeight:document.documentElement.scrollHeight});
+    requestAnimationFrame(()=>{
+      const cardRect=currentAssistantCard.getBoundingClientRect();
+      const viewBottom=window.innerHeight;
+      const needsScroll=cardRect.bottom>viewBottom-12;
+      if(needsScroll){
+        window.scrollTo({top:window.scrollY+(cardRect.bottom-(viewBottom-12)),behavior:'auto'});
+      }
+      setTimeout(()=>{
+        if(!currentAssistantCard.isConnected)return;
+        const latestRect=currentAssistantCard.getBoundingClientRect();
+        if(latestRect.bottom>window.innerHeight-12){
+          window.scrollTo({top:window.scrollY+(latestRect.bottom-(window.innerHeight-12)),behavior:'auto'});
+        }
+      },100);
+    });
   });
+};
+window.revealNewestResponse=()=>{
+  if(!currentAssistantCard||!currentAssistantCard.isConnected)return;
+  const rect=currentAssistantCard.getBoundingClientRect();
+  const bottom=window.innerHeight;
+  if(rect.bottom>bottom-12){
+    window.scrollTo({top:window.scrollY+(rect.bottom-(bottom-12)),behavior:'auto'});
+  }
 };
 window.beginFollowup=(userText)=>{
   addMessage('user',userText);
@@ -565,9 +587,13 @@ Follow-up question:
                 local windowFrame = translationWindow:frame()
                 local bottom = windowFrame.y + windowFrame.h
                 local y = math.max(screenFrame.y + 20, math.min(bottom - targetHeight, screenFrame.y + screenFrame.h - targetHeight - 20))
-                if targetHeight >= availableHeight then y = screenFrame.y + 20 end
+                if targetHeight >= availableHeight then
+                    y = screenFrame.y + 20
+                    targetHeight = availableHeight
+                end
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                -- No inner scroll pane: the native window grows to fit the full conversation when possible.
+                -- Tell WebKit to scroll only when its visible content cannot contain the newest response.
+                translationWindow:evaluateJavaScript("window.revealNewestResponse && window.revealNewestResponse();")
             end
         end
     end)
