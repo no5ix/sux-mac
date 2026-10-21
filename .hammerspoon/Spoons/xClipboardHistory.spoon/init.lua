@@ -765,9 +765,12 @@ end
 
 
 local function positionPanelOnCurrentScreen()
+    -- Resolve the screen containing the pointer, then place the panel fully
+    -- inside that screen's visible frame. Work in the screen's frame coordinate
+    -- system so displays with negative origins and different sizes are handled.
     local screens = hs.screen.allScreens()
     local pointer = hs.mouse.absolutePosition()
-    local target = hs.screen.mainScreen()
+    local target = nil
     for _, screen in ipairs(screens) do
         local full = screen:fullFrame()
         if pointer.x >= full.x and pointer.x < full.x + full.w
@@ -776,21 +779,40 @@ local function positionPanelOnCurrentScreen()
             break
         end
     end
-    if not target then return nil end
+    target = target or hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    if not target or not clipboard_webview then return nil end
 
     panelScreenUUID = target:getUUID()
     local visible = target:frame()
-    local current = clipboard_webview and clipboard_webview:frame() or {w=980,h=760}
+    local current = clipboard_webview:frame() or {w=980,h=760}
     local w = math.min(current.w or 980, visible.w)
     local h = math.min(current.h or 760, visible.h)
-    local frame = {
+    clipboard_webview:frame({
         x = visible.x + math.max(0, (visible.w - w) / 2),
         y = visible.y + math.max(0, (visible.h - h) / 2),
         w = w,
         h = h
-    }
-    clipboard_webview:frame(frame)
+    })
     return target
+end
+
+local function showClipboardNativeWindow()
+    if not clipboard_webview then return false end
+
+    -- Spaces on macOS are independent of screens. Ask Hammerspoon to create
+    -- and order the native window on the current space before resolving its
+    -- wrapper; repeat the operation during the brief WebView initialization.
+    local screen = positionPanelOnCurrentScreen()
+    clipboard_webview:show()
+    local win = clipboard_webview:hswindow()
+    if not win then return false end
+
+    if screen then
+        pcall(function() win:moveToScreen(screen) end)
+    end
+    pcall(function() win:raise() end)
+    pcall(function() win:focus() end)
+    return true
 end
 
 clipboard_usercontent = webview.usercontent.new("clipboardHistory")
@@ -992,88 +1014,37 @@ function showClipboardHistory()
 
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
-    local targetScreen = positionPanelOnCurrentScreen()
+    positionPanelOnCurrentScreen()
     clipboard_webview:show()
     clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-    -- The WebView can be ordered before AppKit publishes its hswindow wrapper.
-    -- Retry a short bounded interval, then recreate the WebView once instead of
-    -- silently leaving the panel unavailable for this hotkey invocation.
     local focusAttempts = 0
     local function focusClipboardWindowWhenReady()
         if not clipboard_webview then
             suppressFocusDismiss = false
             return
         end
-        local hsWindow = clipboard_webview:hswindow()
-        if hsWindow then
-            if targetScreen then
-                positionPanelOnCurrentScreen()
-            end
-            hsWindow:focus()
+
+        -- Reposition and re-order on every attempt because pointer position,
+        -- active display, and active Space may change between invocations.
+        positionPanelOnCurrentScreen()
+        if showClipboardNativeWindow() then
             suppressFocusDismiss = false
-            return
-        end
-        focusAttempts = focusAttempts + 1
-        if focusAttempts < 12 then
-            hs.timer.doAfter(0.08, focusClipboardWindowWhenReady)
             return
         end
 
-        logger.w("Clipboard history window was unavailable; rebuilding the panel window")
-        if clipboard_webview then
-            pcall(function() clipboard_webview:delete() end)
-            clipboard_webview = nil
-        end
-        local ok, err = pcall(function()
-            clipboard_webview = webview.new(
-                {x = 120, y = 80, w = 980, h = 760},
-                {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
-                clipboard_usercontent
-            ):windowStyle({"titled", "closable", "resizable"})
-            clipboard_webview:shadow(true)
-            clipboard_webview:allowTextEntry(true)
-            clipboard_webview:windowCallback(function(action, _, focused)
-                if action == "focusChange" and focused == false and not suppressFocusDismiss then
-                    hs.timer.doAfter(0.1, function()
-                        if clipboard_webview then clipboard_webview:hide() end
-                    end)
-                end
-            end)
-            clipboard_webview:html(clipboardPanelHTML())
-            positionPanelOnCurrentScreen()
-            clipboard_webview:show()
-            clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-        end)
-        if not ok then
-            logger.e("Failed to rebuild clipboard history window: " .. tostring(err))
+        focusAttempts = focusAttempts + 1
+        if focusAttempts < 20 then
+            hs.timer.doAfter(0.1, focusClipboardWindowWhenReady)
+        else
+            -- Keep the existing WebView alive. Rebuilding repeatedly makes
+            -- transient Space/display transitions worse; a later hotkey press
+            -- will retry showing this same panel on the then-current screen.
+            logger.w("Clipboard history window is not ready yet; keeping it for the next show attempt")
             suppressFocusDismiss = false
-            return
         end
-        local rebuiltAttempts = 0
-        local function focusRebuiltWindow()
-            if not clipboard_webview then
-                suppressFocusDismiss = false
-                return
-            end
-            local hsWindow = clipboard_webview:hswindow()
-            if hsWindow then
-                positionPanelOnCurrentScreen()
-                hsWindow:focus()
-                suppressFocusDismiss = false
-                return
-            end
-            rebuiltAttempts = rebuiltAttempts + 1
-            if rebuiltAttempts < 12 then
-                hs.timer.doAfter(0.08, focusRebuiltWindow)
-            else
-                logger.e("Clipboard history panel failed to create a native window after rebuild")
-                suppressFocusDismiss = false
-            end
-        end
-        hs.timer.doAfter(0.08, focusRebuiltWindow)
     end
-    hs.timer.doAfter(0.08, focusClipboardWindowWhenReady)
+    hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
 
 end
 
