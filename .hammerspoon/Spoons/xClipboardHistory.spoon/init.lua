@@ -827,6 +827,9 @@ end
 
 local function configureClipboardWebview(view)
     view:windowStyle({"titled", "closable", "resizable"})
+    -- Native close should dispose only the NSWindow, not the Lua webview
+    -- object. The shortcut explicitly replaces the old webview on reopen.
+    view:deleteOnClose(false)
     view:shadow(true)
     view:allowTextEntry(true)
     view:closeOnEscape(false)
@@ -837,6 +840,12 @@ local function configureClipboardWebview(view)
                     closeClipboardPanel()
                 end
             end)
+        elseif action == "closing" then
+            -- Keep the Lua handle from being used to show a dead NSWindow later.
+            if clipboard_webview == view then
+                clipboard_webview = nil
+                clipboard_usercontent = nil
+            end
         end
     end)
 end
@@ -966,16 +975,20 @@ function showClipboardHistory()
     else
         previousApplication = nil
     end
-    -- Closing a native NSWindow leaves the hs.webview object unsuitable for
-    -- reuse on some macOS Spaces. Hide and discard it, then create a fresh native
-    -- window on every shortcut press so AppKit attaches it to the active Desktop.
+    -- Always make the previous native window go through its close lifecycle.
+    -- If the user already closed it with the red button, the callback above has
+    -- cleared clipboard_webview, and we simply construct a new instance.
     if clipboard_webview then
         local oldView = clipboard_webview
-        oldView:hide()
         local oldWindow = oldView:hswindow()
-        if oldWindow then pcall(function() oldWindow:close() end) end
         clipboard_webview = nil
         clipboard_usercontent = nil
+        if oldWindow then
+            local ok, closed = pcall(function() return oldWindow:close() end)
+            if not ok or closed == false then oldView:hide() end
+        else
+            oldView:hide()
+        end
     end
     createClipboardWebview()
 
