@@ -248,7 +248,11 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 :root[data-appearance="dark"] #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#conversation{width:100%;max-height:calc(100vh - 205px);overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:12px;padding:0 2px 8px;scroll-behavior:auto;overscroll-behavior:contain}
+html,body{height:auto;min-height:0}
+body{padding:16px;overflow:visible}
+#conversation{width:100%;max-height:none;overflow:visible;display:flex;flex-direction:column;gap:12px;padding:0 2px 2px;scroll-behavior:auto;overscroll-behavior:contain}
+#followup{margin-bottom:0}
+
 .conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px 12px 42px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
 .conversation-message.assistant{margin-right:2%}
@@ -335,33 +339,11 @@ window.translationResult=value=>{
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
 
-  // Measure after the response has been laid out. Grow the native window first;
-  // scroll only if the newest response still extends below the visible conversation.
+  // The document height is measured without a fixed-height inner scroller, so
+  // every response remains fully visible. The native window is then resized to
+  // that height, subject only to the physical screen bounds.
   requestAnimationFrame(()=>{
-    const desiredHeight=document.body.scrollHeight;
-    const beforeHeight=window.innerHeight;
-    bridge('resize',{contentHeight:desiredHeight});
-    requestAnimationFrame(()=>{
-      const cardRect=currentAssistantCard.getBoundingClientRect();
-      const viewRect=conversation.getBoundingClientRect();
-      const hasInsufficientSpace=cardRect.bottom>viewRect.bottom-12;
-      if(hasInsufficientSpace){
-        const neededScroll=cardRect.bottom-(viewRect.bottom-12);
-        conversation.scrollTop+=Math.max(0,neededScroll);
-      }
-      // A native resize is asynchronous. Re-check only if the card did not fit
-      // before resizing; never jump the conversation when there is enough room.
-      if(hasInsufficientSpace){
-        setTimeout(()=>{
-          if(!currentAssistantCard.isConnected)return;
-          const latestRect=currentAssistantCard.getBoundingClientRect();
-          const latestView=conversation.getBoundingClientRect();
-          if(latestRect.bottom>latestView.bottom-12){
-            conversation.scrollTop+=latestRect.bottom-(latestView.bottom-12);
-          }
-        },100);
-      }
-    });
+    bridge('resize',{contentHeight:document.documentElement.scrollHeight});
   });
 };
 window.beginFollowup=(userText)=>{
@@ -573,20 +555,18 @@ Follow-up question:
             local currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
             if translationWindow and currentScreen then
                 local screenFrame = currentScreen:frame()
-                local maxWindowHeight = math.max(300, screenFrame.h - 28)
-                local targetHeight = math.min(maxWindowHeight, math.max(260, body.contentHeight + 24))
+                local availableHeight = math.max(260, screenFrame.h - 40)
+                -- Body height now reflects the complete conversation, but a native
+                -- window cannot exceed the screen. Use the smaller of content height
+                -- and screen height, and let WebView shrink the layout naturally only
+                -- when the whole conversation cannot fit on screen.
+                local targetHeight = math.min(availableHeight, math.max(220, body.contentHeight + 24))
                 local windowFrame = translationWindow:frame()
-                -- Grow upward from the current bottom edge when possible. This preserves
-                -- the response header and gives the conversation a stable visible viewport.
                 local bottom = windowFrame.y + windowFrame.h
                 local y = math.max(screenFrame.y + 20, math.min(bottom - targetHeight, screenFrame.y + screenFrame.h - targetHeight - 20))
-                local availableHeight = screenFrame.h - 40
-                if targetHeight >= availableHeight then
-                    y = screenFrame.y + 20
-                    targetHeight = availableHeight
-                end
+                if targetHeight >= availableHeight then y = screenFrame.y + 20 end
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                -- Conversation messages use their full natural height; no fixed result textarea to clamp.
+                -- No inner scroll pane: the native window grows to fit the full conversation when possible.
             end
         end
     end)
