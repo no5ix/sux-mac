@@ -800,22 +800,16 @@ local function showClipboardNativeWindow()
     if not clipboard_webview then return false end
 
     local screen = positionPanelOnCurrentScreen()
-    -- A normal Hammerspoon WebView is tied to the Space where its native window
-    -- was created. Showing or moving it only changes monitor coordinates, not
-    -- its Space assignment. "allSpaces" lets this utility appear on whichever
-    -- virtual desktop is currently active, while the screen frame still follows
-    -- the pointer's monitor.
-    local win = clipboard_webview:hswindow()
-    if win then
-        pcall(function() win:level(hs.drawing.windowLevels.floating) end)
-        pcall(function()
-            local behavior = hs.window.setShadows -- read only, keeps this block Lua-version independent
-            win:behavior({"canJoinAllSpaces", "fullScreenAuxiliary"})
-        end)
-    end
     clipboard_webview:show()
-    win = clipboard_webview:hswindow()
+    local win = clipboard_webview:hswindow()
     if not win then return false end
+
+    -- Do not make the panel a member of every Space. It should follow the
+    -- active Space when invoked. Re-creating the NSWindow is not sufficient;
+    -- macOS may keep a hidden Hammerspoon WebView attached to its original
+    -- Space. Close/recreate below if a stale window survives on another Space.
+    pcall(function() win:behavior({"fullScreenAuxiliary"}) end)
+    pcall(function() win:level(hs.drawing.windowLevels.floating) end)
     if screen then pcall(function() win:moveToScreen(screen) end) end
     pcall(function() win:raise() end)
     pcall(function() win:focus() end)
@@ -829,10 +823,10 @@ clipboard_webview = webview.new(
     {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
     clipboard_usercontent
 ):windowStyle({"titled", "closable", "resizable"})
--- Make the clipboard panel available on every macOS Space. The active Space
--- is still selected naturally when the shortcut is invoked.
+-- Keep this window auxiliary to the active Space without opting into
+-- canJoinAllSpaces, which can make it appear on the Space where it was created.
 pcall(function()
-    clipboard_webview:behavior({"canJoinAllSpaces", "fullScreenAuxiliary"})
+    clipboard_webview:behavior({"fullScreenAuxiliary"})
     clipboard_webview:level(hs.drawing.windowLevels.floating)
 end)
 clipboard_webview:shadow(true)
