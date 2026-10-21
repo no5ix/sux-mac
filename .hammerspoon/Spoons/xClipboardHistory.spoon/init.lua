@@ -819,17 +819,8 @@ local function positionPanelOnCurrentScreen()
     end
 end
 
-clipboard_usercontent = webview.usercontent.new("clipboardHistory")
-clipboard_usercontent:setCallback(handleClipboardPanelMessage)
-clipboard_webview = webview.new(
-    {x = 120, y = 80, w = 980, h = 760},
-    {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
-    clipboard_usercontent
-):windowStyle({"titled", "closable", "resizable"})
-clipboard_webview:shadow(true)
-clipboard_webview:allowTextEntry(true)
--- Dismiss the panel without destroying the reusable webview. On the next
--- shortcut press, recreate the native window so it attaches to the active Space.
+-- Dismissal intentionally only hides the current panel. A new native window
+-- is created for each shortcut invocation so its Space is resolved afresh.
 closeClipboardPanel = function()
     if clipboard_webview then clipboard_webview:hide() end
 end
