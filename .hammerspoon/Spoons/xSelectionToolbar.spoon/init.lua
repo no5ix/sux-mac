@@ -258,8 +258,8 @@ button:disabled{opacity:.4;cursor:default}
 </style></head><body>
 <header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
 <textarea id="result" readonly placeholder="Translation will appear here"></textarea>
-<textarea id="followup" aria-label="Follow-up instruction" placeholder="Ask a follow-up question… (Enter to send, Shift+Enter for a new line)"></textarea>
-<div class="actions"><div class="actions-left"><button id="send-followup">Send</button></div><button id="copy" disabled>Copy</button></div>
+<div class="actions"><button id="send-followup">Send</button><button id="copy" disabled>Copy</button></div>
+<textarea id="followup" aria-label="Follow-up instruction" placeholder="Follow up ..."></textarea>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
 const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),sendFollowup=document.getElementById('send-followup');
@@ -311,6 +311,8 @@ local function translationJSCall(functionName, value)
     local literal = type(encoded) == "table" and encoded[1] or encoded or '""'
     return "window." .. functionName .. "(" .. literal .. ");"
 end
+
+local lastTranslationResult = ""
 
 local translationEscapeTap = nil
 local destroyTranslationWindow
@@ -417,8 +419,9 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
             translationWindow:evaluateJavaScript(translationJSCall("translationStatus", tostring(errorMessage)))
             return
         end
+        lastTranslationResult = trim(result)
         translationWindow:evaluateJavaScript(
-            translationJSCall("translationResult", trim(result)) ..
+            translationJSCall("translationResult", lastTranslationResult) ..
             translationJSCall("translationStatus", windowTitle .. " · local AI")
         )
     end, {
@@ -455,8 +458,18 @@ local function showCustomAIWindow(text, config)
             local followupText = trim(body.text)
             if followupText ~= "" and translationWindow then
                 local title = config.label or "AI"
+                local followupPrompt = [[You have already answered the original request below. Now answer the user's follow-up question directly. Treat it as a question about the original request and the previous answer. Do not repeat the original response unless needed for clarity.
+
+Original selected text:
+]] .. text .. [[
+
+Previous AI response:
+]] .. tostring(lastTranslationResult or "") .. [[
+
+Follow-up question:
+]] .. followupText
                 sendLocalPromptRequest(
-                    text .. "\\n\\nFollow-up question: " .. followupText,
+                    followupPrompt,
                     "{{text}}",
                     title
                 )
