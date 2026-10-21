@@ -508,8 +508,10 @@ Previous AI response:
 
 Follow-up question:
 ]] .. followupText
+                local encodedFollowup = json.encode({followupText})
+                local followupLiteral = type(encodedFollowup) == "table" and encodedFollowup[1] or encodedFollowup or '""'
                 translationWindow:evaluateJavaScript(
-                    "window.beginFollowup && window.beginFollowup(" .. string.format("%q", followupText) .. ");"
+                    "window.beginFollowup && window.beginFollowup(" .. followupLiteral .. ");"
                 )
                 sendLocalPromptRequest(followupPrompt, "{{text}}", title)
             end
