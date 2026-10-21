@@ -6,6 +6,10 @@ local pkg = {}
 local hotkey = require "hs.hotkey"
 local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
+-- The default watcher polls every 250 ms. Check more frequently so transient
+-- clipboard writes are less likely to be overwritten before we observe them.
+-- This setting applies to watchers created after this point.
+pbwatcher.interval(0.1)
 local webview = require "hs.webview"
 local application = require "hs.application"
 local logger = hs.logger.new("xClipboardHistory", "info")
@@ -20,7 +24,6 @@ local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
 local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
-local lastAcceptedClipboardValue = nil
 local previousApplication = nil
 local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
@@ -119,13 +122,6 @@ function handleClipboardChange(content)
 
     pasteboard_watcher:start()
 
-    -- A text clipboard callback is accepted only when it represents a real value
-    -- change. This prevents accessibility selection updates or repeated watcher
-    -- notifications from creating phantom history entries.
-    if type(content) == "string" and content ~= "" then
-        if content == lastAcceptedClipboardValue then return end
-    end
-
     -- cur_change_cnt = pasteboard.changeCount()
     -- print("[handleClipboardChange] start, cur_change_cnt = " .. tostring(cur_change_cnt) .. ", last_change = " .. tostring(last_change))
     -- if (cur_change_cnt > last_change) then
@@ -154,7 +150,6 @@ function handleClipboardChange(content)
             -- local sss = content:encodeAsURLString()
             -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
             pasteboardToClipboard("image", pasteboardImg)
-            lastAcceptedClipboardValue = "image:" .. tostring(pasteboardImg:size().w) .. "x" .. tostring(pasteboardImg:size().h) .. ":" .. tostring(cur_ts)
             -- Trim history if it gets too long
             if #img_clipboard_history > max_history_size_for_img then
                 table.remove(img_clipboard_history, 1)
@@ -180,7 +175,6 @@ function handleClipboardChange(content)
                     end
             end
             pasteboardToClipboard("text", content)
-            lastAcceptedClipboardValue = content
             -- Trim history if it gets too long
             if #text_clipboard_history > max_history_size_for_text then
                 table.remove(text_clipboard_history, 1)
