@@ -248,7 +248,7 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 :root[data-appearance="dark"] #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#conversation{width:100%;max-height:none;overflow:visible;display:flex;flex-direction:column;gap:12px;padding-bottom:2px}
+#conversation{width:100%;max-height:calc(100vh - 205px);overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:12px;padding:0 2px 8px;scroll-behavior:auto;overscroll-behavior:contain}
 .conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px 12px 42px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
 .conversation-message.assistant{margin-right:2%}
@@ -334,16 +334,40 @@ window.translationResult=value=>{
   const copyButton=currentAssistantCard.querySelector('.message-copy');
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
+  // Keep the response card fully inside the visible conversation viewport.
+  // The native window may hit the screen-height limit, so scroll the conversation
+  // itself rather than assuming that the whole document can fit in the window.
   requestAnimationFrame(()=>{
-    bridge('resize',{contentHeight:document.body.scrollHeight});
-    conversation.scrollTop=conversation.scrollHeight;
+    const desiredHeight=document.body.scrollHeight;
+    bridge('resize',{contentHeight:desiredHeight});
+    requestAnimationFrame(()=>{
+      const cardRect=currentAssistantCard.getBoundingClientRect();
+      const viewRect=conversation.getBoundingClientRect();
+      const topInset=8;
+      const bottomInset=12;
+      if(cardRect.bottom>viewRect.bottom-bottomInset){
+        conversation.scrollTop += cardRect.bottom-(viewRect.bottom-bottomInset);
+      }else if(cardRect.top<viewRect.top+topInset){
+        conversation.scrollTop -= (viewRect.top+topInset)-cardRect.top;
+      }
+      // Re-evaluate after the native frame update finishes.
+      setTimeout(()=>{
+        if(!currentAssistantCard.isConnected)return;
+        const latestRect=currentAssistantCard.getBoundingClientRect();
+        const latestView=conversation.getBoundingClientRect();
+        if(latestRect.bottom>latestView.bottom-bottomInset){
+          conversation.scrollTop += latestRect.bottom-(latestView.bottom-bottomInset);
+        }
+      },80);
+    });
   });
 };
 window.beginFollowup=(userText)=>{
   addMessage('user',userText);
   currentAssistantCard=addMessage('assistant','');
   currentAssistantText='';
-  copy.disabled=true;
+  const copyButton=currentAssistantCard.querySelector('.message-copy');
+  if(copyButton)copyButton.disabled=true;
   followup.classList.remove('visible');
   status.textContent='Working locally…';
 };
@@ -550,19 +574,15 @@ Follow-up question:
                 local maxWindowHeight = math.max(300, screenFrame.h - 28)
                 local targetHeight = math.min(maxWindowHeight, math.max(260, body.contentHeight + 24))
                 local windowFrame = translationWindow:frame()
-                local y = math.max(screenFrame.y + 20,
-                    math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
-                -- Anchor the resized popup near the pointer if the existing top edge
-                -- would leave the new height outside the monitor.
-                local mouse = hs.mouse.absolutePosition()
-                if y + targetHeight > screenFrame.y + screenFrame.h - 20 then
-                    y = screenFrame.y + screenFrame.h - targetHeight - 20
+                -- Grow upward from the current bottom edge when possible. This preserves
+                -- the response header and gives the conversation a stable visible viewport.
+                local bottom = windowFrame.y + windowFrame.h
+                local y = math.max(screenFrame.y + 20, math.min(bottom - targetHeight, screenFrame.y + screenFrame.h - targetHeight - 20))
+                local availableHeight = screenFrame.h - 40
+                if targetHeight >= availableHeight then
+                    y = screenFrame.y + 20
+                    targetHeight = availableHeight
                 end
-                if mouse.y < windowFrame.y then
-                    y = math.max(screenFrame.y + 20,
-                        math.min(mouse.y - targetHeight - 18, screenFrame.y + screenFrame.h - targetHeight - 20))
-                end
-                -- Keep the native window width exactly as it was; change height only.
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
                 -- Conversation messages use their full natural height; no fixed result textarea to clamp.
             end
