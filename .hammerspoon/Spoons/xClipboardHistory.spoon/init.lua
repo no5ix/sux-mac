@@ -798,16 +798,10 @@ end
 
 local function showClipboardNativeWindow()
     if not clipboard_webview then return false end
-
     local screen = positionPanelOnCurrentScreen()
     clipboard_webview:show()
     local win = clipboard_webview:hswindow()
     if not win then return false end
-
-    -- Do not make the panel a member of every Space. It should follow the
-    -- active Space when invoked. Re-creating the NSWindow is not sufficient;
-    -- macOS may keep a hidden Hammerspoon WebView attached to its original
-    -- Space. Close/recreate below if a stale window survives on another Space.
     pcall(function() win:behavior({"fullScreenAuxiliary"}) end)
     pcall(function() win:level(hs.drawing.windowLevels.floating) end)
     if screen then pcall(function() win:moveToScreen(screen) end) end
@@ -953,10 +947,12 @@ function showClipboardHistory()
     end
     pasteboard_watcher:start()
 
-    -- Recreate the native window for this invocation. macOS Spaces cannot
-    -- reliably be changed by moving/raising a hidden NSWindow after creation.
-    -- A fresh WebView lets AppKit associate the panel with the current Space.
-    createClipboardWebview()
+    -- Reuse the WebView across invocations. Recreating it from inside a hotkey
+    -- callback can race AppKit's NSWindow creation and cause hswindow() to stay
+    -- nil. Refreshing and showing the existing WebView is more reliable.
+    if not clipboard_webview then
+        createClipboardWebview()
+    end
     if not clipboard_webview then
         logger.e("Clipboard history panel is unavailable; cannot show it")
         return
@@ -1040,6 +1036,10 @@ function showClipboardHistory()
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
     positionPanelOnCurrentScreen()
+
+    -- Show on the active Space first. Resolve/focus the NSWindow on a later
+    -- timer tick because hswebview:hswindow() may not be ready synchronously
+    -- during a show/order transition.
     clipboard_webview:show()
     clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
@@ -1050,10 +1050,12 @@ function showClipboardHistory()
             return
         end
 
-        -- Reposition and re-order on every attempt because pointer position,
-        -- active display, and active Space may change between invocations.
         positionPanelOnCurrentScreen()
-        if showClipboardNativeWindow() then
+        local hsWindow = clipboard_webview:hswindow()
+        if hsWindow then
+            -- Ask AppKit to order the existing window after its Space is active.
+            pcall(function() hsWindow:raise() end)
+            pcall(function() hsWindow:focus() end)
             suppressFocusDismiss = false
             return
         end
@@ -1062,14 +1064,13 @@ function showClipboardHistory()
         if focusAttempts < 20 then
             hs.timer.doAfter(0.1, focusClipboardWindowWhenReady)
         else
-            -- Keep the existing WebView alive. Rebuilding repeatedly makes
-            -- transient Space/display transitions worse; a later hotkey press
-            -- will retry showing this same panel on the then-current screen.
-            logger.w("Clipboard history window is not ready yet; keeping it for the next show attempt")
+            -- Don't delete/recreate an NSWindow from this timer loop. Keep it
+            -- shown, report a useful diagnostic, and allow the next hotkey to retry.
+            logger.w("Clipboard history WebView is shown but its native window handle is unavailable")
             suppressFocusDismiss = false
         end
     end
-    hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+    hs.timer.doAfter(0.15, focusClipboardWindowWhenReady)
 
 end
 
