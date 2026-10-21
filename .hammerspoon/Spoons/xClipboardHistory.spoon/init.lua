@@ -1052,11 +1052,34 @@ function showClipboardHistory()
             suppressFocusDismiss = false
             return
         end
+
         positionPanelOnCurrentScreen()
         clipboard_webview:show()
         clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-    
+        -- hswebview:show() may order the native window asynchronously, so retry focus.
+        local focusAttempts = 0
+        local function focusClipboardWindowWhenReady()
+            if not clipboard_webview then
+                suppressFocusDismiss = false
+                return
+            end
+            local hsWindow = clipboard_webview:hswindow()
+            if hsWindow then
+                hsWindow:focus()
+                suppressFocusDismiss = false
+                return
+            end
+            focusAttempts = focusAttempts + 1
+            if focusAttempts < 8 then
+                hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+            else
+                logger.w("Clipboard history window is still unavailable after retries")
+                suppressFocusDismiss = false
+            end
+        end
+        hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+    end)
 end
 
 -- Start the pasteboard watcher
