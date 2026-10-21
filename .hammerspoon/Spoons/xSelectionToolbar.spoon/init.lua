@@ -340,31 +340,21 @@ window.translationResult=value=>{
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
 
-  // Resize the native window to fit when possible. If the monitor bottom limits
-  // growth, reveal the newest response by scrolling the outer WebView document.
+  // Resize to fit the full conversation when possible. If the physical screen
+  // limit prevents that, keep the bottom follow-up field visible by scrolling
+  // down to it rather than scrolling up to the newest AI card.
   requestAnimationFrame(()=>{
     bridge('resize',{contentHeight:document.documentElement.scrollHeight});
-    requestAnimationFrame(()=>{
-      const cardRect=currentAssistantCard.getBoundingClientRect();
-      const viewBottom=window.innerHeight;
-      const needsScroll=cardRect.bottom>viewBottom-12;
-      if(needsScroll){
-        window.scrollTo({top:window.scrollY+(cardRect.bottom-(viewBottom-12)),behavior:'auto'});
-      }
-      setTimeout(()=>{
-        if(!currentAssistantCard.isConnected)return;
-        const latestRect=currentAssistantCard.getBoundingClientRect();
-        if(latestRect.bottom>window.innerHeight-12){
-          window.scrollTo({top:window.scrollY+(latestRect.bottom-(window.innerHeight-12)),behavior:'auto'});
-        }
-      },100);
-    });
+    requestAnimationFrame(()=>setTimeout(()=>{
+      revealFollowupIfClipped();
+    },120));
   });
 };
-window.revealNewestResponse=()=>{
-  if(!currentAssistantCard||!currentAssistantCard.isConnected)return;
-  const rect=currentAssistantCard.getBoundingClientRect();
+window.revealFollowupIfClipped=()=>{
+  if(!followup||!followup.classList.contains('visible'))return;
+  const rect=followup.getBoundingClientRect();
   const bottom=window.innerHeight;
+  // Scroll only when the follow-up box is actually clipped by the bottom edge.
   if(rect.bottom>bottom-12){
     window.scrollTo({top:window.scrollY+(rect.bottom-(bottom-12)),behavior:'auto'});
   }
@@ -592,8 +582,12 @@ Follow-up question:
                     targetHeight = availableHeight
                 end
                 translationWindow:frame({x=windowFrame.x,y=y,w=windowFrame.w,h=targetHeight})
-                -- Tell WebKit to scroll only when its visible content cannot contain the newest response.
-                translationWindow:evaluateJavaScript("window.revealNewestResponse && window.revealNewestResponse();")
+                -- Let the page finish layout after resizing, then keep the follow-up input visible.
+                timer.doAfter(0.12, function()
+                    if translationWindow then
+                        translationWindow:evaluateJavaScript("window.revealFollowupIfClipped && window.revealFollowupIfClipped();")
+                    end
+                end)
             end
         end
     end)
