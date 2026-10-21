@@ -967,6 +967,16 @@ function showClipboardHistory()
     else
         previousApplication = nil
     end
+    -- Reuse the panel, but detach it from any previous macOS Space first.
+    -- The native close operation is the behavior observed to let the next show()
+    -- attach the panel to the Desktop where the shortcut was invoked.
+    local nativeWindow = clipboard_webview:hswindow()
+    if nativeWindow then
+        nativeWindow:close()
+    else
+        clipboard_webview:hide()
+    end
+
     suppressFocusDismiss = true
     menuData = {}
 
@@ -1035,35 +1045,18 @@ function showClipboardHistory()
 
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
-    positionPanelOnCurrentScreen()
-    clipboard_webview:show()
-    clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-
-    -- hswebview:show() can create/order the native window asynchronously, so
-    -- hswindow() may briefly return nil on the first call. Retry focus without
-    -- treating this normal startup race as an error.
-    local focusAttempts = 0
-    local function focusClipboardWindowWhenReady()
+    -- Wait for the native close to be processed before positioning and showing.
+    -- Otherwise AppKit can briefly reuse the old Space's window attachment.
+    hs.timer.doAfter(0.05, function()
         if not clipboard_webview then
             suppressFocusDismiss = false
             return
         end
-        local hsWindow = clipboard_webview:hswindow()
-        if hsWindow then
-            hsWindow:focus()
-            suppressFocusDismiss = false
-            return
-        end
-        focusAttempts = focusAttempts + 1
-        if focusAttempts < 8 then
-            hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
-        else
-            logger.w("Clipboard history window is still unavailable after retries")
-            suppressFocusDismiss = false
-        end
-    end
-    hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+        positionPanelOnCurrentScreen()
+        clipboard_webview:show()
+        clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
+    
 end
 
 -- Start the pasteboard watcher
