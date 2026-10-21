@@ -334,31 +334,33 @@ window.translationResult=value=>{
   const copyButton=currentAssistantCard.querySelector('.message-copy');
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
-  // Keep the response card fully inside the visible conversation viewport.
-  // The native window may hit the screen-height limit, so scroll the conversation
-  // itself rather than assuming that the whole document can fit in the window.
+
+  // Measure after the response has been laid out. Grow the native window first;
+  // scroll only if the newest response still extends below the visible conversation.
   requestAnimationFrame(()=>{
     const desiredHeight=document.body.scrollHeight;
+    const beforeHeight=window.innerHeight;
     bridge('resize',{contentHeight:desiredHeight});
     requestAnimationFrame(()=>{
       const cardRect=currentAssistantCard.getBoundingClientRect();
       const viewRect=conversation.getBoundingClientRect();
-      const topInset=8;
-      const bottomInset=12;
-      if(cardRect.bottom>viewRect.bottom-bottomInset){
-        conversation.scrollTop += cardRect.bottom-(viewRect.bottom-bottomInset);
-      }else if(cardRect.top<viewRect.top+topInset){
-        conversation.scrollTop -= (viewRect.top+topInset)-cardRect.top;
+      const hasInsufficientSpace=cardRect.bottom>viewRect.bottom-12;
+      if(hasInsufficientSpace){
+        const neededScroll=cardRect.bottom-(viewRect.bottom-12);
+        conversation.scrollTop+=Math.max(0,neededScroll);
       }
-      // Re-evaluate after the native frame update finishes.
-      setTimeout(()=>{
-        if(!currentAssistantCard.isConnected)return;
-        const latestRect=currentAssistantCard.getBoundingClientRect();
-        const latestView=conversation.getBoundingClientRect();
-        if(latestRect.bottom>latestView.bottom-bottomInset){
-          conversation.scrollTop += latestRect.bottom-(latestView.bottom-bottomInset);
-        }
-      },80);
+      // A native resize is asynchronous. Re-check only if the card did not fit
+      // before resizing; never jump the conversation when there is enough room.
+      if(hasInsufficientSpace){
+        setTimeout(()=>{
+          if(!currentAssistantCard.isConnected)return;
+          const latestRect=currentAssistantCard.getBoundingClientRect();
+          const latestView=conversation.getBoundingClientRect();
+          if(latestRect.bottom>latestView.bottom-12){
+            conversation.scrollTop+=latestRect.bottom-(latestView.bottom-12);
+          }
+        },100);
+      }
     });
   });
 };
