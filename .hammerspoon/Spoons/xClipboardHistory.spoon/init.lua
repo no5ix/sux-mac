@@ -770,6 +770,8 @@ local function updateClipboardPanel(query, kind, offset, append)
     clipboard_type_filter = kind
 end
 
+local closeClipboardPanel
+
 function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
@@ -835,7 +837,7 @@ clipboard_webview:allowTextEntry(true)
 -- Route user-driven dismissal through NSWindow's native close operation.
 -- Unlike :hide(), this exercises the same close lifecycle as the red button,
 -- which avoids leaving the window attached to the previous macOS Space.
-local function closeClipboardPanel()
+closeClipboardPanel = function()
     local webview = clipboard_webview
     if not webview then return end
     local nativeWindow = webview:hswindow()
