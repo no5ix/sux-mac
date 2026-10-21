@@ -311,30 +311,69 @@ function clipboardPanelHTML()
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+:root {
+  color-scheme: light dark;
+  --panel-bg: #1d1f24;
+  --panel-fg: #f5f6f8;
+  --header-bg: #202329;
+  --border: #3c4049;
+  --control-bg: #15171b;
+  --control-border: #454a55;
+  --card-bg: #272a31;
+  --card-border: #414650;
+  --button-bg: #30343d;
+  --button-border: #4a505b;
+  --muted: #aab0bd;
+  --subtle: #8e96a5;
+  --accent: #7da6ff;
+  --selected-bg: #343a46;
+  --selected-border: #8cb1ff;
+  --footer-bg: #1d1f24;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --panel-bg: #f5f6f8;
+    --panel-fg: #202124;
+    --header-bg: #ffffff;
+    --border: #d8dbe2;
+    --control-bg: #ffffff;
+    --control-border: #c8ccd4;
+    --card-bg: #ffffff;
+    --card-border: #d5d9e0;
+    --button-bg: #edf0f5;
+    --button-border: #d0d5de;
+    --muted: #626b79;
+    --subtle: #697386;
+    --accent: #2463eb;
+    --selected-bg: #e5edff;
+    --selected-border: #5d8df7;
+    --footer-bg: #f5f6f8;
+  }
+}
 * { box-sizing: border-box; }
 html, body { width:100%; height:100%; margin:0; overflow:hidden; }
-body { background:#1d1f24; color:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; display:flex; flex-direction:column; }
-header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:#202329; border-bottom:1px solid #3c4049; }
+body { background:var(--panel-bg); color:var(--panel-fg); font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; display:flex; flex-direction:column; }
+header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); border-bottom:1px solid var(--border); }
 .top { display:flex; align-items:center; gap:10px; }
 .title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
 h1 { margin:0; font-size:17px; font-weight:650; }
 .header-clear { flex-shrink:0; }
-.count { color:#aab0bd; font-size:12px; margin-left:auto; }
-input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid #454a55; background:#15171b; color:#f5f6f8; font-size:13px; outline:none; }
-input:focus { border-color:#7da6ff; }
+.count { color:var(--muted); font-size:12px; margin-left:auto; }
+input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid var(--control-border); background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; }
+input:focus { border-color:var(--accent); }
 main:focus { outline:none; }
 .item:focus-visible { outline:2px solid #8cb1ff; outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; gap:8px; margin-top:10px; }
-.action { border:1px solid #4a505b; border-radius:8px; padding:7px 10px; background:#30343d; color:#f7f7f9; cursor:pointer; font-size:12px; }
-.action.primary { background:#3267d6; border-color:#3267d6; }
+.action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
+.action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
-.item:hover { border-color:#85aaff; background:#30343d; }
-.hover-detail { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:#f5f6f8; background:#17191e; border:1px solid #697386; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
+.item:hover { border-color:var(--accent); background:var(--button-bg); }
+.hover-detail { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:#f5f6f8; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
 .item.detail-open .hover-detail { display:block; }
 .text-detail { width:min(560px, calc(100vw - 32px)); }
 .hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
@@ -345,24 +384,24 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .image-item.preview-loading.detail-open .image-detail { display:none; }
 .hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; visibility:hidden; }
 .hover-image-placeholder { color:#9ca3af; padding:20px; }
-.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
+.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
 #clipboard-items .item { position:relative; margin:0; }
 #clipboard-items .item.selected { z-index:1; }
 .item:hover { border-color:#85aaff; background:#30343d; }
-.item.selected { border-color:#8cb1ff; outline:2px solid #6d98ff; outline-offset:1px; background:#343a46; }
-.image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:#191b20; border-radius:7px; }
+.item.selected { border-color:var(--selected-border); outline:2px solid var(--accent); outline-offset:1px; background:var(--selected-bg); }
+.image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
 .image-item .preview { aspect-ratio:auto; }
 .image-item .preview:not([src]), .image-item .preview[src=""] { object-fit:contain; }
 .text-preview { overflow-wrap:anywhere; word-break:break-word; }
-.preview.placeholder { display:flex; align-items:center; justify-content:center; color:#9ba2af; }
+.preview.placeholder { display:flex; align-items:center; justify-content:center; color:var(--muted); }
 .meta { padding:9px 2px 1px; }
-.kind { font-size:10px; letter-spacing:.12em; color:#93b5ff; font-weight:700; }
-.stamp { color:#b8beca; font-size:11px; margin-top:5px; }
+.kind { font-size:10px; letter-spacing:.12em; color:var(--accent); font-weight:700; }
+.stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
-.hint { color:#8e96a5; font-size:10px; margin-top:8px; }
-.empty { color:#9ca3b1; text-align:center; padding:40px 12px; grid-column:1/-1; }
-footer { flex:0 0 auto; padding:8px 16px; color:#9299a7; background:#1d1f24; border-top:1px solid #393d46; font-size:11px; }
+.hint { color:var(--subtle); font-size:10px; margin-top:8px; }
+.empty { color:var(--muted); text-align:center; padding:40px 12px; grid-column:1/-1; }
+footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); border-top:1px solid var(--border); font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
