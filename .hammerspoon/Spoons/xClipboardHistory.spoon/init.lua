@@ -959,15 +959,32 @@ function showClipboardHistory()
     clipboard_webview:html(clipboardPanelHTML())
     positionPanelOnCurrentScreen()
     clipboard_webview:show()
-    local hsWindow = clipboard_webview:hswindow()
-    if hsWindow then
-        hsWindow:focus()
-    else
-        logger.e("Clipboard history window is unavailable; skipped explicit window focus")
-    end
     clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-    -- Clear this guard after the initial key-window transition settles.
-    hs.timer.doAfter(0.25, function() suppressFocusDismiss = false end)
+
+    -- hswebview:show() can create/order the native window asynchronously, so
+    -- hswindow() may briefly return nil on the first call. Retry focus without
+    -- treating this normal startup race as an error.
+    local focusAttempts = 0
+    local function focusClipboardWindowWhenReady()
+        if not clipboard_webview then
+            suppressFocusDismiss = false
+            return
+        end
+        local hsWindow = clipboard_webview:hswindow()
+        if hsWindow then
+            hsWindow:focus()
+            suppressFocusDismiss = false
+            return
+        end
+        focusAttempts = focusAttempts + 1
+        if focusAttempts < 8 then
+            hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+        else
+            logger.w("Clipboard history window is still unavailable after retries")
+            suppressFocusDismiss = false
+        end
+    end
+    hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
 
 end
 
