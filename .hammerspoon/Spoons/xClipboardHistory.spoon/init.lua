@@ -31,8 +31,10 @@ local CLIPBOARD_RENDER_BATCH_SIZE = 60
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
 local function decodeImage(entry)
-    if not entry or not entry.imageData then return nil end
-    return hs.image.imageFromURL(entry.imageData)
+    if not entry then return nil end
+    if entry.imageObject then return entry.imageObject end
+    if entry.imageData then return hs.image.imageFromURL(entry.imageData) end
+    return nil
 end
 
 local function isImageDataURL(value)
@@ -76,7 +78,10 @@ function pasteboardToClipboard(item_type, item)
         -- Keep the original image for pasting. Build a correctly-proportioned
         -- thumbnail; requesting a fixed square bitmap can stretch some source
         -- images depending on the image provider's bitmapRepresentation behavior.
-        local thumbnail = nil
+        -- Cache a small thumbnail for grid display. Generating a full-size
+        -- data URL at capture time and embedding both full and thumbnail data
+        -- into every DOM card makes switching to Images expensive.
+        local thumbnailData = nil
         local size = item:size()
         local width = tonumber(size and size.w) or 0
         local height = tonumber(size and size.h) or 0
@@ -84,15 +89,15 @@ function pasteboardToClipboard(item_type, item)
             local scale = math.min(1, 320 / width, 320 / height)
             local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
             local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
-            thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+            local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+            if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
         end
-        local fullImageURL = item:encodeAsURLString()
         table.insert(img_clipboard_history, {
             ts=cur_ts,
-            imageData=fullImageURL,
-            thumbnailData=thumbnail and thumbnail:encodeAsURLString() or fullImageURL
+            -- Full image serialization is deferred until the item is pasted.
+            imageObject=item,
+            thumbnailData=thumbnailData or ""
         })
-        thumbnail = nil
     end
 end
 
@@ -140,7 +145,7 @@ function handleClipboardChange(content)
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
                 (#text_clipboard_history == 0 or (img_clipboard_history[#img_clipboard_history].ts > text_clipboard_history[#text_clipboard_history].ts)) then
-                    if img_clipboard_history[#img_clipboard_history].imageData == pasteboardImg:encodeAsURLString() then
+                    if img_clipboard_history[#img_clipboard_history].imageObject == pasteboardImg then
                         -- print("[handleClipboardChange] it's the same as the last img")
                         return
                     end
@@ -149,7 +154,7 @@ function handleClipboardChange(content)
             -- local sss = content:encodeAsURLString()
             -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
             pasteboardToClipboard("image", pasteboardImg)
-            lastAcceptedClipboardValue = pasteboardImg:encodeAsURLString()
+            lastAcceptedClipboardValue = "image:" .. tostring(pasteboardImg:size().w) .. "x" .. tostring(pasteboardImg:size().h) .. ":" .. tostring(cur_ts)
             -- Trim history if it gets too long
             if #img_clipboard_history > max_history_size_for_img then
                 table.remove(img_clipboard_history, 1)
@@ -230,20 +235,18 @@ local function historyItemHTML(entry, index)
     if entry.type == "image" then
         local historyEntry = entry.historyEntry
         local thumbnail = historyEntry and historyEntry.thumbnailData or ""
-        local fullImage = historyEntry and historyEntry.imageData or thumbnail
         local preview
         if thumbnail ~= "" then
             preview = '<img class="preview" src="' .. escapeHTML(thumbnail) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">'
         else
-            preview = '<div class="preview placeholder">Image preview unavailable</div>'
+            preview = '<div class="preview placeholder">Preview loads on demand</div>'
         end
-        local fullPreview = fullImage ~= "" and
-            '<img class="hover-image" src="' .. escapeHTML(fullImage) .. '" alt="Full clipboard image preview">' or
-            '<div class="hover-image-placeholder">Image preview unavailable</div>'
+        -- Full-resolution bytes are not serialized into the initial grid. The
+        -- hover handler requests a larger preview only after the hover delay.
         return '<button class="item image-item" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
             preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div>' ..
-            '<div class="hover-detail image-detail" role="tooltip">' .. fullPreview .. '</div></button>'
+            '<div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Full clipboard image preview" loading="lazy" decoding="async"></div></button>'
     end
     local content = tostring(entry.data or "")
     local previewText = content
@@ -423,6 +426,11 @@ function scheduleHoverDetail(item) {
     hoverDetailTimer = null;
     if (pendingHoverItem !== item || !item.isConnected) return;
     item.classList.add('detail-open');
+    const image = item.querySelector('.hover-image');
+    if (image && !image.dataset.requested) {
+      image.dataset.requested = 'true';
+      bridge('loadImagePreview', Number(item.dataset.index || 0), '', 'image');
+    }
   }, 1000);
 }
 document.addEventListener('pointerover', event => {
@@ -450,6 +458,11 @@ document.addEventListener('pointermove', event => {
 });
 window.addEventListener('blur', cancelPendingHoverDetail);
 window.addEventListener('resize', cancelPendingHoverDetail);
+window.setImagePreview = (index, src) => {
+  const item = document.querySelector('.image-item[data-index="' + index + '"]');
+  const img = item && item.querySelector('.hover-image');
+  if (img && img.dataset.requested === 'true') img.src = src;
+};
 const search = document.getElementById('search');
 let searchTimer = null;
 const activeTypeFilters = new Set();
@@ -698,6 +711,17 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", tonumber(body.index) or 0, true)
+    elseif body.action == "loadImagePreview" then
+        local index = tonumber(body.index)
+        local entry = index and menuData[index]
+        local historyEntry = entry and entry.historyEntry
+        local image = historyEntry and decodeImage(historyEntry)
+        if image and clipboard_webview then
+            local url = image:encodeAsURLString()
+            clipboard_webview:evaluateJavaScript(
+                "window.setImagePreview && window.setImagePreview(" .. tostring(index) .. "," .. jsStringLiteral(url) .. ");"
+            )
+        end
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
@@ -883,7 +907,11 @@ function showClipboardHistory()
                 text = dateTimeStr .. "[IMG]",
                 type = type,
                 rowTs = unixTs,
-                historyEntry = v
+                historyEntry = {
+                    ts = v.ts,
+                    thumbnailData = v.thumbnailData,
+                    imageObject = v.imageObject
+                }
             })
         end
     end
