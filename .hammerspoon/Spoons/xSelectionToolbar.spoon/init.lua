@@ -248,8 +248,13 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 :root[data-appearance="dark"] #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
-#followup{display:none;width:100%;height:42px;min-height:42px;resize:none;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#conversation{width:100%;max-height:calc(100vh - 250px);overflow:auto;display:flex;flex-direction:column;gap:12px}
+.conversation-message{background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
+.conversation-message.assistant{margin-right:2%}
+.message-role{font-size:11px;color:var(--muted);font-weight:650;margin-bottom:6px}
+.message-content{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+#followup{display:none;width:100%;height:42px;min-height:42px;resize:vertical;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 #followup.visible{display:block}
 #followup:focus{outline:2px solid var(--accent);outline-offset:1px}
 .actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
@@ -257,12 +262,31 @@ button{border:1px solid var(--border);border-radius:8px;background:var(--panel);
 button:disabled{opacity:.4;cursor:default}
 </style></head><body>
 <header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
-<textarea id="result" readonly placeholder="Translation will appear here"></textarea>
+<div id="conversation" aria-live="polite"></div>
 <div class="actions"><button id="copy" disabled>Copy</button></div>
 <textarea id="followup" aria-label="Follow-up instruction" placeholder="follow up ... press enter to send"></textarea>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup');
+const status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),conversation=document.getElementById('conversation');
+let latestAssistantText='';
+let messageSequence=0;
+const addMessage=(role,text)=>{
+  const card=document.createElement('section');
+  card.className='conversation-message '+role;
+  const label=document.createElement('div');
+  label.className='message-role';
+  label.textContent=role==='user'?'You':'AI';
+  const content=document.createElement('div');
+  content.className='message-content';
+  content.textContent=text||'';
+  card.append(label,content);
+  conversation.appendChild(card);
+  card.dataset.messageId=String(++messageSequence);
+  conversation.scrollTop=conversation.scrollHeight;
+  return card;
+};
+let currentAssistantCard=addMessage('assistant','');
+let currentAssistantText='';
 const sendFollowupMessage=()=>{const text=followup.value.trim();if(!text)return;bridge('followup',{text});followup.value='';};
 followup.addEventListener('keydown',event=>{
   if(event.key==='Escape'){event.preventDefault();bridge('close');return;}
@@ -291,21 +315,25 @@ window.translationPinned=value=>{
 };
 window.translationStatus=value=>status.textContent=value||'';
 window.translationResult=value=>{
-  result.value=value||'';
-  copy.disabled=!value;
-  // Reveal follow-up only after a real AI response has arrived. Include it in
-  // native window sizing so the input is never clipped while the model works.
-  if(value){
-    followup.classList.add('visible');
-  }else{
-    followup.classList.remove('visible');
-  }
+  currentAssistantText=value||'';
+  latestAssistantText=currentAssistantText;
+  const content=currentAssistantCard.querySelector('.message-content');
+  if(content)content.textContent=currentAssistantText;
+  copy.disabled=!latestAssistantText;
+  if(latestAssistantText)followup.classList.add('visible');
   requestAnimationFrame(()=>{
-    result.style.height='auto';
-    result.style.overflowY='hidden';
-    const desiredHeight=Math.max(90,result.scrollHeight);
+    const desiredHeight=Math.max(90,conversation.scrollHeight);
     bridge('resize',{contentHeight:desiredHeight});
+    conversation.scrollTop=conversation.scrollHeight;
   });
+};
+window.beginFollowup=(userText)=>{
+  addMessage('user',userText);
+  currentAssistantCard=addMessage('assistant','');
+  currentAssistantText='';
+  copy.disabled=true;
+  followup.classList.remove('visible');
+  status.textContent='Working locally…';
 };
 window.setPopupResultHeight=maxHeight=>{
   const limit=Math.max(90,Number(maxHeight)||90);
@@ -470,7 +498,7 @@ local function showCustomAIWindow(text, config)
             local followupText = trim(body.text)
             if followupText ~= "" and translationWindow then
                 local title = config.label or "AI"
-                local followupPrompt = [[You have already answered the original request below. Now answer the user's follow-up question directly. Treat it as a question about the original request and the previous answer. Do not repeat the original response unless needed for clarity.
+                local followupPrompt = [[You have already answered the original request below. Answer the user's follow-up question directly, using the full conversation context. Keep earlier answers intact and do not repeat them unless needed for clarity.
 
 Original selected text:
 ]] .. text .. [[
@@ -480,11 +508,10 @@ Previous AI response:
 
 Follow-up question:
 ]] .. followupText
-                sendLocalPromptRequest(
-                    followupPrompt,
-                    "{{text}}",
-                    title
+                translationWindow:evaluateJavaScript(
+                    "window.beginFollowup && window.beginFollowup(" .. string.format("%q", followupText) .. ");"
                 )
+                sendLocalPromptRequest(followupPrompt, "{{text}}", title)
             end
         elseif body.action == "pin" and type(body.pinned) == "boolean" then
             translationWindowPinned = body.pinned
