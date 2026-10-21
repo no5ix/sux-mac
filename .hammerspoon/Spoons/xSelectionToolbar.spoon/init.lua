@@ -249,23 +249,29 @@ h1{font-size:15px;margin:0;font-weight:650;flex:1}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]) #pin[aria-pressed="true"]{background:#3b4658;border-color:#59677d;color:#f1f5f9}}
 #pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #result{display:block;width:100%;height:90px;min-height:90px;max-height:none;resize:none;line-height:1.5;white-space:pre-wrap;overflow:auto;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
-#followup{display:block;width:100%;height:42px;min-height:42px;resize:none;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#followup{display:none;width:100%;height:42px;min-height:42px;resize:none;line-height:1.4;overflow:auto;margin-top:10px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#followup.visible{display:block}
 #followup:focus{outline:2px solid var(--accent);outline-offset:1px}
-.actions{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}
-.actions-left{display:flex;gap:8px}
+.actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
 button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);padding:7px 11px;font:inherit;cursor:pointer}
 button:disabled{opacity:.4;cursor:default}
 </style></head><body>
 <header><h1>Translation</h1><span class="status" id="status">Translating locally…</span><button id="pin" type="button" aria-label="Pin window" aria-pressed="false" title="Keep window open when clicking outside">📌</button></header>
 <textarea id="result" readonly placeholder="Translation will appear here"></textarea>
-<div class="actions"><button id="send-followup">Send</button><button id="copy" disabled>Copy</button></div>
-<textarea id="followup" aria-label="Follow-up instruction" placeholder="Follow up ..."></textarea>
+<div class="actions"><button id="copy" disabled>Copy</button></div>
+<textarea id="followup" aria-label="Follow-up instruction" placeholder="follow up ... press enter to send"></textarea>
 <script>
 const bridge=(action,payload={})=>{try{window.webkit.messageHandlers.translationWindow.postMessage({action,...payload})}catch(e){}};
-const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup'),sendFollowup=document.getElementById('send-followup');
+const result=document.getElementById('result'),status=document.getElementById('status'),copy=document.getElementById('copy'),pin=document.getElementById('pin'),followup=document.getElementById('followup');
 const sendFollowupMessage=()=>{const text=followup.value.trim();if(!text)return;bridge('followup',{text});followup.value='';};
-sendFollowup.addEventListener('click',sendFollowupMessage);
-followup.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();bridge('close');return;}if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendFollowupMessage();}});
+followup.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();bridge('close');return;}
+  // Ignore Enter while an IME is composing/selecting a Chinese candidate.
+  if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229){
+    event.preventDefault();
+    sendFollowupMessage();
+  }
+});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();bridge('close');}});
 let pinned=false;
 pin.addEventListener('click',()=>{
@@ -287,7 +293,13 @@ window.translationStatus=value=>status.textContent=value||'';
 window.translationResult=value=>{
   result.value=value||'';
   copy.disabled=!value;
-  // Measure only after the text is laid out, then ask the native window to resize.
+  // Reveal follow-up only after a real AI response has arrived. Include it in
+  // native window sizing so the input is never clipped while the model works.
+  if(value){
+    followup.classList.add('visible');
+  }else{
+    followup.classList.remove('visible');
+  }
   requestAnimationFrame(()=>{
     result.style.height='auto';
     result.style.overflowY='hidden';
