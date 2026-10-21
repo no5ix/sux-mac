@@ -335,8 +335,7 @@ window.translationResult=value=>{
   if(copyButton)copyButton.disabled=!latestAssistantText;
   if(latestAssistantText)followup.classList.add('visible');
   requestAnimationFrame(()=>{
-    bridge('resize',{contentHeight:conversation.scrollHeight});
-    // Let the native window fit complete responses instead of clipping them in a fixed-height area.
+    bridge('resize',{contentHeight:document.body.scrollHeight});
     conversation.scrollTop=conversation.scrollHeight;
   });
 };
@@ -549,7 +548,7 @@ Follow-up question:
             if translationWindow and currentScreen then
                 local screenFrame = currentScreen:frame()
                 local maxWindowHeight = math.max(300, screenFrame.h - 28)
-                local targetHeight = math.min(maxWindowHeight, math.max(260, body.contentHeight + 92))
+                local targetHeight = math.min(maxWindowHeight, math.max(260, body.contentHeight + 24))
                 local windowFrame = translationWindow:frame()
                 local y = math.max(screenFrame.y + 20,
                     math.min(windowFrame.y, screenFrame.y + screenFrame.h - targetHeight - 20))
