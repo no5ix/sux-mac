@@ -341,6 +341,8 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
 .image-detail { padding:8px; width:min(680px, calc(100vw - 32px)); height:min(70vh, 640px); display:none; align-items:center; justify-content:center; }
 .item.detail-open .image-detail { display:flex; }
+.image-item.preview-loading .image-detail,
+.image-item.preview-loading.detail-open .image-detail { display:none; }
 .hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; visibility:hidden; }
 .hover-image-placeholder { color:#9ca3af; padding:20px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
@@ -428,11 +430,24 @@ function scheduleHoverDetail(item) {
   hoverDetailTimer = setTimeout(() => {
     hoverDetailTimer = null;
     if (pendingHoverItem !== item || !item.isConnected) return;
-    item.classList.add('detail-open');
     const image = item.querySelector('.hover-image');
-    if (image && !image.dataset.requested) {
+    if (image) {
+      // Keep the entire preview panel hidden until the image itself has loaded.
+      item.classList.add('preview-loading');
       image.dataset.requested = 'true';
+      image.onload = () => {
+        if (!item.isConnected || pendingHoverItem !== item) return;
+        item.classList.remove('preview-loading');
+        item.classList.add('detail-open');
+        image.style.visibility = 'visible';
+      };
+      image.onerror = () => {
+        item.classList.remove('preview-loading');
+        image.style.visibility = 'hidden';
+      };
       bridge('loadImagePreview', Number(item.dataset.index || 0), '', 'image');
+    } else {
+      item.classList.add('detail-open');
     }
   }, 1000);
 }
@@ -464,12 +479,18 @@ window.addEventListener('resize', cancelPendingHoverDetail);
 window.setImagePreview = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
   const img = item && item.querySelector('.hover-image');
-  if (img && img.dataset.requested === 'true') {
-    img.onload = () => { img.style.visibility = 'visible'; };
-    img.onerror = () => { img.style.visibility = 'hidden'; };
-    img.style.visibility = 'hidden';
+  if (!img || img.dataset.requested !== 'true') return;
+  // Load into a detached Image first. The tooltip is not shown until this
+  // request completes, so neither an empty preview window nor alt text flashes.
+  const preloader = new Image();
+  preloader.onload = () => {
+    if (!item.isConnected || pendingHoverItem !== item) return;
     img.src = src;
-  }
+  };
+  preloader.onerror = () => {
+    if (item.isConnected) item.classList.remove('preview-loading');
+  };
+  preloader.src = src;
 };
 const search = document.getElementById('search');
 let searchTimer = null;
