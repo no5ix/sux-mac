@@ -799,17 +799,24 @@ end
 local function showClipboardNativeWindow()
     if not clipboard_webview then return false end
 
-    -- Spaces on macOS are independent of screens. Ask Hammerspoon to create
-    -- and order the native window on the current space before resolving its
-    -- wrapper; repeat the operation during the brief WebView initialization.
     local screen = positionPanelOnCurrentScreen()
-    clipboard_webview:show()
+    -- A normal Hammerspoon WebView is tied to the Space where its native window
+    -- was created. Showing or moving it only changes monitor coordinates, not
+    -- its Space assignment. "allSpaces" lets this utility appear on whichever
+    -- virtual desktop is currently active, while the screen frame still follows
+    -- the pointer's monitor.
     local win = clipboard_webview:hswindow()
-    if not win then return false end
-
-    if screen then
-        pcall(function() win:moveToScreen(screen) end)
+    if win then
+        pcall(function() win:level(hs.drawing.windowLevels.floating) end)
+        pcall(function()
+            local behavior = hs.window.setShadows -- read only, keeps this block Lua-version independent
+            win:behavior({"canJoinAllSpaces", "fullScreenAuxiliary"})
+        end)
     end
+    clipboard_webview:show()
+    win = clipboard_webview:hswindow()
+    if not win then return false end
+    if screen then pcall(function() win:moveToScreen(screen) end) end
     pcall(function() win:raise() end)
     pcall(function() win:focus() end)
     return true
@@ -822,6 +829,12 @@ clipboard_webview = webview.new(
     {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
     clipboard_usercontent
 ):windowStyle({"titled", "closable", "resizable"})
+-- Make the clipboard panel available on every macOS Space. The active Space
+-- is still selected naturally when the shortcut is invoked.
+pcall(function()
+    clipboard_webview:behavior({"canJoinAllSpaces", "fullScreenAuxiliary"})
+    clipboard_webview:level(hs.drawing.windowLevels.floating)
+end)
 clipboard_webview:shadow(true)
 clipboard_webview:allowTextEntry(true)
 clipboard_webview:windowCallback(function(action, _, focused)
