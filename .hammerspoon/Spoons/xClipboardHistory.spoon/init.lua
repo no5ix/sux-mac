@@ -774,7 +774,7 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then
-        if clipboard_webview then clipboard_webview:hide() end
+        closeClipboardPanel()
     elseif body.action == "search" or body.action == "filter" then
         updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadMore" then
@@ -832,11 +832,28 @@ clipboard_webview = webview.new(
 ):windowStyle({"titled", "closable", "resizable"})
 clipboard_webview:shadow(true)
 clipboard_webview:allowTextEntry(true)
+-- Route user-driven dismissal through NSWindow's native close operation.
+-- Unlike :hide(), this exercises the same close lifecycle as the red button,
+-- which avoids leaving the window attached to the previous macOS Space.
+local function closeClipboardPanel()
+    local webview = clipboard_webview
+    if not webview then return end
+    local nativeWindow = webview:hswindow()
+    if nativeWindow then
+        nativeWindow:close()
+    else
+        -- Fallback only while the native NSWindow is being created.
+        webview:hide()
+    end
+end
+clipboard_webview:closeOnEscape(false)
 clipboard_webview:windowCallback(function(action, _, focused)
     if action == "focusChange" and focused == false and not suppressFocusDismiss then
         -- Clicking another app or elsewhere dismisses the floating history panel.
         hs.timer.doAfter(0.1, function()
-            if clipboard_webview then clipboard_webview:hide() end
+            if not suppressFocusDismiss and clipboard_webview and clipboard_webview:isVisible() then
+                closeClipboardPanel()
+            end
         end)
     end
 end)
