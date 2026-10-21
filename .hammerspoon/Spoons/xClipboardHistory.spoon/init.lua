@@ -828,31 +828,39 @@ clipboard_webview = webview.new(
 ):windowStyle({"titled", "closable", "resizable"})
 clipboard_webview:shadow(true)
 clipboard_webview:allowTextEntry(true)
--- Route user-driven dismissal through NSWindow's native close operation.
--- Unlike :hide(), this exercises the same close lifecycle as the red button,
--- which avoids leaving the window attached to the previous macOS Space.
+-- Dismiss the panel without destroying the reusable webview. On the next
+-- shortcut press, recreate the native window so it attaches to the active Space.
 closeClipboardPanel = function()
-    local webview = clipboard_webview
-    if not webview then return end
-    local nativeWindow = webview:hswindow()
-    if nativeWindow then
-        nativeWindow:close()
-    else
-        -- Fallback only while the native NSWindow is being created.
-        webview:hide()
-    end
+    if clipboard_webview then clipboard_webview:hide() end
 end
-clipboard_webview:closeOnEscape(false)
-clipboard_webview:windowCallback(function(action, _, focused)
-    if action == "focusChange" and focused == false and not suppressFocusDismiss then
-        -- Clicking another app or elsewhere dismisses the floating history panel.
-        hs.timer.doAfter(0.1, function()
-            if not suppressFocusDismiss and clipboard_webview and clipboard_webview:isVisible() then
-                closeClipboardPanel()
-            end
-        end)
-    end
-end)
+
+local function configureClipboardWebview(view)
+    view:windowStyle({"titled", "closable", "resizable"})
+    view:shadow(true)
+    view:allowTextEntry(true)
+    view:closeOnEscape(false)
+    view:windowCallback(function(action, _, focused)
+        if action == "focusChange" and focused == false and not suppressFocusDismiss then
+            hs.timer.doAfter(0.1, function()
+                if not suppressFocusDismiss and clipboard_webview == view and view:isVisible() then
+                    closeClipboardPanel()
+                end
+            end)
+        end
+    end)
+end
+
+local function createClipboardWebview()
+    clipboard_usercontent = webview.usercontent.new("clipboardHistory")
+    clipboard_usercontent:setCallback(handleClipboardPanelMessage)
+    clipboard_webview = webview.new(
+        {x = 120, y = 80, w = 980, h = 760},
+        {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
+        clipboard_usercontent
+    )
+    configureClipboardWebview(clipboard_webview)
+end
+createClipboardWebview()
 
 -- Paste clipboard-history rows from the oldest selected item to the newest.
 -- The chooser is displayed newest-first, so walk the selected range backwards.
@@ -967,15 +975,18 @@ function showClipboardHistory()
     else
         previousApplication = nil
     end
-    -- Reuse the panel, but detach it from any previous macOS Space first.
-    -- The native close operation is the behavior observed to let the next show()
-    -- attach the panel to the Desktop where the shortcut was invoked.
-    local nativeWindow = clipboard_webview:hswindow()
-    if nativeWindow then
-        nativeWindow:close()
-    else
-        clipboard_webview:hide()
+    -- Closing a native NSWindow leaves the hs.webview object unsuitable for
+    -- reuse on some macOS Spaces. Hide and discard it, then create a fresh native
+    -- window on every shortcut press so AppKit attaches it to the active Desktop.
+    if clipboard_webview then
+        local oldView = clipboard_webview
+        oldView:hide()
+        local oldWindow = oldView:hswindow()
+        if oldWindow then pcall(function() oldWindow:close() end) end
+        clipboard_webview = nil
+        clipboard_usercontent = nil
     end
+    createClipboardWebview()
 
     suppressFocusDismiss = true
     menuData = {}
@@ -1045,9 +1056,8 @@ function showClipboardHistory()
 
     clipboard_search = ""
     clipboard_webview:html(clipboardPanelHTML())
-    -- Wait for the native close to be processed before positioning and showing.
-    -- Otherwise AppKit can briefly reuse the old Space's window attachment.
-    hs.timer.doAfter(0.05, function()
+    -- Let AppKit finish constructing the new window before assigning its frame.
+    hs.timer.doAfter(0.1, function()
         if not clipboard_webview then
             suppressFocusDismiss = false
             return
