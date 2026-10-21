@@ -246,7 +246,7 @@ local function historyItemHTML(entry, index)
         return '<button class="item image-item" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
             preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
             escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div>' ..
-            '<div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Full clipboard image preview" loading="lazy" decoding="async"></div></button>'
+            '<div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="" aria-hidden="true" loading="lazy" decoding="async"></div></button>'
     end
     local content = tostring(entry.data or "")
     local previewText = content
@@ -341,7 +341,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
 .image-detail { padding:8px; width:min(680px, calc(100vw - 32px)); height:min(70vh, 640px); display:none; align-items:center; justify-content:center; }
 .item.detail-open .image-detail { display:flex; }
-.hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; }
+.hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; visibility:hidden; }
 .hover-image-placeholder { color:#9ca3af; padding:20px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid #414650; border-radius:12px; background:#272a31; padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid #8cb1ff; outline-offset:2px; }
@@ -464,7 +464,12 @@ window.addEventListener('resize', cancelPendingHoverDetail);
 window.setImagePreview = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
   const img = item && item.querySelector('.hover-image');
-  if (img && img.dataset.requested === 'true') img.src = src;
+  if (img && img.dataset.requested === 'true') {
+    img.onload = () => { img.style.visibility = 'visible'; };
+    img.onerror = () => { img.style.visibility = 'hidden'; };
+    img.style.visibility = 'hidden';
+    img.src = src;
+  }
 };
 const search = document.getElementById('search');
 let searchTimer = null;
