@@ -598,14 +598,7 @@ Follow-up question:
         end
     end)
     translationWindow:html(translationWindowHTML(popupText):gsub("<h1>Translation</h1>", "<h1>" .. htmlEscape(config.label) .. "</h1>"), "file:///")
-    timer.doAfter(0.1, function()
-        if translationWindow then
-            translationWindow:evaluateJavaScript(
-                "window.setPopupResultHeight && window.setPopupResultHeight(" ..
-                tostring(math.max(90, h - 92)) .. ");"
-            )
-        end
-    end)
+    -- The conversation view sizes itself to its content; no fixed textarea height.
     syncTranslationAppearance()
     translationAppearancePoll = timer.doEvery(1, syncTranslationAppearance)
     translationWindow:show()
