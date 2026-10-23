@@ -16,6 +16,7 @@ local image = require "hs.image"
 local logger = hs.logger.new("xClipboardHistory", "info")
 local HISTORY_ROOT = (os.getenv("HOME") .. "/Documents/github/sux-mac/clipboard-history")
 local RETENTION_DAYS = 7
+local THUMBNAIL_MAX_DIMENSION = 112
 local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
@@ -305,7 +306,7 @@ local function restorePersistentHistory()
                                     local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
                                     local thumbnailData = ""
                                     if width > 0 and height > 0 then
-                                        local scale = math.min(1, 240 / width, 240 / height)
+                                        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
                                         local thumbnail = imageObject:bitmapRepresentation({
                                             w=math.max(1, math.floor(width*scale+0.5)),
                                             h=math.max(1, math.floor(height*scale+0.5))
@@ -442,7 +443,7 @@ function pasteboardToClipboard(item_type, item)
         local width = tonumber(size and size.w) or 0
         local height = tonumber(size and size.h) or 0
         if width > 0 and height > 0 then
-            local scale = math.min(1, 240 / width, 240 / height)
+            local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
             local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
             local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
             local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
@@ -1225,7 +1226,11 @@ function handleClipboardPanelMessage(message)
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "clearAll" then
         clearClipboardHistory()
-        if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()); clipboard_webview:show() end
+        if clipboard_webview then
+            clipboardPanelHTMLReady = true
+            clipboard_webview:html(clipboardPanelHTML())
+            clipboard_webview:show()
+        end
         pasteboard_watcher:start()
         hs.alert.show("Clipboard history cleared")
     end
@@ -1252,9 +1257,17 @@ local function positionPanelOnCurrentScreen()
     end
 end
 
--- Hide rather than closing the native window so repeated opening is inexpensive.
+-- Destroy the native window on dismissal. A hidden hs.webview can remain tied
+-- to the Space where it was first shown; recreating it on the next hotkey lets
+-- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
-    if clipboard_webview then clipboard_webview:hide() end
+    local view = clipboard_webview
+    clipboard_webview = nil
+    clipboardPanelHTMLReady = false
+    clipboard_usercontent = nil
+    if view then
+        view:delete()
+    end
 end
 
 local function configureClipboardWebview(view)
@@ -1263,7 +1276,13 @@ local function configureClipboardWebview(view)
     view:allowTextEntry(true)
     view:closeOnEscape(false)
     view:windowCallback(function(action, _, focused)
-        if action == "focusChange" and focused == false and not suppressFocusDismiss then
+        if action == "closing" then
+            if clipboard_webview == view then
+                clipboard_webview = nil
+                clipboard_usercontent = nil
+                clipboardPanelHTMLReady = false
+            end
+        elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
             hs.timer.doAfter(0.1, function()
                 if not suppressFocusDismiss and clipboard_webview == view and view:isVisible() then
                     closeClipboardPanel()
