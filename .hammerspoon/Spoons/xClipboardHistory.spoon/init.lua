@@ -253,7 +253,13 @@ local function restorePersistentHistory()
                         local bytes = file:read("*a")
                         file:close()
                         if bytes and #bytes > 0 then
-                            local imageData = "data:image/png;base64," .. hs.base64.encode(bytes)
+                            local fileExtension = record.imagePath:match("%.([%w]+)$") or "png"
+                            local mimeByExtension = {
+                                png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif",
+                                webp="image/webp", tiff="image/tiff", bmp="image/bmp"
+                            }
+                            local mimeType = mimeByExtension[string.lower(fileExtension)] or "image/png"
+                            local imageData = "data:" .. mimeType .. ";base64," .. hs.base64.encode(bytes)
                             local ok, imageObject = pcall(hs.image.imageFromURL, imageData)
                             if ok and imageObject then
                                 local size = imageObject:size()
@@ -355,7 +361,6 @@ local display_max_text_length = 200
 -- Add the given string to the history
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
-    runDailyCleanupIfNeeded()
     local persistedImagePath = nil
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
