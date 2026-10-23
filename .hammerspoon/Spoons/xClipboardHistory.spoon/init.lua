@@ -6,13 +6,18 @@ local pkg = {}
 local hotkey = require "hs.hotkey"
 local pasteboard = require "hs.pasteboard"
 local pbwatcher = require "hs.pasteboard.watcher"
--- The default watcher polls every 250 ms. Check more frequently so transient
--- clipboard writes are less likely to be overwritten before we observe them.
--- This setting applies to watchers created after this point.
+-- Keep clipboard observation responsive without performing disk cleanup on every copy.
 pbwatcher.interval(0.1)
 local webview = require "hs.webview"
 local application = require "hs.application"
+local json = require "hs.json"
+local fs = require "hs.fs"
+local image = require "hs.image"
 local logger = hs.logger.new("xClipboardHistory", "info")
+local HISTORY_ROOT = os.getenv("HOME") .. "/.config/sux-mac/clipboard-history"
+local RETENTION_DAYS = 7
+local cleanupLastRunDate = nil
+local lastPersistedEntryKey = nil
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
