@@ -587,6 +587,8 @@ local function jsStringLiteral(value)
     return '"' .. value .. '"'
 end
 
+local TEXT_CARD_PREVIEW_MAX_CHARS = 1800
+
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
@@ -610,24 +612,37 @@ local function historyItemHTML(entry, index)
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
+    elseif #content > TEXT_CARD_PREVIEW_MAX_CHARS then
+        local stop = TEXT_CARD_PREVIEW_MAX_CHARS
+        local utf8Lib = utf8
+        if utf8Lib and utf8Lib.offset then
+            local ok, offset = pcall(utf8Lib.offset, content, TEXT_CARD_PREVIEW_MAX_CHARS + 1)
+            if ok and offset then stop = offset - 1 end
+        end
+        previewText = content:sub(1, stop) .. "\n… (preview truncated; hover to load full text)"
     end
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower(content .. " " .. stamp)) .. '">' ..
+    -- Search is performed in Lua. Do not copy the entire clipboard payload into
+    -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
         '<div class="hover-detail text-detail" role="tooltip">' ..
         '<div class="hover-detail-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
-        '<div class="hover-full-text">' .. escapeHTML(previewText) .. '</div></div></button>'
+        '<div class="hover-full-text" data-loaded="false">Loading full text…</div></div></button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
     if kind == "none" then return false end
     if kind ~= "all" and entry.type ~= kind then return false end
+    query = string.lower(tostring(query or ""))
+    -- The vast majority of filter clicks have an empty query. Return before
+    -- reading or lowercasing the possibly huge clipboard payload.
+    if query == "" then return true end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     local searchableText = entry.type == "image" and "[image]" or tostring(entry.data or "")
     local searchable = string.lower(searchableText .. " " .. stamp)
-    query = string.lower(tostring(query or ""))
-    return query == "" or searchable:find(query, 1, true) ~= nil
+    return searchable:find(query, 1, true) ~= nil
 end
 
 local function getClipboardMatches(query, kind)
@@ -845,6 +860,12 @@ function scheduleHoverDetail(item) {
       };
       bridge('loadImagePreview', Number(item.dataset.index || 0), '', 'image');
     } else {
+      const fullText = item.querySelector('.hover-full-text');
+      if (fullText && fullText.dataset.loaded !== 'true') {
+        fullText.textContent = 'Loading full text…';
+        bridge('loadTextPreview', Number(item.dataset.index || 0), '', 'text');
+        return;
+      }
       item.classList.add('detail-open');
     }
   }, 1000);
@@ -889,6 +910,14 @@ window.setImagePreview = (index, src) => {
     if (item.isConnected) item.classList.remove('preview-loading');
   };
   preloader.src = src;
+};
+window.setTextPreview = (index, content) => {
+  const item = document.querySelector('.text-item[data-index="' + index + '"]');
+  const fullText = item && item.querySelector('.hover-full-text');
+  if (!item || !fullText || pendingHoverItem !== item) return;
+  fullText.textContent = content;
+  fullText.dataset.loaded = 'true';
+  item.classList.add('detail-open');
 };
 const search = document.getElementById('search');
 let searchTimer = null;
@@ -1153,6 +1182,14 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", tonumber(body.index) or 0, true)
+    elseif body.action == "loadTextPreview" then
+        local index = tonumber(body.index)
+        local entry = index and menuData[index]
+        if entry and entry.type == "text" and clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(entry.data or "") .. ");"
+            )
+        end
     elseif body.action == "loadImagePreview" then
         local index = tonumber(body.index)
         local entry = index and menuData[index]
@@ -1218,7 +1255,10 @@ local function configureClipboardWebview(view)
     end)
 end
 
+local clipboardPanelHTMLReady = false
+
 local function createClipboardWebview()
+    clipboardPanelHTMLReady = false
     clipboard_usercontent = webview.usercontent.new("clipboardHistory")
     clipboard_usercontent:setCallback(handleClipboardPanelMessage)
     clipboard_webview = webview.new(
@@ -1437,9 +1477,17 @@ function showClipboardHistory()
         end)
     end
 
-    -- If the panel already has its document loaded, only replace its cards.
-    -- Otherwise construct the full HTML exactly once; this avoids blank white
-    -- windows caused by JavaScript updates being sent before the DOM exists.
+    -- On the first open (or after the native window was recreated), load HTML
+    -- directly. Don't send JavaScript into an uninitialized WebView and wait
+    -- for a predictable error/rebuild cycle before showing the panel.
+    if not clipboardPanelHTMLReady then
+        view:html(clipboardPanelHTML())
+        clipboardPanelHTMLReady = true
+        hs.timer.doAfter(0.15, showAfterHTMLLoaded)
+        return
+    end
+
+    -- The document is already loaded, so update only the visible batch.
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
     local loadMoreHTML = renderedCount < matchingCount and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
@@ -1457,6 +1505,7 @@ function showClipboardHistory()
         if error then
             logger.w("Clipboard panel DOM refresh failed; rebuilding HTML: " .. tostring(error))
             view:html(clipboardPanelHTML())
+            clipboardPanelHTMLReady = true
             hs.timer.doAfter(0.1, showAfterHTMLLoaded)
             return
         end
