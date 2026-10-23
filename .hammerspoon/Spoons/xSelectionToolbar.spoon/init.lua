@@ -256,13 +256,13 @@ body{padding:16px;overflow:visible}
 
 .conversation-message{position:relative;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .conversation-message.user{background:var(--bg);border-color:var(--border);margin-left:9%}
-.conversation-message.assistant{margin-right:2%;padding-top:42px;padding-right:44px;padding-bottom:12px}
+.conversation-message.assistant{margin-right:0;padding-top:42px;padding-right:44px;padding-bottom:12px}
 .message-role{font-size:11px;color:var(--muted);font-weight:650;margin-bottom:6px}
 .conversation-message.assistant .message-role{position:absolute;top:12px;left:12px;margin:0}
 .message-content{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
 .message-copy{position:absolute;right:8px;top:6px;width:28px;height:28px;padding:0;border-radius:6px;font-size:19px;line-height:1;color:var(--muted)}
 .message-copy:hover{background:var(--bg);color:var(--fg)}
-#followup{display:none;width:100%;height:38px;min-height:38px;max-height:38px;resize:none;line-height:1.4;overflow:auto;margin-top:12px;margin-bottom:0;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:8px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+#followup{display:none;box-sizing:border-box;width:100%;height:38px;min-height:38px;max-height:38px;resize:none;line-height:1.4;overflow:auto;margin-top:12px;margin-bottom:0;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:8px 12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
 #followup.visible{display:block}
 #followup:focus{outline:1px solid var(--accent);outline-offset:0}
 .actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
@@ -640,12 +640,14 @@ end
 local function showTranslationProviderChooser()
     local chooser = hs.chooser.new(function(selected)
         if not selected then return end
+        if selected.id == "provider-label" then return end
         TRANSLATION_PROVIDER_CHOICE = selected.id
         hs.alert.show(selected.id == "local" and "Provider: Local oMLX + Qwen" or "Provider: ChatGPT")
     end)
     chooser:choices({
-        {id="local", text="1. Local — oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Selected provider" or "Use local AI"},
-        {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Selected provider" or "Use ChatGPT in your browser"}
+        {id="provider-label", text="🔀 Current Provider", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Local — oMLX + Qwen" or "ChatGPT"},
+        {id="local", text="1. Local — oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Currently selected" or "Switch to local AI"},
+        {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Currently selected" or "Switch to ChatGPT"}
     })
     chooser:show()
 end
