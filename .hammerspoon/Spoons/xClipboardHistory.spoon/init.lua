@@ -199,7 +199,12 @@ local function removeExpiredHistoryDirectories(todayKey)
     if not todayNoon then return end
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
     local iterator = fs.dir(HISTORY_ROOT)
-    if not iterator then return end
+    if not iterator then
+        -- A missing history root is normal on first launch. Create it and
+        -- return; there are no expired folders to remove yet.
+        ensureDirectory(HISTORY_ROOT)
+        return
+    end
     for name in iterator do
         if validDateKey(name) then
             local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
