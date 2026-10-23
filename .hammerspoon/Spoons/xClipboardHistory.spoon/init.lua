@@ -59,6 +59,10 @@ end
 
 local function ensureDirectory(path)
     if fs.attributes(path) then return true end
+    local parent = path:match("^(.*)/[^/]+$")
+    if parent and parent ~= path and not fs.attributes(parent) then
+        if not ensureDirectory(parent) then return false end
+    end
     local ok, err = fs.mkdir(path)
     if ok then return true end
     if fs.attributes(path) then return true end
@@ -334,9 +338,7 @@ local max_history_size_for_text = 10000
 local max_history_size_for_img = 100
 local display_max_text_length = 200
 
--- Load the retained seven-day history when this Spoon starts.
-runDailyCleanupIfNeeded()
-restorePersistentHistory()
+
 
 -- local last_change = pasteboard.changeCount() -- keeps track of how many times the pasteboard owner has changed // Indicates a new copy has been made
 
