@@ -182,7 +182,6 @@ button:active{background-color:var(--toolbar-active)!important}
 </head><body><div class="bar">
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
-<button data-action="chatgpt" aria-label="ChatGPT" title="ChatGPT" onclick="action('chatgpt')"><span class="icon" aria-hidden="true">🤖</span></button>
 <button data-action="translation-provider" aria-label="Translation provider" title="Translation provider" onclick="action('translation-provider')"><span class="icon" aria-hidden="true">🌐</span></button>
 
 __CUSTOM_AI_BUTTONS__
@@ -224,8 +223,7 @@ local translationWindowPinned = false
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
 local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
-local TRANSLATION_PROVIDER_CHOICE = "local"
-local runCloudTranslation
+local TRANSLATION_PROVIDER_CHOICE = "local" -- local oMLX+Qwen or ChatGPT
 
 -- Add custom local-AI actions here. Each entry creates a toolbar button and
 -- uses its prompt template with the selected text. Use {{text}} where the
@@ -639,76 +637,55 @@ local function openSafariURL(url)
     hs.task.new("/usr/bin/open", nil, { "-a", "Safari", url }):start()
 end
 
-runCloudTranslation = function(text)
-    local source = trim(text)
-    if source == "" then return end
-    hideToolbar()
-    local encoded = urlEncode(source)
-    -- Try Google first. If a web page fails to open, the OS reports a non-zero
-    -- task status and the next provider is attempted automatically.
-    local providers = {
-        {
-            name = "Google Translate",
-            url = "https://translate.google.com/?sl=auto&tl=zh-CN&text=" .. encoded .. "&op=translate"
-        },
-        {
-            name = "Apple Translate",
-            url = "https://www.apple.com/ios/feature-availability/#translate"
-        },
-        {
-            name = "Microsoft Translator",
-            url = "https://www.bing.com/translator?from=auto&to=zh-Hans&text=" .. encoded
-        }
-    }
-    local function tryProvider(index)
-        local provider = providers[index]
-        if not provider then
-            pasteboard.setContents(source)
-            hs.alert.show("All cloud translation providers failed to open; text copied.")
-            return
-        end
-        hs.alert.show("Opening " .. provider.name .. "…")
-        local task = hs.task.new("/usr/bin/open", function(exitCode)
-            if exitCode == 0 then
-                -- URL dispatch succeeded. Clipboard preserves the exact selection
-                -- so it can be pasted into the chosen translation page if required.
-                pasteboard.setContents(source)
-                return
-            end
-            logger.w(provider.name .. " could not be opened; trying the next provider.")
-            timer.doAfter(0.25, function() tryProvider(index + 1) end)
-        end, {provider.url})
-        if not task or not task:start() then
-            timer.doAfter(0.25, function() tryProvider(index + 1) end)
-        end
-    end
-    tryProvider(1)
-end
-
-local function showTranslationProviderChooser(text)
+local function showTranslationProviderChooser()
     local chooser = hs.chooser.new(function(selected)
         if not selected then return end
-        if selected.id == "local" then
-            TRANSLATION_PROVIDER_CHOICE = "local"
-            hs.alert.show("Provider: Local oMLX + Qwen")
-        elseif selected.id == "cloud" then
-            TRANSLATION_PROVIDER_CHOICE = "cloud"
-            hs.alert.show("Provider: Cloud translation")
-        elseif selected.id == "run-local" then
-            for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
-                if config.id == "translation" then showCustomAIWindow(text, config); return end
-            end
-        elseif selected.id == "run-cloud" and runCloudTranslation then
-            runCloudTranslation(text)
-        end
+        TRANSLATION_PROVIDER_CHOICE = selected.id
+        hs.alert.show(selected.id == "local" and "Provider: Local oMLX + Qwen" or "Provider: ChatGPT")
     end)
     chooser:choices({
-        {id="local", text="Select Local oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Current provider" or "Use the local model"},
-        {id="cloud", text="Select Cloud translation", subText=TRANSLATION_PROVIDER_CHOICE == "cloud" and "Current provider" or "Google → Apple Translate → Microsoft fallback"},
-        {id="run-local", text="Translate with local AI", subText="Run translation using oMLX + Qwen"},
-        {id="run-cloud", text="Translate with cloud", subText="Try Google, then Apple Translate, then Microsoft"}
+        {id="local", text="Local — oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Selected provider" or "Use local AI"},
+        {id="chatgpt", text="ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Selected provider" or "Use ChatGPT in your browser"}
     })
     chooser:show()
+end
+
+local function runChatGPTWorkflow(text, promptTemplate)
+    local prompt = tostring(promptTemplate or CHATGPT_PROMPT) .. "\n\n" .. text
+    pasteboard.setContents(prompt)
+    hideToolbar()
+    hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
+    timer.doAfter(5.0, function()
+        local appleScript = [[
+            tell application "Safari"
+                activate
+                delay 0.3
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        if (URL of t) contains "chatgpt.com" then
+                            set current tab of w to t
+                            set index of w to 1
+                            tell application "System Events"
+                                tell process "Safari"
+                                    set frontmost to true
+                                    keystroke "v" using {command down}
+                                    delay 0.7
+                                    key code 36
+                                end tell
+                            end tell
+                            return "SUBMITTED"
+                        end if
+                    end repeat
+                end repeat
+                return "NO_CHATGPT_TAB"
+            end tell
+        ]]
+        local ok, result, scriptError = pcall(hs.osascript.applescript, appleScript)
+        if not ok or not result then
+            logger.e("ChatGPT paste/submit failed: " .. tostring(scriptError or result))
+            hs.alert.show("ChatGPT paste failed. Check Hammerspoon Accessibility permission.")
+        end
+    end)
 end
 
 local function onToolbarMessage(message)
@@ -736,65 +713,19 @@ local function onToolbarMessage(message)
         hideToolbar()
         eventtap.keyStroke(DOUbao_SHORTCUT, DOUbao_KEY, 0.08)
         timer.doAfter(0.6, function() eventtap.keyStroke({ "cmd" }, "v", 0.08) end)
-    elseif action == "chatgpt" then
-        local prompt = CHATGPT_PROMPT .. "\n\n" .. text
-        pasteboard.setContents(prompt)
-        hideToolbar()
-        hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
-        timer.doAfter(2.5, function()
-            -- System Events pastes only after activating Safari and selecting an
-            -- already loaded ChatGPT tab. Hammerspoon must have Accessibility access.
-            local appleScript = [[
-                tell application "Safari"
-                    activate
-                    delay 0.2
-                    repeat with w in windows
-                        repeat with t in tabs of w
-                            if (URL of t) contains "chatgpt.com" then
-                                set current tab of w to t
-                                set index of w to 1
-                                tell application "System Events"
-                                    tell process "Safari"
-                                        set frontmost to true
-                                        keystroke "v" using {command down}
-                                        delay 0.6
-                                        key code 36
-                                    end tell
-                                end tell
-                                return "SUBMITTED"
-                            end if
-                        end repeat
-                    end repeat
-                    return "NO_CHATGPT_TAB"
-                end tell
-            ]]
-            local callOk, result, scriptError = pcall(hs.osascript.applescript, appleScript)
-            if not callOk or not result then
-                logger.w("ChatGPT paste/submit failed: " .. tostring(scriptError or result))
-                hs.alert.show("Could not paste into ChatGPT. Check Hammerspoon Accessibility permission.")
-            end
-        end)
     elseif action == "translation-provider" then
         hideToolbar()
-        showTranslationProviderChooser(text)
-    elseif action == "translation" then
-        hideToolbar()
-        for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
-            if config.id == "translation" then
-                if TRANSLATION_PROVIDER_CHOICE == "cloud" then
-                    if runCloudTranslation then runCloudTranslation(text) end
-                else
-                    showCustomAIWindow(text, config)
-                end
-                break
-            end
-        end
+        showTranslationProviderChooser()
     elseif type(action) == "string" and action:sub(1, 7) == "custom-" then
         local actionId = action:sub(8)
         for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
             if tostring(config.id) == actionId then
                 hideToolbar()
-                showCustomAIWindow(text, config)
+                if TRANSLATION_PROVIDER_CHOICE == "chatgpt" then
+                    runChatGPTWorkflow(text, config.prompt)
+                else
+                    showCustomAIWindow(text, config)
+                end
                 break
             end
         end
@@ -862,7 +793,7 @@ local function buildToolbar(text)
     toolbar:show()
     toolbar:bringToFront()
     -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
-    local buttonWidths = { 38, 38, 38, 38, 38 } -- Copy, ChatGPT, provider, Youdao Result, Youdao Dictionary
+    local buttonWidths = { 38, 38, 38, 38 } -- Copy, provider, Youdao Result, Youdao Dictionary
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         buttonWidths[#buttonWidths + 1] = 38
     end
@@ -892,7 +823,7 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
-            local buttonActions = { "copy", "chatgpt", "translation-provider" }
+            local buttonActions = { "copy", "translation-provider" }
             for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
                 buttonActions[#buttonActions + 1] = customActionName(config)
             end
@@ -905,7 +836,7 @@ local function buildToolbar(text)
                     break
                 end
                 cursor = cursor + width + gap
-                if i == 3 + #(CUSTOM_AI_BUTTONS or {}) then cursor = cursor + separatorWidthWithMargins + gap end
+                if i == 1 + #(CUSTOM_AI_BUTTONS or {}) then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
 
