@@ -1090,17 +1090,13 @@ local function positionPanelOnCurrentScreen()
     end
 end
 
--- Dismissal intentionally only hides the current panel. A new native window
--- is created for each shortcut invocation so its Space is resolved afresh.
+-- Hide rather than closing the native window so repeated opening is inexpensive.
 closeClipboardPanel = function()
     if clipboard_webview then clipboard_webview:hide() end
 end
 
 local function configureClipboardWebview(view)
     view:windowStyle({"titled", "closable", "resizable"})
-    -- Native close should dispose only the NSWindow, not the Lua webview
-    -- object. The shortcut explicitly replaces the old webview on reopen.
-    view:deleteOnClose(false)
     view:shadow(true)
     view:allowTextEntry(true)
     view:closeOnEscape(false)
@@ -1111,12 +1107,6 @@ local function configureClipboardWebview(view)
                     closeClipboardPanel()
                 end
             end)
-        elseif action == "closing" then
-            -- Keep the Lua handle from being used to show a dead NSWindow later.
-            if clipboard_webview == view then
-                clipboard_webview = nil
-                clipboard_usercontent = nil
-            end
         end
     end)
 end
@@ -1128,7 +1118,7 @@ local function createClipboardWebview()
         {x = 120, y = 80, w = 980, h = 760},
         {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
         clipboard_usercontent
-    )
+    ):windowStyle({"titled", "closable", "resizable"})
     configureClipboardWebview(clipboard_webview)
 end
 createClipboardWebview()
