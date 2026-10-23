@@ -244,6 +244,13 @@ local function runDailyCleanupIfNeeded()
     cleanupLastRunDate = todayKey
 end
 
+-- These limits must be declared before restorePersistentHistory(), because
+-- that function references them when the Spoon is loaded at the bottom of
+-- this file. A later local declaration would be out of scope and evaluate to nil.
+local max_history_size_for_text = 10000
+local max_history_size_for_img = 100
+local display_max_text_length = 200
+
 local function restorePersistentHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
@@ -390,9 +397,7 @@ local function clearClipboardHistory()
     collectgarbage("collect")
     hs.reload()
 end
-local max_history_size_for_text = 10000
-local max_history_size_for_img = 100
-local display_max_text_length = 200
+
 
 
 
