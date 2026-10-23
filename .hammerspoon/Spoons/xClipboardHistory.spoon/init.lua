@@ -298,6 +298,7 @@ function clipboardPanelHTML()
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
     clipboard_search = ""
     clipboard_type_filter = "all"
+    panelGeneration = (panelGeneration or 0) + 1
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
     local loadMoreHTML = renderedCount < matchingCount and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
