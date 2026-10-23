@@ -1283,7 +1283,8 @@ function showClipboardHistory()
                 historyEntry = {
                     ts = v.ts,
                     thumbnailData = v.thumbnailData,
-                    imageObject = v.imageObject
+                    imageObject = v.imageObject,
+                    imagePath = v.imagePath
                 }
             })
         end
