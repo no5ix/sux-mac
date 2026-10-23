@@ -1590,7 +1590,9 @@ function showClipboardHistory()
     view:evaluateJavaScript(updateScript, function(result, error)
         if clipboard_webview ~= view then return end
         if error then
-            logger.w("Clipboard panel DOM refresh failed; rebuilding HTML: " .. tostring(error))
+            -- A DOM refresh can fail when WebKit has discarded or not yet
+            -- restored the document. Rebuilding HTML is the intended recovery
+            -- path, so don't emit a warning for this handled condition.
             view:html(clipboardPanelHTML())
             clipboardPanelHTMLReady = true
             hs.timer.doAfter(0.1, showAfterHTMLLoaded)
