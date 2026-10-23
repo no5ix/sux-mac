@@ -1253,13 +1253,13 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
+    -- Run daily retention cleanup when the panel is first requested that day too.
+    runDailyCleanupIfNeeded()
     -- Initialize defensively in case the watcher was torn down during reload.
     if not pasteboard_watcher then
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
     end
     pasteboard_watcher:start()
-    -- A native close can clear the current webview handle. The reopen path below
-    -- deliberately creates a replacement instead of aborting on a nil handle.
 
     -- Keep the current app as the paste destination before showing the panel.
     local frontApp = application.frontmostApplication()
