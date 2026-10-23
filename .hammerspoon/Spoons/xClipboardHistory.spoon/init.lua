@@ -36,6 +36,239 @@ local visibleIndices = {}
 local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 60
 
+-- Persistent, local, day-partitioned clipboard history.
+local function localDateKey(timestamp)
+    return os.date("%Y-%m-%d", timestamp or os.time())
+end
+
+local function validDateKey(name)
+    return type(name) == "string" and name:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil
+end
+
+local function historyDayDirectory(dateKey)
+    return HISTORY_ROOT .. "/" .. dateKey
+end
+
+local function historyJSONPath(dateKey)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-history.json"
+end
+
+local function historyImageDirectory(dateKey)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-images"
+end
+
+local function ensureDirectory(path)
+    if fs.attributes(path) then return true end
+    local ok, err = fs.mkdir(path)
+    if ok then return true end
+    if fs.attributes(path) then return true end
+    logger.e("Unable to create clipboard history directory: " .. tostring(err or path))
+    return false
+end
+
+local function atomicWrite(path, data)
+    local temporaryPath = path .. ".tmp-" .. tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000))
+    local file, openError = io.open(temporaryPath, "wb")
+    if not file then
+        logger.e("Unable to open clipboard history temp file: " .. tostring(openError))
+        return false
+    end
+    local writeOk, writeError = file:write(data)
+    local closeOk, closeError = file:close()
+    if not writeOk or closeOk == nil then
+        os.remove(temporaryPath)
+        logger.e("Unable to write clipboard history: " .. tostring(writeError or closeError))
+        return false
+    end
+    local renameOk, renameError = os.rename(temporaryPath, path)
+    if not renameOk then
+        os.remove(temporaryPath)
+        logger.e("Unable to replace clipboard history file: " .. tostring(renameError))
+        return false
+    end
+    return true
+end
+
+local function saveImageFile(dateKey, item, timestamp)
+    local directory = historyImageDirectory(dateKey)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
+        return nil
+    end
+    local baseName = os.date("%Y%m%d%H%M%S", timestamp)
+    local path = directory .. "/" .. baseName .. ".png"
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. ".png"
+    end
+
+    local ok, imageData = pcall(function()
+        local encoded = item:encodeAsURLString()
+        if type(encoded) ~= "string" or encoded == "" then return nil end
+        local base64 = encoded:match("^data:image/[^;]+;base64,(.+)$")
+        if not base64 then return nil end
+        return hs.base64.decode(base64)
+    end)
+    if not ok or type(imageData) ~= "string" or #imageData == 0 then
+        logger.e("Unable to encode clipboard image for persistence")
+        return nil
+    end
+
+    local file, err = io.open(path, "wb")
+    if not file then
+        logger.e("Unable to create clipboard image file: " .. tostring(err))
+        return nil
+    end
+    local wrote, writeError = file:write(imageData)
+    local closed, closeError = file:close()
+    if not wrote or closed == nil then
+        os.remove(path)
+        logger.e("Unable to write clipboard image: " .. tostring(writeError or closeError))
+        return nil
+    end
+    return path
+end
+
+local function readDayHistory(dateKey)
+    local path = historyJSONPath(dateKey)
+    local file = io.open(path, "rb")
+    if not file then return {} end
+    local raw = file:read("*a")
+    file:close()
+    if not raw or raw == "" then return {} end
+    local ok, records = pcall(json.decode, raw)
+    if not ok or type(records) ~= "table" then
+        logger.e("Ignoring invalid clipboard history JSON: " .. path)
+        return {}
+    end
+    return records
+end
+
+local function writeDayHistory(dateKey, records)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
+    local encodedOk, encoded = pcall(json.encode, records, true)
+    if not encodedOk or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history JSON for " .. dateKey)
+        return false
+    end
+    return atomicWrite(historyJSONPath(dateKey), encoded)
+end
+
+local function persistClipboardEntry(itemType, content, timestamp)
+    timestamp = timestamp or os.time()
+    local dateKey = localDateKey(timestamp)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
+    local records = readDayHistory(dateKey)
+    local record = {type=itemType, ts=timestamp}
+    if itemType == "text" then
+        record.content = content
+    elseif itemType == "image" then
+        local imagePath = saveImageFile(dateKey, content, timestamp)
+        if not imagePath then return false end
+        record.imagePath = imagePath
+    else
+        return false
+    end
+    records[#records + 1] = record
+    if not writeDayHistory(dateKey, records) then
+        if record.imagePath then os.remove(record.imagePath) end
+        return false
+    end
+    return true, record.imagePath
+end
+
+local function removeExpiredHistoryDirectories(todayKey)
+    local year, month, day = todayKey:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not year then return end
+    local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
+    if not todayNoon then return end
+    local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
+    local iterator = fs.dir(HISTORY_ROOT)
+    if not iterator then return end
+    for name in iterator do
+        if validDateKey(name) then
+            local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+            local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
+            if folderNoon and folderNoon <= cutoffNoon then
+                local dayPath = historyDayDirectory(name)
+                local function deleteTree(path)
+                    local children = fs.dir(path)
+                    if children then
+                        for child in children do
+                            if child ~= "." and child ~= ".." then
+                                local childPath = path .. "/" .. child
+                                local attributes = fs.attributes(childPath)
+                                if attributes and attributes.mode == "directory" then
+                                    deleteTree(childPath)
+                                else
+                                    os.remove(childPath)
+                                end
+                            end
+                        end
+                    end
+                    os.remove(path)
+                end
+                deleteTree(dayPath)
+            end
+        end
+    end
+end
+
+local function runDailyCleanupIfNeeded()
+    local todayKey = localDateKey()
+    if cleanupLastRunDate == todayKey then return end
+    ensureDirectory(HISTORY_ROOT)
+    removeExpiredHistoryDirectories(todayKey)
+    cleanupLastRunDate = todayKey
+end
+
+local function restorePersistentHistory()
+    text_clipboard_history = {}
+    img_clipboard_history = {}
+    local iterator = fs.dir(HISTORY_ROOT)
+    if not iterator then return end
+    for name in iterator do
+        if validDateKey(name) then
+            for _, record in ipairs(readDayHistory(name)) do
+                local timestamp = tonumber(record.ts)
+                if timestamp and record.type == "text" and type(record.content) == "string" then
+                    text_clipboard_history[#text_clipboard_history + 1] = {ts=timestamp, content=record.content}
+                elseif timestamp and record.type == "image" and type(record.imagePath) == "string" then
+                    local file = io.open(record.imagePath, "rb")
+                    if file then
+                        local bytes = file:read("*a")
+                        file:close()
+                        if bytes and #bytes > 0 then
+                            local imageData = "data:image/png;base64," .. hs.base64.encode(bytes)
+                            local ok, imageObject = pcall(hs.image.imageFromURL, imageData)
+                            if ok and imageObject then
+                                local size = imageObject:size()
+                                local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
+                                local thumbnailData = ""
+                                if width > 0 and height > 0 then
+                                    local scale = math.min(1, 240 / width, 240 / height)
+                                    local thumbnail = imageObject:bitmapRepresentation({
+                                        w=math.max(1, math.floor(width*scale+0.5)),
+                                        h=math.max(1, math.floor(height*scale+0.5))
+                                    })
+                                    if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
+                                end
+                                img_clipboard_history[#img_clipboard_history + 1] = {
+                                    ts=timestamp, imageObject=imageObject, thumbnailData=thumbnailData, imagePath=record.imagePath
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(text_clipboard_history, function(a,b) return a.ts < b.ts end)
+    table.sort(img_clipboard_history, function(a,b) return a.ts < b.ts end)
+    while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
+    while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
+end
+
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
 local function decodeImage(entry)
