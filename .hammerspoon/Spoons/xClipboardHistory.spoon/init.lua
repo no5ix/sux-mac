@@ -198,11 +198,12 @@ local function removeExpiredHistoryDirectories(todayKey)
     local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
     if not todayNoon then return end
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
-    local iterator = fs.dir(HISTORY_ROOT)
-    if not iterator then
-        -- A missing history root is normal on first launch. Create it and
-        -- return; there are no expired folders to remove yet.
-        ensureDirectory(HISTORY_ROOT)
+    -- hs.fs.dir() throws when the path cannot be opened; it does not return nil.
+    -- Ensure the root exists, then protect the iteration against filesystem errors.
+    if not ensureDirectory(HISTORY_ROOT) then return end
+    local ok, iterator = pcall(fs.dir, HISTORY_ROOT)
+    if not ok or type(iterator) ~= "function" then
+        logger.w("Skipping clipboard retention cleanup because the history directory cannot be read")
         return
     end
     for name in iterator do
