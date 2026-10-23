@@ -644,8 +644,8 @@ local function showTranslationProviderChooser()
         hs.alert.show(selected.id == "local" and "Provider: Local oMLX + Qwen" or "Provider: ChatGPT")
     end)
     chooser:choices({
-        {id="local", text="Local — oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Selected provider" or "Use local AI"},
-        {id="chatgpt", text="ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Selected provider" or "Use ChatGPT in your browser"}
+        {id="local", text="1. Local — oMLX + Qwen", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Selected provider" or "Use local AI"},
+        {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Selected provider" or "Use ChatGPT in your browser"}
     })
     chooser:show()
 end
