@@ -661,9 +661,8 @@ local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
     offset = math.max(0, tonumber(offset) or 0)
-    -- Image elements carry larger payloads even with lazy decoding, so start
-    -- with a smaller first batch and let the existing Load more action paginate.
-    local batchSize = kind == "image" and 18 or CLIPBOARD_RENDER_BATCH_SIZE
+    -- Use consistent 60-item pagination for text and image filters.
+    local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
     local last = math.min(#matches, offset + batchSize)
     for position = offset + 1, last do
         local index = matches[position]
@@ -802,7 +801,7 @@ document.addEventListener('click', event => {
       return;
     }
     if (action === 'loadMore') {
-      bridge('loadMore', index, search.value, activeTypeFilter);
+      bridge('loadMore', index, search.value, currentTypeFilter());
       return;
     }
     if (action === 'clearAll') {
@@ -869,7 +868,7 @@ function scheduleHoverDetail(item) {
       }
       item.classList.add('detail-open');
     }
-  }, 1000);
+  }, 2000);
 }
 document.addEventListener('pointerover', event => {
   const item = event.target.closest && event.target.closest('#clipboard-items .item');
@@ -1156,7 +1155,9 @@ local function updateClipboardPanel(query, kind, offset, append)
     local script
     if append then
         script = "var main=document.getElementById('clipboard-items');" ..
+            "if(!main)throw new Error('clipboard results container is unavailable');" ..
             "var oldMore=main.querySelector('.load-more-wrap');if(oldMore)oldMore.remove();" ..
+            "var oldEmpty=main.querySelector('.empty');if(oldEmpty)oldEmpty.remove();" ..
             "main.insertAdjacentHTML('beforeend'," .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ");"
     else
         script = "document.getElementById('clipboard-items').innerHTML=" ..
@@ -1167,7 +1168,11 @@ local function updateClipboardPanel(query, kind, offset, append)
         "var active=" .. jsStringLiteral(kind) .. ";" ..
         "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',active==='none'?'true':(b.dataset.filter===active?'true':'false'))});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
-    clipboard_webview:evaluateJavaScript(script)
+    clipboard_webview:evaluateJavaScript(script, function(_, error)
+        if error then
+            logger.w("Clipboard panel update failed (" .. (append and "load more" or "filter/search") .. "): " .. tostring(error))
+        end
+    end)
     clipboard_search = query
     clipboard_type_filter = kind
 end
