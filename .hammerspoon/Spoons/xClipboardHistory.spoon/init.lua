@@ -294,6 +294,7 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    -- Clear all persisted daily histories and any saved image files.
     local iterator = fs.dir(HISTORY_ROOT)
     if iterator then
         for name in iterator do
