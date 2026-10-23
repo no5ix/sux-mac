@@ -425,10 +425,16 @@ function pasteboardToClipboard(item_type, item)
         local imagePath = saveImageFile(localDateKey(cur_ts), item, cur_ts)
         entry.imagePath = imagePath
         if imagePath then
-            local saved, _, record = persistClipboardEntry("image", item, cur_ts)
-            -- persistClipboardEntry saves images by path on disk and returns a
-            -- record; if it could not save, keep the in-memory image available.
-            if not saved then logger.w("Clipboard screenshot is available in memory but could not be persisted") end
+            -- Register the already-saved image in JSON without encoding/saving
+            -- it a second time through persistClipboardEntry().
+            local dateKey = localDateKey(cur_ts)
+            local records = readDayHistory(dateKey)
+            records[#records + 1] = {type="image", ts=cur_ts, imagePath=imagePath}
+            if not writeDayHistory(dateKey, records) then
+                logger.w("Clipboard screenshot was saved but its history record could not be written")
+            end
+        else
+            logger.w("Clipboard screenshot remains available in memory but could not be persisted")
         end
 
         -- Thumbnail work is separate so it cannot delay the first panel open.
