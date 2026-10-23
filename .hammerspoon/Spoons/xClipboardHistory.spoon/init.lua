@@ -829,6 +829,7 @@ let lastPointerX = -1;
 let lastPointerY = -1;
 let pointerInsideResults = false;
 let suppressHoverUntilPointerMoves = false;
+let resumeHoverAfterScrollTimer = null;
 function hideHoverDetail(item) {
   if (item) {
     item.classList.remove('detail-open');
@@ -882,10 +883,28 @@ function scheduleHoverDetail(item) {
     }
   }, 2000);
 }
+function resumeHoverAfterScrollingSettles() {
+  if (resumeHoverAfterScrollTimer !== null) clearTimeout(resumeHoverAfterScrollTimer);
+  resumeHoverAfterScrollTimer = setTimeout(() => {
+    resumeHoverAfterScrollTimer = null;
+    suppressHoverUntilPointerMoves = false;
+    // Scrolling can move a different card underneath a stationary pointer and
+    // WebKit doesn't always dispatch pointerover/pointermove afterward. Resolve
+    // the current target from the saved pointer coordinates and restart dwell.
+    if (lastPointerX < 0 || lastPointerY < 0) return;
+    const target = document.elementFromPoint(lastPointerX, lastPointerY);
+    const item = target && target.closest
+      ? target.closest('#clipboard-items .item')
+      : null;
+    pointerInsideResults = !!item && resultsPanel.contains(item);
+    if (pointerInsideResults) scheduleHoverDetail(item);
+  }, 350);
+}
 document.addEventListener('wheel', event => {
   if (resultsPanel && resultsPanel.contains(event.target)) {
     suppressHoverUntilPointerMoves = true;
     cancelPendingHoverDetail();
+    resumeHoverAfterScrollingSettles();
   }
 }, {capture:true, passive:true});
 document.addEventListener('pointerover', event => {
@@ -935,6 +954,7 @@ document.addEventListener('scroll', event => {
     suppressHoverUntilPointerMoves = true;
     pointerInsideResults = false;
     cancelPendingHoverDetail();
+    resumeHoverAfterScrollingSettles();
   }
 }, true);
 window.addEventListener('blur', () => {
