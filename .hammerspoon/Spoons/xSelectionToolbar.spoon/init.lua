@@ -643,25 +643,46 @@ runCloudTranslation = function(text)
     local source = trim(text)
     if source == "" then return end
     hideToolbar()
-    local chooser = hs.chooser.new(function(selected)
-        if not selected then return end
-        local encoded = urlEncode(source)
-        if selected.id == "google" then
-            hs.task.new("/usr/bin/open", nil, {"https://translate.google.com/?sl=auto&tl=zh-CN&text=" .. encoded .. "&op=translate"}):start()
-        elseif selected.id == "apple" then
+    local encoded = urlEncode(source)
+    -- Try Google first. If a web page fails to open, the OS reports a non-zero
+    -- task status and the next provider is attempted automatically.
+    local providers = {
+        {
+            name = "Google Translate",
+            url = "https://translate.google.com/?sl=auto&tl=zh-CN&text=" .. encoded .. "&op=translate"
+        },
+        {
+            name = "Apple Translate",
+            url = "https://www.apple.com/ios/feature-availability/#translate"
+        },
+        {
+            name = "Microsoft Translator",
+            url = "https://www.bing.com/translator?from=auto&to=zh-Hans&text=" .. encoded
+        }
+    }
+    local function tryProvider(index)
+        local provider = providers[index]
+        if not provider then
             pasteboard.setContents(source)
-            hs.task.new("/usr/bin/open", nil, {"x-apple.systempreferences:com.apple.preference.language-and-region"}):start()
-            hs.alert.show("Apple Translate may be available on this Mac; text copied to clipboard.")
-        elseif selected.id == "microsoft" then
-            hs.task.new("/usr/bin/open", nil, {"https://www.bing.com/translator?from=auto&to=zh-Hans&text=" .. encoded}):start()
+            hs.alert.show("All cloud translation providers failed to open; text copied.")
+            return
         end
-    end)
-    chooser:choices({
-        {id="google", text="Google Translate", subText="Primary cloud service"},
-        {id="apple", text="Apple Translate", subText="Fallback; selected text copied"},
-        {id="microsoft", text="Microsoft Translator", subText="Final fallback"}
-    })
-    chooser:show()
+        hs.alert.show("Opening " .. provider.name .. "…")
+        local task = hs.task.new("/usr/bin/open", function(exitCode)
+            if exitCode == 0 then
+                -- URL dispatch succeeded. Clipboard preserves the exact selection
+                -- so it can be pasted into the chosen translation page if required.
+                pasteboard.setContents(source)
+                return
+            end
+            logger.w(provider.name .. " could not be opened; trying the next provider.")
+            timer.doAfter(0.25, function() tryProvider(index + 1) end)
+        end, {provider.url})
+        if not task or not task:start() then
+            timer.doAfter(0.25, function() tryProvider(index + 1) end)
+        end
+    end
+    tryProvider(1)
 end
 
 local function showTranslationProviderChooser(text)
