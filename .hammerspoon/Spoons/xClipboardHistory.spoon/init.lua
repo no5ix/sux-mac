@@ -30,6 +30,7 @@ local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 60
+local panelGeneration = 0
 
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
@@ -956,13 +957,20 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
-    -- Initialize defensively in case the watcher was torn down during reload.
+    -- Start the watcher if needed, but don't tear down or recreate the webview:
+    -- that native-window churn is expensive and can strand the panel on another Space.
     if not pasteboard_watcher then
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
     end
     pasteboard_watcher:start()
-    -- A native close can clear the current webview handle. The reopen path below
-    -- deliberately creates a replacement instead of aborting on a nil handle.
+    if not clipboard_webview then
+        createClipboardWebview()
+    end
+    if clipboard_webview:isVisible() then
+        -- Toggle off when the shortcut is pressed while already open.
+        closeClipboardPanel()
+        return
+    end
 
     -- Remember the app that should receive a paste before the panel takes focus.
     local frontApp = application.frontmostApplication()
@@ -973,23 +981,6 @@ function showClipboardHistory()
     else
         previousApplication = nil
     end
-    -- Always make the previous native window go through its close lifecycle.
-    -- If the user already closed it with the red button, the callback above has
-    -- cleared clipboard_webview, and we simply construct a new instance.
-    if clipboard_webview then
-        local oldView = clipboard_webview
-        local oldWindow = oldView:hswindow()
-        clipboard_webview = nil
-        clipboard_usercontent = nil
-        if oldWindow then
-            local ok, closed = pcall(function() return oldWindow:close() end)
-            if not ok or closed == false then oldView:hide() end
-        else
-            oldView:hide()
-        end
-    end
-    createClipboardWebview()
-
     suppressFocusDismiss = true
     menuData = {}
 
@@ -1056,44 +1047,40 @@ function showClipboardHistory()
         j = j - 1
     end
 
-    clipboard_search = ""
-    clipboard_webview:html(clipboardPanelHTML())
-    -- Let AppKit finish constructing the new window before assigning its frame.
-    hs.timer.doAfter(0.1, function()
-        if not clipboard_webview then
-            suppressFocusDismiss = false
-            return
-        end
-
+    -- The webview and DOM stay alive across dismissals. Refresh only the data cards
+    -- using the lightweight JavaScript update path, rather than rebuilding the entire
+    -- document (and its CSS, event handlers, and image-heavy initial batch) on every open.
+    local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
+    local loadMoreHTML = renderedCount < matchingCount and
+        '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+    local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
+    local updateScript = "document.getElementById('clipboard-items').innerHTML=" ..
+        jsStringLiteral(initialCardsHTML .. loadMoreHTML) .. ";" ..
+        "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
+        "document.getElementById('search').value='';" ..
+        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter==='all'?'true':'false')});" ..
+        "document.body.classList.add('keyboard-mode');" ..
+        "if(window.resetClipboardSelection)window.resetClipboardSelection();"
+    local view = clipboard_webview
+    local shownAtGeneration = panelGeneration or 0
+    view:evaluateJavaScript(updateScript, function()
+        if clipboard_webview ~= view then return end
+        if (panelGeneration or 0) ~= shownAtGeneration then return end
         positionPanelOnCurrentScreen()
-        clipboard_webview:show()
-        clipboard_webview:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-
-        -- hswebview:show() may order the native window asynchronously, so retry focus.
-        local focusAttempts = 0
-        local function focusClipboardWindowWhenReady()
-            if not clipboard_webview then
-                suppressFocusDismiss = false
-                return
-            end
-            local hsWindow = clipboard_webview:hswindow()
-            if hsWindow then
-                hsWindow:focus()
-                suppressFocusDismiss = false
-                return
-            end
-            focusAttempts = focusAttempts + 1
-            if focusAttempts < 8 then
-                hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+        view:show()
+        hs.timer.doAfter(0.02, function()
+            if clipboard_webview ~= view or (panelGeneration or 0) ~= shownAtGeneration then return end
+            local nativeWindow = view:hswindow()
+            if nativeWindow then
+                nativeWindow:focus()
             else
-                logger.w("Clipboard history window is still unavailable after retries")
-                suppressFocusDismiss = false
+                logger.w("Clipboard history window unavailable after show")
             end
-        end
-        hs.timer.doAfter(0.05, focusClipboardWindowWhenReady)
+            suppressFocusDismiss = false
+        end)
     end)
 end
-
 -- Start the pasteboard watcher
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
 pasteboard_watcher:start()
