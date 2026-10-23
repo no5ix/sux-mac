@@ -98,39 +98,37 @@ local function saveImageFile(dateKey, item, timestamp)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
         return nil
     end
-    local baseName = os.date("%Y%m%d%H%M%S", timestamp)
-    local path = directory .. "/" .. baseName .. ".png"
-    local counter = 1
-    while fs.attributes(path) do
-        counter = counter + 1
-        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. ".png"
-    end
 
-    local ok, imageData = pcall(function()
-        local encoded = item:encodeAsURLString()
-        if type(encoded) ~= "string" or encoded == "" then return nil end
-        local mimeType, base64 = encoded:match("^data:(image/[^;]+);base64,(.+)$")
-        if not base64 then return nil end
-        return hs.base64.decode(base64), mimeType
-    end)
-    if not ok or type(imageData) ~= "string" or #imageData == 0 then
+    local encodedOK, encoded = pcall(function() return item:encodeAsURLString() end)
+    if not encodedOK or type(encoded) ~= "string" then
         logger.e("Unable to encode clipboard image for persistence")
         return nil
     end
+    local mimeType, base64 = encoded:match("^data:(image/[^;]+);base64,(.+)$")
+    if not base64 then
+        logger.e("Unsupported encoded clipboard image data")
+        return nil
+    end
+    local imageData = hs.base64.decode(base64)
+    if type(imageData) ~= "string" or #imageData == 0 then
+        logger.e("Decoded clipboard image is empty")
+        return nil
+    end
 
-    -- encodeAsURLString may preserve JPEG/GIF/etc. Keep the original payload's
-    -- actual extension so the bytes are never mislabeled as PNG.
-    local encodedURL = item:encodeAsURLString()
-    local mimeType = type(encodedURL) == "string" and encodedURL:match("^data:(image/[^;]+);base64,") or "image/png"
     local extensionByMime = {
         ["image/png"]="png", ["image/jpeg"]="jpg", ["image/jpg"]="jpg",
         ["image/gif"]="gif", ["image/webp"]="webp", ["image/tiff"]="tiff",
         ["image/bmp"]="bmp"
     }
     local extension = extensionByMime[mimeType] or "png"
-    if extension ~= "png" then
-        path = path:gsub("%.png$", "." .. extension)
+    local baseName = os.date("%Y%m%d%H%M%S", timestamp)
+    local path = directory .. "/" .. baseName .. "." .. extension
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. "." .. extension
     end
+
     local file, err = io.open(path, "wb")
     if not file then
         logger.e("Unable to create clipboard image file: " .. tostring(err))
