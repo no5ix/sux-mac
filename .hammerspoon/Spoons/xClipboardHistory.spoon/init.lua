@@ -101,46 +101,23 @@ local function saveImageFile(dateKey, item, timestamp)
         return nil
     end
 
-    local encodedOK, encoded = pcall(function() return item:encodeAsURLString() end)
-    if not encodedOK or type(encoded) ~= "string" then
-        logger.e("Unable to encode clipboard image for persistence")
-        return nil
-    end
-    local mimeType, base64 = encoded:match("^data:(image/[^;]+);base64,(.+)$")
-    if not base64 then
-        logger.e("Unsupported encoded clipboard image data")
-        return nil
-    end
-    local imageData = hs.base64.decode(base64)
-    if type(imageData) ~= "string" or #imageData == 0 then
-        logger.e("Decoded clipboard image is empty")
-        return nil
-    end
-
-    local extensionByMime = {
-        ["image/png"]="png", ["image/jpeg"]="jpg", ["image/jpg"]="jpg",
-        ["image/gif"]="gif", ["image/webp"]="webp", ["image/tiff"]="tiff",
-        ["image/bmp"]="bmp"
-    }
-    local extension = extensionByMime[mimeType] or "png"
+    -- Use hs.image's native file writer. Encoding the entire screenshot to a
+    -- base64 data URL and immediately decoding it again creates large temporary
+    -- strings and stalls the pasteboard watcher for high-resolution captures.
     local baseName = os.date("%Y%m%d%H%M%S", timestamp)
-    local path = directory .. "/" .. baseName .. "." .. extension
+    local path = directory .. "/" .. baseName .. ".png"
     local counter = 1
     while fs.attributes(path) do
         counter = counter + 1
-        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. "." .. extension
+        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. ".png"
     end
 
-    local file, err = io.open(path, "wb")
-    if not file then
-        logger.e("Unable to create clipboard image file: " .. tostring(err))
-        return nil
-    end
-    local wrote, writeError = file:write(imageData)
-    local closed, closeError = file:close()
-    if not wrote or closed == nil then
+    local ok, saved = pcall(function()
+        return item:saveToFile(path, false, "PNG")
+    end)
+    if not ok or saved ~= true then
         os.remove(path)
-        logger.e("Unable to write clipboard image: " .. tostring(writeError or closeError))
+        logger.e("Unable to save clipboard image natively: " .. tostring(saved))
         return nil
     end
     return path
@@ -425,40 +402,87 @@ end
 -- Add the given string to the history
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
-    local persistedImagePath = nil
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
         persistClipboardEntry("text", item, cur_ts)
-    else
-        local saved, imagePath = persistClipboardEntry("image", item, cur_ts)
-        if saved then persistedImagePath = imagePath end
-        -- Keep the original image for pasting. Build a correctly-proportioned
-        -- thumbnail; requesting a fixed square bitmap can stretch some source
-        -- images depending on the image provider's bitmapRepresentation behavior.
-        -- Cache a small thumbnail for grid display. Generating a full-size
-        -- data URL at capture time and embedding both full and thumbnail data
-        -- into every DOM card makes switching to Images expensive.
-        local thumbnailData = nil
-        local size = item:size()
-        local width = tonumber(size and size.w) or 0
-        local height = tonumber(size and size.h) or 0
-        if width > 0 and height > 0 then
-            local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-            local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
-            local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
-            local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
-            if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
-        end
-        table.insert(img_clipboard_history, {
-            ts=cur_ts,
-            -- Full image serialization is deferred until the item is pasted.
-            imageObject=item,
-            thumbnailData=thumbnailData or "",
-            imagePath=persistedImagePath
-        })
+        return
     end
-end
 
+    -- Insert the screenshot into memory immediately so opening the panel never
+    -- waits for disk persistence or thumbnail encoding.
+    local entry = {
+        ts=cur_ts,
+        imageObject=item,
+        thumbnailData="",
+        imagePath=nil,
+        thumbnailPending=true
+    }
+    table.insert(img_clipboard_history, entry)
+
+    -- Defer the expensive screenshot work until after the clipboard watcher
+    -- callback returns. Native PNG saving avoids the large base64 round trip.
+    hs.timer.doAfter(0.25, function()
+        local imagePath = saveImageFile(localDateKey(cur_ts), item, cur_ts)
+        entry.imagePath = imagePath
+        if imagePath then
+            local saved, _, record = persistClipboardEntry("image", item, cur_ts)
+            -- persistClipboardEntry saves images by path on disk and returns a
+            -- record; if it could not save, keep the in-memory image available.
+            if not saved then logger.w("Clipboard screenshot is available in memory but could not be persisted") end
+        end
+
+        -- Thumbnail work is separate so it cannot delay the first panel open.
+        hs.timer.doAfter(0.15, function()
+            local ok, thumbnailData = pcall(function()
+                local size = item:size()
+                local width = tonumber(size and size.w) or 0
+                local height = tonumber(size and size.h) or 0
+                if width <= 0 or height <= 0 then return "" end
+                local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+                local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
+                local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
+                local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+                return thumbnail and thumbnail:encodeAsURLString() or ""
+            end)
+            entry.thumbnailData = ok and thumbnailData or ""
+            entry.thumbnailPending = false
+
+            -- Persist the thumbnail-independent image path and JSON record after
+            -- thumbnail generation. Updating the in-memory card is best-effort.
+            if clipboard_webview and clipboard_webview:isVisible() and entry.thumbnailData ~= "" then
+                local js = {}
+                for index, menuEntry in ipairs(menuData or {}) do
+                    if menuEntry.type == "image" and menuEntry.rowTs == cur_ts then
+                        if menuEntry.historyEntry then
+                            menuEntry.historyEntry.thumbnailData = entry.thumbnailData
+                            menuEntry.historyEntry.imagePath = imagePath
+                        end
+                        js[#js + 1] = "window.setImageThumbnail && window.setImageThumbnail(" ..
+                            tostring(index) .. "," .. jsStringLiteral(entry.thumbnailData) .. ");"
+                    end
+                end
+                if #js > 0 then
+                    clipboard_webview:evaluateJavaScript(table.concat(js, "\n"))
+                end
+            end
+
+            -- Write the daily JSON after all image metadata is ready.
+            local dateKey = localDateKey(cur_ts)
+            local records = readDayHistory(dateKey)
+            local found = false
+            for _, record in ipairs(records) do
+                if record.type == "image" and tonumber(record.ts) == cur_ts and record.imagePath == imagePath then
+                    record.thumbnailData = entry.thumbnailData
+                    found = true
+                end
+            end
+            if not found and imagePath then
+                records[#records + 1] = {type="image", ts=cur_ts, imagePath=imagePath, thumbnailData=entry.thumbnailData}
+            end
+            if imagePath then writeDayHistory(dateKey, records) end
+        end)
+    end)
+end
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
     -- Startup cleanup alone is not enough: users may create an expired folder
@@ -966,6 +990,19 @@ window.addEventListener('resize', () => {
   suppressHoverUntilPointerMoves = true;
   cancelPendingHoverDetail();
 });
+window.setImageThumbnail = (index, src) => {
+  const item = document.querySelector('.image-item[data-index="' + index + '"]');
+  if (!item || !item.isConnected || !src) return;
+  const placeholder = item.querySelector('.preview.placeholder');
+  if (!placeholder) return;
+  const img = document.createElement('img');
+  img.className = 'preview';
+  img.alt = 'Clipboard image preview';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.src = src;
+  placeholder.replaceWith(img);
+};
 window.setImagePreview = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
   const img = item && item.querySelector('.hover-image');
