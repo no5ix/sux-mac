@@ -200,13 +200,19 @@ local function removeExpiredHistoryDirectories(todayKey)
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
     if not ensureDirectory(HISTORY_ROOT) then return end
 
+    -- Also clean up manually created/renamed dated folders, such as
+    -- "2026-10-17 copy". The managed history folders themselves use exact
+    -- YYYY-MM-DD names, but Finder copies should obey the same retention cutoff.
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
-            if validDateKey(name) then
-                local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+            local folderDate = type(name) == "string"
+                and name:match("^(%d%d%d%d%-%d%d%-%d%d)")
+                or nil
+            if folderDate then
+                local y, m, d = folderDate:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
                 local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
                 if folderNoon and folderNoon <= cutoffNoon then
-                    local dayPath = historyDayDirectory(name)
+                    local dayPath = HISTORY_ROOT .. "/" .. name
                     local function deleteTree(path)
                         local childrenOK, childrenErr = pcall(function()
                             for child in fs.dir(path) do
@@ -227,7 +233,10 @@ local function removeExpiredHistoryDirectories(todayKey)
                             logger.w("Could not fully clean expired clipboard folder " .. path .. ": " .. tostring(childrenErr))
                         end
                     end
-                    deleteTree(dayPath)
+                    local attributes = fs.attributes(dayPath)
+                    if attributes and attributes.mode == "directory" then
+                        deleteTree(dayPath)
+                    end
                 end
             end
         end
