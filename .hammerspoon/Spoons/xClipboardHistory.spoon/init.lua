@@ -14,7 +14,7 @@ local json = require "hs.json"
 local fs = require "hs.fs"
 local image = require "hs.image"
 local logger = hs.logger.new("xClipboardHistory", "info")
-local HISTORY_ROOT = os.getenv("HOME") .. "/.config/sux-mac/clipboard-history"
+local HISTORY_ROOT = (hs.configdir or (os.getenv("HOME") .. "/.hammerspoon")) .. "/clipboard-history"
 local RETENTION_DAYS = 7
 local cleanupLastRunDate = nil
 local lastPersistedEntryKey = nil
@@ -198,21 +198,38 @@ local function removeExpiredHistoryDirectories(todayKey)
     local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
     if not todayNoon then return end
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
-    -- hs.fs.dir(path) returns an iterator function AND a directory object.
-    -- Preserve the full iterator tuple; treating the second result as the
-    -- iterator state causes "directory metatable expected, got nil".
     if not ensureDirectory(HISTORY_ROOT) then return end
-    local iterFn, dirObj = nil, nil
-    local ok, first, second, initial, closing = pcall(fs.dir, HISTORY_ROOT)
-    if not ok or type(first) ~= "function" or second == nil then
-        logger.w("Skipping clipboard retention cleanup because the history directory cannot be read")
-        return
-    end
-    iterFn, dirObj = first, second
-    local function eachDirectoryEntry()
-        return iterFn(dirObj)
-    end
-    for name in eachDirectoryEntry do
+    -- hs.fs.dir returns Lua's full iterator tuple. In a generic for loop, use
+    -- the API directly so Lua supplies both the directory object and close value.
+    local ok, err = pcall(function()
+        for name in fs.dir(HISTORY_ROOT) do
+            if validDateKey(name) then
+                local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+                local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
+                if folderNoon and folderNoon <= cutoffNoon then
+                    local dayPath = historyDayDirectory(name)
+                    local function deleteTree(path)
+                        local success = pcall(function()
+                            for child in fs.dir(path) do
+                                if child ~= "." and child ~= ".." then
+                                    local childPath = path .. "/" .. child
+                                    local attributes = fs.attributes(childPath)
+                                    if attributes and attributes.mode == "directory" then
+                                        deleteTree(childPath)
+                                    else
+                                        os.remove(childPath)
+                                    end
+                                end
+                            end
+                        end)
+                        if success then os.remove(path) end
+                    end
+                    deleteTree(dayPath)
+                end
+            end
+        end
+    end)
+    if not ok then logger.w("Clipboard retention cleanup stopped safely: " .. tostring(err)) end
         if validDateKey(name) then
             local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
             local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
@@ -255,15 +272,15 @@ end
 local function restorePersistentHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-    local dirOK, iterFn, dirObj = pcall(fs.dir, HISTORY_ROOT)
-    if not dirOK or type(iterFn) ~= "function" or dirObj == nil then
-        logger.w("Skipping clipboard history restore because the history directory cannot be read")
+    local rootExists = fs.attributes(HISTORY_ROOT)
+    if not rootExists then
+        if not ensureDirectory(HISTORY_ROOT) then
+            logger.w("Skipping clipboard history restore because the history directory cannot be created")
+        end
         return
     end
-    local function eachDirectoryEntry()
-        return iterFn(dirObj)
-    end
-    for name in eachDirectoryEntry do
+    local ok, err = pcall(function()
+        for name in fs.dir(HISTORY_ROOT) do
         if validDateKey(name) then
             for _, record in ipairs(readDayHistory(name)) do
                 local timestamp = tonumber(record.ts)
@@ -309,6 +326,9 @@ local function restorePersistentHistory()
     table.sort(img_clipboard_history, function(a,b) return a.ts < b.ts end)
     while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
     while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
+        end
+    end)
+    if not ok then logger.w("Clipboard history restore stopped safely: " .. tostring(err)) end
 end
 
 -- Store images as compressed data URLs in history. Decode them only when the
@@ -337,12 +357,10 @@ local function clearClipboardHistory()
     img_clipboard_history = {}
     menuData = {}
     -- Clear all persisted daily histories and any saved image files.
-    local dirOK, iterFn, dirObj = pcall(fs.dir, HISTORY_ROOT)
-    if dirOK and type(iterFn) == "function" and dirObj ~= nil then
-        local function eachDirectoryEntry()
-            return iterFn(dirObj)
-        end
-        for name in eachDirectoryEntry do
+    local rootExists = fs.attributes(HISTORY_ROOT)
+    if rootExists then
+        pcall(function()
+            for name in fs.dir(HISTORY_ROOT) do
             if validDateKey(name) then
                 local dayPath = historyDayDirectory(name)
                 local function deleteTree(path)
@@ -366,8 +384,10 @@ local function clearClipboardHistory()
                     os.remove(path)
                 end
                 deleteTree(dayPath)
+                    end
+                end
             end
-        end
+        end)
     end
     if clipboard_webview then
         clipboard_search = ""
