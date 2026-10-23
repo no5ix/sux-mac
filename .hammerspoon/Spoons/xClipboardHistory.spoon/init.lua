@@ -1361,6 +1361,11 @@ function showClipboardHistory()
     end)
 end
 
+-- Restore disk state before starting the watcher, so previous history is
+-- available immediately after Hammerspoon/Sux-Mac starts.
+runDailyCleanupIfNeeded()
+restorePersistentHistory()
+
 -- Start the pasteboard watcher
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
 pasteboard_watcher:start()
