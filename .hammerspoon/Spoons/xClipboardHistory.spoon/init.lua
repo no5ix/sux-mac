@@ -375,6 +375,8 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
+    -- Run age-based cleanup once on the first observed copy each local day.
+    runDailyCleanupIfNeeded()
     -- The selection toolbar sets this marker only for its temporary Cmd+C.
     -- Consume only a clipboard notification that occurs inside that short window;
     -- never suppress unrelated clipboard changes indefinitely.
