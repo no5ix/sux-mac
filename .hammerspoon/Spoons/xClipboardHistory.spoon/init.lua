@@ -60,7 +60,15 @@ local function clearClipboardHistory()
     if clipboard_webview then
         clipboard_search = ""
         clipboard_webview:hide()
-        clipboard_webview:html(clipboardPanelHTML())
+        local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
+        local loadMoreHTML = renderedCount < matchingCount and
+            '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+            renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+        local cards = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
+        local script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cards .. loadMoreHTML) .. ";" ..
+            "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
+            "document.getElementById('search').value='';"
+        clipboard_webview:evaluateJavaScript(script)
     end
     collectgarbage("collect")
     -- make sure the lua vm is reloaded, otherwise the memory will not be released
