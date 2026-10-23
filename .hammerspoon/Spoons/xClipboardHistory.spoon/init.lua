@@ -825,8 +825,15 @@ document.addEventListener('click', event => {
 // or leaving a card cancels the pending timer so previews don't flicker.
 let hoverDetailTimer = null;
 let pendingHoverItem = null;
+let lastPointerMoveAt = 0;
+let lastPointerX = -1;
+let lastPointerY = -1;
+let pointerInsideResults = false;
 function hideHoverDetail(item) {
-  if (item) item.classList.remove('detail-open');
+  if (item) {
+    item.classList.remove('detail-open');
+    item.classList.remove('preview-loading');
+  }
 }
 function cancelPendingHoverDetail() {
   if (hoverDetailTimer !== null) {
@@ -838,12 +845,21 @@ function cancelPendingHoverDetail() {
 }
 function scheduleHoverDetail(item) {
   if (!item || !item.querySelector('.hover-detail')) return;
+  // pointerover can fire when cards move under a stationary pointer during scroll.
+  // Require a real pointer move and then a quiet 2-second dwell.
+  if (lastPointerMoveAt === 0 || Date.now() - lastPointerMoveAt > 2000) return;
   if (pendingHoverItem === item && hoverDetailTimer !== null) return;
   cancelPendingHoverDetail();
   pendingHoverItem = item;
+  const scheduledPointerX = lastPointerX;
+  const scheduledPointerY = lastPointerY;
   hoverDetailTimer = setTimeout(() => {
     hoverDetailTimer = null;
     if (pendingHoverItem !== item || !item.isConnected) return;
+    if (!pointerInsideResults || scheduledPointerX !== lastPointerX || scheduledPointerY !== lastPointerY) {
+      cancelPendingHoverDetail();
+      return;
+    }
     const image = item.querySelector('.hover-image');
     if (image) {
       // Keep the entire preview panel hidden until the image itself has loaded.
@@ -871,6 +887,9 @@ function scheduleHoverDetail(item) {
     }
   }, 2000);
 }
+document.addEventListener('wheel', event => {
+  if (resultsPanel && resultsPanel.contains(event.target)) cancelPendingHoverDetail();
+}, {capture:true, passive:true});
 document.addEventListener('pointerover', event => {
   const item = event.target.closest && event.target.closest('#clipboard-items .item');
   if (!item) return;
@@ -891,10 +910,33 @@ document.addEventListener('focusin', event => {
   // delay is specifically based on the pointer hovering over the card.
 });
 document.addEventListener('pointermove', event => {
+  const moved = event.clientX !== lastPointerX || event.clientY !== lastPointerY;
+  if (moved) {
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+    lastPointerMoveAt = Date.now();
+    // Any movement cancels a pending or open preview. A new preview can open
+    // only after the pointer stops moving over a card for the full delay.
+    cancelPendingHoverDetail();
+  }
   const item = event.target.closest && event.target.closest('#clipboard-items .item');
-  if (!item && pendingHoverItem) cancelPendingHoverDetail();
+  pointerInsideResults = !!item;
 });
-window.addEventListener('blur', cancelPendingHoverDetail);
+document.addEventListener('pointerleave', () => {
+  pointerInsideResults = false;
+  cancelPendingHoverDetail();
+}, true);
+document.addEventListener('scroll', event => {
+  // Scrolling the results grid must always dismiss previews, whether the scroll
+  // was from a wheel, trackpad, scrollbar, or keyboard.
+  if (event.target === resultsPanel || resultsPanel.contains(event.target)) {
+    cancelPendingHoverDetail();
+  }
+}, true);
+window.addEventListener('blur', () => {
+  pointerInsideResults = false;
+  cancelPendingHoverDetail();
+});
 window.addEventListener('resize', cancelPendingHoverDetail);
 window.setImagePreview = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
