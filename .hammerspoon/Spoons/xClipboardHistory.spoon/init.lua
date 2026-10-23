@@ -1002,6 +1002,19 @@ local function pasteHistoryEntry(index)
         pasteboard.setContents(choice.data)
     else
         local image = decodeImage(choice.historyEntry)
+        if not image and choice.historyEntry and choice.historyEntry.imagePath then
+            local file = io.open(choice.historyEntry.imagePath, "rb")
+            if file then
+                local bytes = file:read("*a")
+                file:close()
+                if bytes and #bytes > 0 then
+                    local ext = string.lower(choice.historyEntry.imagePath:match("%.([%w]+)$") or "png")
+                    local mime = ({png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif", webp="image/webp", tiff="image/tiff", bmp="image/bmp"})[ext] or "image/png"
+                    local dataURL = "data:" .. mime .. ";base64," .. hs.base64.encode(bytes)
+                    image = hs.image.imageFromURL(dataURL)
+                end
+            end
+        end
         if not image then
             pasteboard_watcher:start()
             hs.alert.show("Unable to restore this clipboard image")
