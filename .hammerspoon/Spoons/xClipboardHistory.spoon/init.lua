@@ -601,8 +601,9 @@ local function historyItemHTML(entry, index)
         -- Full-resolution bytes are not serialized into the initial grid. The
         -- hover handler requests a larger preview only after the hover delay.
         return '<button class="item image-item" data-kind="image" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[image] " .. stamp)) .. '">' ..
-            preview .. '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
-            escapeHTML(stamp) .. '</div><div class="hint">Click to paste</div></div>' ..
+            '<div class="meta"><div class="kind">IMAGE</div><div class="stamp">' ..
+            escapeHTML(stamp) .. '</div></div>' .. preview ..
+            '<div class="hint">Click to paste</div>' ..
             '<div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="" aria-hidden="true" loading="lazy" decoding="async"></div></button>'
     end
     local content = tostring(entry.data or "")
