@@ -199,8 +199,7 @@ local function removeExpiredHistoryDirectories(todayKey)
     if not todayNoon then return end
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
     if not ensureDirectory(HISTORY_ROOT) then return end
-    -- hs.fs.dir returns Lua's full iterator tuple. In a generic for loop, use
-    -- the API directly so Lua supplies both the directory object and close value.
+
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
             if validDateKey(name) then
@@ -209,7 +208,7 @@ local function removeExpiredHistoryDirectories(todayKey)
                 if folderNoon and folderNoon <= cutoffNoon then
                     local dayPath = historyDayDirectory(name)
                     local function deleteTree(path)
-                        local success = pcall(function()
+                        local childrenOK, childrenErr = pcall(function()
                             for child in fs.dir(path) do
                                 if child ~= "." and child ~= ".." then
                                     local childPath = path .. "/" .. child
@@ -222,45 +221,21 @@ local function removeExpiredHistoryDirectories(todayKey)
                                 end
                             end
                         end)
-                        if success then os.remove(path) end
+                        if childrenOK then
+                            os.remove(path)
+                        else
+                            logger.w("Could not fully clean expired clipboard folder " .. path .. ": " .. tostring(childrenErr))
+                        end
                     end
                     deleteTree(dayPath)
                 end
             end
         end
     end)
-    if not ok then logger.w("Clipboard retention cleanup stopped safely: " .. tostring(err)) end
-        if validDateKey(name) then
-            local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
-            local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
-            if folderNoon and folderNoon <= cutoffNoon then
-                local dayPath = historyDayDirectory(name)
-                local function deleteTree(path)
-                    local dirOK, childIter, childDir = pcall(fs.dir, path)
-                    if dirOK and type(childIter) == "function" and childDir ~= nil then
-                        local function eachChild()
-                            return childIter(childDir)
-                        end
-                        for child in eachChild do
-                            if child ~= "." and child ~= ".." then
-                                local childPath = path .. "/" .. child
-                                local attributes = fs.attributes(childPath)
-                                if attributes and attributes.mode == "directory" then
-                                    deleteTree(childPath)
-                                else
-                                    os.remove(childPath)
-                                end
-                            end
-                        end
-                    end
-                    os.remove(path)
-                end
-                deleteTree(dayPath)
-            end
-        end
+    if not ok then
+        logger.w("Clipboard retention cleanup stopped safely: " .. tostring(err))
     end
 end
-
 local function runDailyCleanupIfNeeded()
     local todayKey = localDateKey()
     if cleanupLastRunDate == todayKey then return end
@@ -272,65 +247,66 @@ end
 local function restorePersistentHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-    local rootExists = fs.attributes(HISTORY_ROOT)
-    if not rootExists then
+    if not fs.attributes(HISTORY_ROOT) then
         if not ensureDirectory(HISTORY_ROOT) then
             logger.w("Skipping clipboard history restore because the history directory cannot be created")
         end
         return
     end
+
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
-        if validDateKey(name) then
-            for _, record in ipairs(readDayHistory(name)) do
-                local timestamp = tonumber(record.ts)
-                if timestamp and record.type == "text" and type(record.content) == "string" then
-                    text_clipboard_history[#text_clipboard_history + 1] = {ts=timestamp, content=record.content}
-                elseif timestamp and record.type == "image" and type(record.imagePath) == "string" then
-                    local file = io.open(record.imagePath, "rb")
-                    if file then
-                        local bytes = file:read("*a")
-                        file:close()
-                        if bytes and #bytes > 0 then
-                            local fileExtension = record.imagePath:match("%.([%w]+)$") or "png"
-                            local mimeByExtension = {
-                                png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif",
-                                webp="image/webp", tiff="image/tiff", bmp="image/bmp"
-                            }
-                            local mimeType = mimeByExtension[string.lower(fileExtension)] or "image/png"
-                            local imageData = "data:" .. mimeType .. ";base64," .. hs.base64.encode(bytes)
-                            local ok, imageObject = pcall(hs.image.imageFromURL, imageData)
-                            if ok and imageObject then
-                                local size = imageObject:size()
-                                local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
-                                local thumbnailData = ""
-                                if width > 0 and height > 0 then
-                                    local scale = math.min(1, 240 / width, 240 / height)
-                                    local thumbnail = imageObject:bitmapRepresentation({
-                                        w=math.max(1, math.floor(width*scale+0.5)),
-                                        h=math.max(1, math.floor(height*scale+0.5))
-                                    })
-                                    if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
-                                end
-                                img_clipboard_history[#img_clipboard_history + 1] = {
-                                    ts=timestamp, imageObject=imageObject, thumbnailData=thumbnailData, imagePath=record.imagePath
+            if validDateKey(name) then
+                for _, record in ipairs(readDayHistory(name)) do
+                    local timestamp = tonumber(record.ts)
+                    if timestamp and record.type == "text" and type(record.content) == "string" then
+                        text_clipboard_history[#text_clipboard_history + 1] = {ts=timestamp, content=record.content}
+                    elseif timestamp and record.type == "image" and type(record.imagePath) == "string" then
+                        local file = io.open(record.imagePath, "rb")
+                        if file then
+                            local bytes = file:read("*a")
+                            file:close()
+                            if bytes and #bytes > 0 then
+                                local fileExtension = record.imagePath:match("%.([%w]+)$") or "png"
+                                local mimeByExtension = {
+                                    png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif",
+                                    webp="image/webp", tiff="image/tiff", bmp="image/bmp"
                                 }
+                                local mimeType = mimeByExtension[string.lower(fileExtension)] or "image/png"
+                                local imageData = "data:" .. mimeType .. ";base64," .. hs.base64.encode(bytes)
+                                local imageOK, imageObject = pcall(hs.image.imageFromURL, imageData)
+                                if imageOK and imageObject then
+                                    local size = imageObject:size()
+                                    local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
+                                    local thumbnailData = ""
+                                    if width > 0 and height > 0 then
+                                        local scale = math.min(1, 240 / width, 240 / height)
+                                        local thumbnail = imageObject:bitmapRepresentation({
+                                            w=math.max(1, math.floor(width*scale+0.5)),
+                                            h=math.max(1, math.floor(height*scale+0.5))
+                                        })
+                                        if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
+                                    end
+                                    img_clipboard_history[#img_clipboard_history + 1] = {
+                                        ts=timestamp, imageObject=imageObject, thumbnailData=thumbnailData,
+                                        imagePath=record.imagePath
+                                    }
+                                end
                             end
                         end
                     end
                 end
             end
         end
+    end)
+    if not ok then
+        logger.w("Clipboard history restore stopped safely: " .. tostring(err))
     end
     table.sort(text_clipboard_history, function(a,b) return a.ts < b.ts end)
     table.sort(img_clipboard_history, function(a,b) return a.ts < b.ts end)
     while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
     while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
-        end
-    end)
-    if not ok then logger.w("Clipboard history restore stopped safely: " .. tostring(err)) end
 end
-
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
 local function decodeImage(entry)
@@ -356,38 +332,37 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
-    -- Clear all persisted daily histories and any saved image files.
-    local rootExists = fs.attributes(HISTORY_ROOT)
-    if rootExists then
-        pcall(function()
+    -- Clear only valid daily folders under the dedicated history root.
+    if fs.attributes(HISTORY_ROOT) then
+        local ok, err = pcall(function()
             for name in fs.dir(HISTORY_ROOT) do
-            if validDateKey(name) then
-                local dayPath = historyDayDirectory(name)
-                local function deleteTree(path)
-                    local dirOK, childIter, childDir = pcall(fs.dir, path)
-                    if dirOK and type(childIter) == "function" and childDir ~= nil then
-                        local function eachChild()
-                            return childIter(childDir)
-                        end
-                        for child in eachChild do
-                            if child ~= "." and child ~= ".." then
-                                local childPath = path .. "/" .. child
-                                local attributes = fs.attributes(childPath)
-                                if attributes and attributes.mode == "directory" then
-                                    deleteTree(childPath)
-                                else
-                                    os.remove(childPath)
+                if validDateKey(name) then
+                    local dayPath = historyDayDirectory(name)
+                    local function deleteTree(path)
+                        local childrenOK, childrenErr = pcall(function()
+                            for child in fs.dir(path) do
+                                if child ~= "." and child ~= ".." then
+                                    local childPath = path .. "/" .. child
+                                    local attributes = fs.attributes(childPath)
+                                    if attributes and attributes.mode == "directory" then
+                                        deleteTree(childPath)
+                                    else
+                                        os.remove(childPath)
+                                    end
                                 end
                             end
+                        end)
+                        if childrenOK then
+                            os.remove(path)
+                        else
+                            logger.w("Could not fully clear clipboard folder " .. path .. ": " .. tostring(childrenErr))
                         end
                     end
-                    os.remove(path)
-                end
-                deleteTree(dayPath)
-                    end
+                    deleteTree(dayPath)
                 end
             end
         end)
+        if not ok then logger.w("Clear All could not read clipboard history folders: " .. tostring(err)) end
     end
     if clipboard_webview then
         clipboard_search = ""
@@ -397,7 +372,6 @@ local function clearClipboardHistory()
     collectgarbage("collect")
     hs.reload()
 end
-
 local max_history_size_for_text = 10000
 local max_history_size_for_img = 100
 local display_max_text_length = 200
