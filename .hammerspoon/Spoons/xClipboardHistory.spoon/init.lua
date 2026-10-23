@@ -294,13 +294,38 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    local iterator = fs.dir(HISTORY_ROOT)
+    if iterator then
+        for name in iterator do
+            if validDateKey(name) then
+                local dayPath = historyDayDirectory(name)
+                local function deleteTree(path)
+                    local children = fs.dir(path)
+                    if children then
+                        for child in children do
+                            if child ~= "." and child ~= ".." then
+                                local childPath = path .. "/" .. child
+                                local attributes = fs.attributes(childPath)
+                                if attributes and attributes.mode == "directory" then
+                                    deleteTree(childPath)
+                                else
+                                    os.remove(childPath)
+                                end
+                            end
+                        end
+                    end
+                    os.remove(path)
+                end
+                deleteTree(dayPath)
+            end
+        end
+    end
     if clipboard_webview then
         clipboard_search = ""
         clipboard_webview:hide()
         clipboard_webview:html(clipboardPanelHTML())
     end
     collectgarbage("collect")
-    -- make sure the lua vm is reloaded, otherwise the memory will not be released
     hs.reload()
 end
 
