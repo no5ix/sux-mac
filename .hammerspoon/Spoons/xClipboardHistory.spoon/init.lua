@@ -338,9 +338,14 @@ local display_max_text_length = 200
 -- Add the given string to the history
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
+    runDailyCleanupIfNeeded()
+    local persistedImagePath = nil
     if item_type == "text" then
         table.insert(text_clipboard_history, {ts=cur_ts, content=item})
+        persistClipboardEntry("text", item, cur_ts)
     else
+        local saved, imagePath = persistClipboardEntry("image", item, cur_ts)
+        if saved then persistedImagePath = imagePath end
         -- Keep the original image for pasting. Build a correctly-proportioned
         -- thumbnail; requesting a fixed square bitmap can stretch some source
         -- images depending on the image provider's bitmapRepresentation behavior.
@@ -362,7 +367,8 @@ function pasteboardToClipboard(item_type, item)
             ts=cur_ts,
             -- Full image serialization is deferred until the item is pasted.
             imageObject=item,
-            thumbnailData=thumbnailData or ""
+            thumbnailData=thumbnailData or "",
+            imagePath=persistedImagePath
         })
     end
 end
