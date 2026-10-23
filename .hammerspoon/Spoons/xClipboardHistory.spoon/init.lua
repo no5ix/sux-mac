@@ -213,8 +213,8 @@ local function removeExpiredHistoryDirectories(todayKey)
             if folderNoon and folderNoon <= cutoffNoon then
                 local dayPath = historyDayDirectory(name)
                 local function deleteTree(path)
-                    local children = fs.dir(path)
-                    if children then
+                    local dirOK, children = pcall(fs.dir, path)
+                    if dirOK and type(children) == "function" then
                         for child in children do
                             if child ~= "." and child ~= ".." then
                                 local childPath = path .. "/" .. child
@@ -246,8 +246,11 @@ end
 local function restorePersistentHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-    local iterator = fs.dir(HISTORY_ROOT)
-    if not iterator then return end
+    local dirOK, iterator = pcall(fs.dir, HISTORY_ROOT)
+    if not dirOK or type(iterator) ~= "function" then
+        logger.w("Skipping clipboard history restore because the history directory cannot be read")
+        return
+    end
     for name in iterator do
         if validDateKey(name) then
             for _, record in ipairs(readDayHistory(name)) do
@@ -322,8 +325,8 @@ local function clearClipboardHistory()
     img_clipboard_history = {}
     menuData = {}
     -- Clear all persisted daily histories and any saved image files.
-    local iterator = fs.dir(HISTORY_ROOT)
-    if iterator then
+    local dirOK, iterator = pcall(fs.dir, HISTORY_ROOT)
+    if dirOK and type(iterator) == "function" then
         for name in iterator do
             if validDateKey(name) then
                 local dayPath = historyDayDirectory(name)
