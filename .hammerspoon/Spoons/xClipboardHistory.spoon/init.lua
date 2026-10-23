@@ -302,25 +302,26 @@ local function restorePersistentHistory()
     if not ok then
         logger.w("Clipboard history restore stopped safely: " .. tostring(err))
     end
-    -- Normalize timestamps before sorting because old or partially written
-    -- JSON records may contain missing/non-numeric timestamps.
-    local function normalizeHistoryTimestamps(history)
+    -- Defensively filter and normalize timestamps before sorting. Never let
+    -- malformed historical records reach the comparator.
+    local function normalizeAndSortHistory(history)
+        local validEntries = {}
         for _, entry in ipairs(history) do
-            entry.ts = tonumber(entry.ts)
-        end
-        table.sort(history, function(a, b)
-            local aTimestamp = tonumber(a.ts) or 0
-            local bTimestamp = tonumber(b.ts) or 0
-            return aTimestamp < bTimestamp
-        end)
-        for index = #history, 1, -1 do
-            if not tonumber(history[index].ts) then
-                table.remove(history, index)
+            local timestamp = type(entry) == "table" and tonumber(entry.ts) or nil
+            if timestamp then
+                entry.ts = timestamp
+                validEntries[#validEntries + 1] = entry
+            else
+                logger.w("Skipping clipboard history entry with an invalid timestamp")
             end
         end
+        table.sort(validEntries, function(a, b)
+            return (tonumber(a.ts) or 0) < (tonumber(b.ts) or 0)
+        end)
+        return validEntries
     end
-    normalizeHistoryTimestamps(text_clipboard_history)
-    normalizeHistoryTimestamps(img_clipboard_history)
+    text_clipboard_history = normalizeAndSortHistory(text_clipboard_history)
+    img_clipboard_history = normalizeAndSortHistory(img_clipboard_history)
     while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
     while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
 end
