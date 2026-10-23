@@ -14,7 +14,7 @@ local json = require "hs.json"
 local fs = require "hs.fs"
 local image = require "hs.image"
 local logger = hs.logger.new("xClipboardHistory", "info")
-local HISTORY_ROOT = fs and fs.currentDir and (fs.currentDir() .. "/clipboard-history") or ((os.getenv("HOME") .. "/Documents/github/sux-mac/clipboard-history"))
+local HISTORY_ROOT = (os.getenv("HOME") .. "/Documents/github/sux-mac/clipboard-history")
 local RETENTION_DAYS = 7
 local cleanupLastRunDate = nil
 local lastPersistedEntryKey = nil
@@ -302,8 +302,25 @@ local function restorePersistentHistory()
     if not ok then
         logger.w("Clipboard history restore stopped safely: " .. tostring(err))
     end
-    table.sort(text_clipboard_history, function(a,b) return a.ts < b.ts end)
-    table.sort(img_clipboard_history, function(a,b) return a.ts < b.ts end)
+    -- Normalize timestamps before sorting because old or partially written
+    -- JSON records may contain missing/non-numeric timestamps.
+    local function normalizeHistoryTimestamps(history)
+        for _, entry in ipairs(history) do
+            entry.ts = tonumber(entry.ts)
+        end
+        table.sort(history, function(a, b)
+            local aTimestamp = tonumber(a.ts) or 0
+            local bTimestamp = tonumber(b.ts) or 0
+            return aTimestamp < bTimestamp
+        end)
+        for index = #history, 1, -1 do
+            if not tonumber(history[index].ts) then
+                table.remove(history, index)
+            end
+        end
+    end
+    normalizeHistoryTimestamps(text_clipboard_history)
+    normalizeHistoryTimestamps(img_clipboard_history)
     while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
     while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
 end
