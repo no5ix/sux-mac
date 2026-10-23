@@ -748,7 +748,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 #clipboard-items .item.selected { z-index:1; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
 .item.selected { border-color:var(--selected-border); outline:2px solid var(--accent); outline-offset:1px; background:var(--selected-bg); }
-.image-item .meta { padding-top:9px; padding-bottom:9px; }
+.image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
 .image-item .preview { aspect-ratio:auto; }
 .image-item .preview:not([src]), .image-item .preview[src=""] { object-fit:contain; }
