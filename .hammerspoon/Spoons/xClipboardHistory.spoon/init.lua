@@ -587,7 +587,8 @@ local function jsStringLiteral(value)
     return '"' .. value .. '"'
 end
 
-local TEXT_CARD_PREVIEW_MAX_CHARS = 1800
+local TEXT_CARD_PREVIEW_MAX_CHARS = 350
+local TEXT_HOVER_MAX_LINES = 30
 
 local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
@@ -619,7 +620,7 @@ local function historyItemHTML(entry, index)
             local ok, offset = pcall(utf8Lib.offset, content, TEXT_CARD_PREVIEW_MAX_CHARS + 1)
             if ok and offset then stop = offset - 1 end
         end
-        previewText = content:sub(1, stop) .. "\n… (preview truncated; hover to load full text)"
+        previewText = content:sub(1, stop) .. "\n… (preview truncated; hover for more)"
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
@@ -629,15 +630,15 @@ local function historyItemHTML(entry, index)
         '</div><div class="hint">Click to paste</div>' ..
         '<div class="hover-detail text-detail" role="tooltip">' ..
         '<div class="hover-detail-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
-        '<div class="hover-full-text" data-loaded="false">Loading full text…</div></div></button>'
+        '<div class="hover-full-text" data-loaded="false">Loading preview…</div></div></button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
     if kind == "none" then return false end
     if kind ~= "all" and entry.type ~= kind then return false end
     query = string.lower(tostring(query or ""))
-    -- The vast majority of filter clicks have an empty query. Return before
-    -- reading or lowercasing the possibly huge clipboard payload.
+    -- Filter-only clicks normally have no search query; don't scan or lowercase
+    -- the clipboard payload just to decide whether a card matches by type.
     if query == "" then return true end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     local searchableText = entry.type == "image" and "[image]" or tostring(entry.data or "")
@@ -862,7 +863,7 @@ function scheduleHoverDetail(item) {
     } else {
       const fullText = item.querySelector('.hover-full-text');
       if (fullText && fullText.dataset.loaded !== 'true') {
-        fullText.textContent = 'Loading full text…';
+        fullText.textContent = 'Loading preview…';
         bridge('loadTextPreview', Number(item.dataset.index || 0), '', 'text');
         return;
       }
@@ -1186,8 +1187,20 @@ function handleClipboardPanelMessage(message)
         local index = tonumber(body.index)
         local entry = index and menuData[index]
         if entry and entry.type == "text" and clipboard_webview then
+            local excerptLines = {}
+            local lineCount = 0
+            local content = tostring(entry.data or "")
+            for line in (content .. "\n"):gmatch("(.-)\n") do
+                lineCount = lineCount + 1
+                if lineCount > TEXT_HOVER_MAX_LINES then break end
+                excerptLines[#excerptLines + 1] = line
+            end
+            local excerpt = table.concat(excerptLines, "\n")
+            if lineCount > TEXT_HOVER_MAX_LINES or #content > #excerpt then
+                excerpt = excerpt .. "\n… (preview limited to first " .. TEXT_HOVER_MAX_LINES .. " lines)"
+            end
             clipboard_webview:evaluateJavaScript(
-                "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(entry.data or "") .. ");"
+                "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(excerpt) .. ");"
             )
         end
     elseif body.action == "loadImagePreview" then
