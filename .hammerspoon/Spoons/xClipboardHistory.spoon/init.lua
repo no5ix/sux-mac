@@ -198,24 +198,33 @@ local function removeExpiredHistoryDirectories(todayKey)
     local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
     if not todayNoon then return end
     local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
-    -- hs.fs.dir() throws when the path cannot be opened; it does not return nil.
-    -- Ensure the root exists, then protect the iteration against filesystem errors.
+    -- hs.fs.dir(path) returns an iterator function AND a directory object.
+    -- Preserve the full iterator tuple; treating the second result as the
+    -- iterator state causes "directory metatable expected, got nil".
     if not ensureDirectory(HISTORY_ROOT) then return end
-    local ok, iterator = pcall(fs.dir, HISTORY_ROOT)
-    if not ok or type(iterator) ~= "function" then
+    local iterFn, dirObj = nil, nil
+    local ok, first, second, initial, closing = pcall(fs.dir, HISTORY_ROOT)
+    if not ok or type(first) ~= "function" or second == nil then
         logger.w("Skipping clipboard retention cleanup because the history directory cannot be read")
         return
     end
-    for name in iterator do
+    iterFn, dirObj = first, second
+    local function eachDirectoryEntry()
+        return iterFn(dirObj)
+    end
+    for name in eachDirectoryEntry do
         if validDateKey(name) then
             local y, m, d = name:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
             local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
             if folderNoon and folderNoon <= cutoffNoon then
                 local dayPath = historyDayDirectory(name)
                 local function deleteTree(path)
-                    local dirOK, children = pcall(fs.dir, path)
-                    if dirOK and type(children) == "function" then
-                        for child in children do
+                    local dirOK, childIter, childDir = pcall(fs.dir, path)
+                    if dirOK and type(childIter) == "function" and childDir ~= nil then
+                        local function eachChild()
+                            return childIter(childDir)
+                        end
+                        for child in eachChild do
                             if child ~= "." and child ~= ".." then
                                 local childPath = path .. "/" .. child
                                 local attributes = fs.attributes(childPath)
@@ -246,12 +255,15 @@ end
 local function restorePersistentHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
-    local dirOK, iterator = pcall(fs.dir, HISTORY_ROOT)
-    if not dirOK or type(iterator) ~= "function" then
+    local dirOK, iterFn, dirObj = pcall(fs.dir, HISTORY_ROOT)
+    if not dirOK or type(iterFn) ~= "function" or dirObj == nil then
         logger.w("Skipping clipboard history restore because the history directory cannot be read")
         return
     end
-    for name in iterator do
+    local function eachDirectoryEntry()
+        return iterFn(dirObj)
+    end
+    for name in eachDirectoryEntry do
         if validDateKey(name) then
             for _, record in ipairs(readDayHistory(name)) do
                 local timestamp = tonumber(record.ts)
@@ -325,15 +337,21 @@ local function clearClipboardHistory()
     img_clipboard_history = {}
     menuData = {}
     -- Clear all persisted daily histories and any saved image files.
-    local dirOK, iterator = pcall(fs.dir, HISTORY_ROOT)
-    if dirOK and type(iterator) == "function" then
-        for name in iterator do
+    local dirOK, iterFn, dirObj = pcall(fs.dir, HISTORY_ROOT)
+    if dirOK and type(iterFn) == "function" and dirObj ~= nil then
+        local function eachDirectoryEntry()
+            return iterFn(dirObj)
+        end
+        for name in eachDirectoryEntry do
             if validDateKey(name) then
                 local dayPath = historyDayDirectory(name)
                 local function deleteTree(path)
-                    local children = fs.dir(path)
-                    if children then
-                        for child in children do
+                    local dirOK, childIter, childDir = pcall(fs.dir, path)
+                    if dirOK and type(childIter) == "function" and childDir ~= nil then
+                        local function eachChild()
+                            return childIter(childDir)
+                        end
+                        for child in eachChild do
                             if child ~= "." and child ~= ".." then
                                 local childPath = path .. "/" .. child
                                 local attributes = fs.attributes(childPath)
