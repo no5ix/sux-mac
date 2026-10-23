@@ -182,7 +182,7 @@ button:active{background-color:var(--toolbar-active)!important}
 </head><body><div class="bar">
 <button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
 <!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
-<button data-action="translation-provider" aria-label="Translation provider" title="Translation provider" onclick="action('translation-provider')"><span class="icon" aria-hidden="true">🌐</span></button>
+<button data-action="translation-provider" aria-label="Translation provider" title="Translation provider" onclick="action('translation-provider')"><span class="icon" aria-hidden="true">🔀</span></button>
 
 __CUSTOM_AI_BUTTONS__
 <span class="separator"></span>
@@ -654,37 +654,15 @@ local function runChatGPTWorkflow(text, promptTemplate)
     local prompt = tostring(promptTemplate or CHATGPT_PROMPT) .. "\n\n" .. text
     pasteboard.setContents(prompt)
     hideToolbar()
+
+    -- Keep the simple, predictable workflow: open ChatGPT, wait for the page,
+    -- paste the prepared prompt, then press Return one second later.
     hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
     timer.doAfter(5.0, function()
-        local appleScript = [[
-            tell application "Safari"
-                activate
-                delay 0.3
-                repeat with w in windows
-                    repeat with t in tabs of w
-                        if (URL of t) contains "chatgpt.com" then
-                            set current tab of w to t
-                            set index of w to 1
-                            tell application "System Events"
-                                tell process "Safari"
-                                    set frontmost to true
-                                    keystroke "v" using {command down}
-                                    delay 0.7
-                                    key code 36
-                                end tell
-                            end tell
-                            return "SUBMITTED"
-                        end if
-                    end repeat
-                end repeat
-                return "NO_CHATGPT_TAB"
-            end tell
-        ]]
-        local ok, result, scriptError = pcall(hs.osascript.applescript, appleScript)
-        if not ok or not result then
-            logger.e("ChatGPT paste/submit failed: " .. tostring(scriptError or result))
-            hs.alert.show("ChatGPT paste failed. Check Hammerspoon Accessibility permission.")
-        end
+        eventtap.keyStroke({ "cmd" }, "v", 0.08)
+        timer.doAfter(1.0, function()
+            eventtap.keyStroke({}, "return", 0.08)
+        end)
     end)
 end
 
