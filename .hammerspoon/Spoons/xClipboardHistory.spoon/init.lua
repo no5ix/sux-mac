@@ -172,6 +172,7 @@ local function persistClipboardEntry(itemType, content, timestamp)
     timestamp = timestamp or os.time()
     local dateKey = localDateKey(timestamp)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
+    -- Daily cleanup runs at startup and on the first copy observed each date.
     local records = readDayHistory(dateKey)
     local record = {type=itemType, ts=timestamp}
     if itemType == "text" then
