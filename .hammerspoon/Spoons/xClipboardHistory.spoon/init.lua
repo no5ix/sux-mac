@@ -17,6 +17,7 @@ local logger = hs.logger.new("xClipboardHistory", "info")
 local HISTORY_ROOT = (os.getenv("HOME") .. "/Documents/github/sux-mac/clipboard-history")
 local RETENTION_DAYS = 7
 local cleanupLastRunDate = nil
+local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
@@ -251,11 +252,11 @@ local function removeExpiredHistoryDirectories(todayKey)
         logger.w("Clipboard retention cleanup stopped safely: " .. tostring(err))
     end
 end
-local function runDailyCleanupIfNeeded()
+local function runDailyCleanupIfNeeded(force)
     local todayKey = localDateKey()
-    -- Run on startup, then once per day. If the earlier cleanup failed, allow
-    -- a later clipboard change to retry rather than permanently marking today done.
-    if cleanupLastRunDate == todayKey then return end
+    -- Startup cleanup and the first real clipboard change each trigger a scan.
+    -- After that, only run again on a new date.
+    if not force and cleanupLastRunDate == todayKey then return end
     ensureDirectory(HISTORY_ROOT)
     removeExpiredHistoryDirectories(todayKey)
     cleanupLastRunDate = todayKey
@@ -459,8 +460,15 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
-    -- Run age-based cleanup once on the first observed copy each local day.
-    runDailyCleanupIfNeeded()
+    -- Startup cleanup alone is not enough: users may create an expired folder
+    -- after reloading. Force one more scan on the first clipboard notification
+    -- after startup; future notifications only scan when the date changes.
+    if cleanupOnNextClipboardChange then
+        cleanupOnNextClipboardChange = false
+        runDailyCleanupIfNeeded(true)
+    else
+        runDailyCleanupIfNeeded()
+    end
     -- The selection toolbar sets this marker only for its temporary Cmd+C.
     -- Consume only a clipboard notification that occurs inside that short window;
     -- never suppress unrelated clipboard changes indefinitely.
@@ -1458,6 +1466,9 @@ end
 -- available immediately after Hammerspoon/Sux-Mac starts.
 runDailyCleanupIfNeeded()
 restorePersistentHistory()
+-- Also clean on the first clipboard notification after startup, since expired
+-- folders may have been created manually after the startup scan completed.
+cleanupOnNextClipboardChange = true
 
 -- Start the pasteboard watcher
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
