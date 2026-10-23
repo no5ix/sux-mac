@@ -197,45 +197,51 @@ local function removeExpiredHistoryDirectories(todayKey)
     if not year then return end
     local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
     if not todayNoon then return end
-    local cutoffNoon = todayNoon - RETENTION_DAYS * 24 * 60 * 60
+    local cutoffDate = os.date("%Y-%m-%d", todayNoon - RETENTION_DAYS * 24 * 60 * 60)
     if not ensureDirectory(HISTORY_ROOT) then return end
 
-    -- Also clean up manually created/renamed dated folders, such as
-    -- "2026-10-17 copy". The managed history folders themselves use exact
-    -- YYYY-MM-DD names, but Finder copies should obey the same retention cutoff.
+    -- Compare calendar-date strings rather than local timestamps. This makes
+    -- the seven-day cutoff exact and avoids DST/time-zone boundary ambiguity.
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
             local folderDate = type(name) == "string"
                 and name:match("^(%d%d%d%d%-%d%d%-%d%d)")
                 or nil
-            if folderDate then
-                local y, m, d = folderDate:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
-                local folderNoon = os.time({year=tonumber(y), month=tonumber(m), day=tonumber(d), hour=12})
-                if folderNoon and folderNoon <= cutoffNoon then
-                    local dayPath = HISTORY_ROOT .. "/" .. name
+            if folderDate and folderDate <= cutoffDate then
+                local dayPath = HISTORY_ROOT .. "/" .. name
+                local attributes = fs.attributes(dayPath)
+                if attributes and attributes.mode == "directory" then
                     local function deleteTree(path)
                         local childrenOK, childrenErr = pcall(function()
                             for child in fs.dir(path) do
                                 if child ~= "." and child ~= ".." then
                                     local childPath = path .. "/" .. child
-                                    local attributes = fs.attributes(childPath)
-                                    if attributes and attributes.mode == "directory" then
+                                    local childAttributes = fs.attributes(childPath)
+                                    if childAttributes and childAttributes.mode == "directory" then
                                         deleteTree(childPath)
                                     else
-                                        os.remove(childPath)
+                                        local removed, removeError = os.remove(childPath)
+                                        if not removed then
+                                            error("Unable to remove " .. childPath .. ": " .. tostring(removeError))
+                                        end
                                     end
                                 end
                             end
                         end)
                         if childrenOK then
-                            os.remove(path)
+                            local removed, removeError = os.remove(path)
+                            if not removed then
+                                error("Unable to remove directory " .. path .. ": " .. tostring(removeError))
+                            end
                         else
-                            logger.w("Could not fully clean expired clipboard folder " .. path .. ": " .. tostring(childrenErr))
+                            error(tostring(childrenErr))
                         end
                     end
-                    local attributes = fs.attributes(dayPath)
-                    if attributes and attributes.mode == "directory" then
-                        deleteTree(dayPath)
+                    local deleted, deleteError = pcall(deleteTree, dayPath)
+                    if not deleted then
+                        logger.w("Could not fully clean expired clipboard folder " .. dayPath .. ": " .. tostring(deleteError))
+                    else
+                        logger.i("Removed expired clipboard history folder: " .. dayPath)
                     end
                 end
             end
@@ -247,6 +253,8 @@ local function removeExpiredHistoryDirectories(todayKey)
 end
 local function runDailyCleanupIfNeeded()
     local todayKey = localDateKey()
+    -- Run on startup, then once per day. If the earlier cleanup failed, allow
+    -- a later clipboard change to retry rather than permanently marking today done.
     if cleanupLastRunDate == todayKey then return end
     ensureDirectory(HISTORY_ROOT)
     removeExpiredHistoryDirectories(todayKey)
