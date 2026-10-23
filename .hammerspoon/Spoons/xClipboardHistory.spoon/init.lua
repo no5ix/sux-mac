@@ -421,7 +421,12 @@ function pasteboardToClipboard(item_type, item)
 
     -- Defer the expensive screenshot work until after the clipboard watcher
     -- callback returns. Native PNG saving avoids the large base64 round trip.
-    hs.timer.doAfter(0.25, function()
+    local processImageWhenIdle
+    processImageWhenIdle = function()
+        if clipboard_webview and clipboard_webview:isVisible() then
+            hs.timer.doAfter(0.5, processImageWhenIdle)
+            return
+        end
         local imagePath = saveImageFile(localDateKey(cur_ts), item, cur_ts)
         entry.imagePath = imagePath
         if imagePath then
@@ -487,7 +492,8 @@ function pasteboardToClipboard(item_type, item)
             end
             if imagePath then writeDayHistory(dateKey, records) end
         end)
-    end)
+    end
+    hs.timer.doAfter(0.25, processImageWhenIdle)
 end
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
@@ -1328,7 +1334,20 @@ function handleClipboardPanelMessage(message)
         local historyEntry = entry and entry.historyEntry
         local image = historyEntry and decodeImage(historyEntry)
         if image and clipboard_webview then
-            local url = image:encodeAsURLString()
+            local size = image:size()
+            local width = tonumber(size and size.w) or 0
+            local height = tonumber(size and size.h) or 0
+            local preview = image
+            if width > 0 and height > 0 then
+                local scale = math.min(1, 900 / width, 900 / height)
+                if scale < 1 then
+                    preview = image:bitmapRepresentation({
+                        w=math.max(1, math.floor(width * scale + 0.5)),
+                        h=math.max(1, math.floor(height * scale + 0.5))
+                    }) or image
+                end
+            end
+            local url = preview:encodeAsURLString()
             clipboard_webview:evaluateJavaScript(
                 "window.setImagePreview && window.setImagePreview(" .. tostring(index) .. "," .. jsStringLiteral(url) .. ");"
             )
