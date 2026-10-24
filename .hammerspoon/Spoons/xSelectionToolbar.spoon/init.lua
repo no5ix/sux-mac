@@ -841,6 +841,7 @@ function obj:start()
     local lastText = ""
     local lastShownAt = 0
     local pendingCapture = false
+    local captureSelectionFromClipboardFallback
 
     local function selectionFromAccessibility()
         local ok, value = pcall(function()
@@ -878,7 +879,11 @@ function obj:start()
         local now = hs.timer.secondsSinceEpoch()
         -- Suppress duplicate detections from the same gesture, but don't suppress
         -- later selections just because the selected text matches the previous one.
-        if (now - lastShownAt) > 0.35 then
+        if toolbar and toolbar:isVisible() and selectedText == value then
+            lastShownAt = now
+            return true
+        end
+        if (now - lastShownAt) > 0.15 or selectedText ~= value then
             selectedText = value
             lastText = value
             lastShownAt = now
@@ -949,43 +954,58 @@ function obj:start()
                 if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
                 local value = selectionFromAccessibility()
                 if showIfSelection(value) then return end
+
+                -- Accessibility can update the selected-text attribute slightly
+                -- after mouse-up, especially in browser/WebView-based editors.
+                -- Retry briefly before giving up or using the Cmd+C fallback.
+                local attempts = 0
+                local function retryAccessibilitySelection()
+                    if toolbar and toolbar:isVisible() then return end
+                    attempts = attempts + 1
+                    local retryValue = selectionFromAccessibility()
+                    if showIfSelection(retryValue) then return end
+                    if attempts < 4 then
+                        timer.doAfter(0.08, retryAccessibilitySelection)
+                    elseif didDrag and not pendingCapture then
+                        captureSelectionFromClipboardFallback()
+                    end
+                end
+
+                if didDrag and not pendingCapture then
+                    captureSelectionFromClipboardFallback = function()
+                        if pendingCapture then return end
+                        -- Do not synthesize Cmd+C for Finder or other file-oriented apps.
+                        local fallbackApp = hs.application.frontmostApplication()
+                        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                        local appName = string.lower(fallbackApp:name() or "")
+                        local bundleID = string.lower(fallbackApp:bundleID() or "")
+                        if bundleID == "com.apple.finder" or appName == "finder" then return end
+
+                        pendingCapture = true
+                        local oldClipboard = pasteboard.getContents()
+                        local oldCount = pasteboard.changeCount()
+                        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
+                        hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
+                        timer.doAfter(0.22, function()
+                            local newCount = pasteboard.changeCount()
+                            local copied = trim(pasteboard.getContents())
+                            if oldClipboard ~= nil and newCount ~= oldCount then pasteboard.setContents(oldClipboard) end
+                            pendingCapture = false
+                            local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
+                                and not copied:match("^file://")
+                                and not copied:match("^/[^%s]+$")
+                            if newCount ~= oldCount and isPlainText then
+                                local axValue = selectionFromAccessibility()
+                                local selection = trim(axValue ~= "" and axValue or copied)
+                                if selection ~= "" and not looksLikeImagePayload(selection) then showIfSelection(selection) end
+                            end
+                        end)
+                    end
+                    timer.doAfter(0.08, retryAccessibilitySelection)
+                end
                 if not didDrag or pendingCapture then return end
 
-                -- Do not synthesize Cmd+C for Finder or other file-oriented apps:
-                -- a drag there usually selects files, and their clipboard payload is
-                -- not a text selection.
-                local appName = string.lower(app:name() or "")
-                local bundleID = string.lower(app:bundleID() or "")
-                if bundleID == "com.apple.finder" or appName == "finder" then return end
-
-                -- If Accessibility cannot report selected text, fallback to Cmd+C,
-                -- but accept only a new plain-text clipboard string and restore the prior clipboard.
-                pendingCapture = true
-                local oldClipboard = pasteboard.getContents()
-                local oldCount = pasteboard.changeCount()
-                -- The clipboard-history Spoon can use this marker to ignore the
-                -- temporary copy used only to detect selected text.
-                _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.5
-                hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
-                timer.doAfter(0.16, function()
-                    local newCount = pasteboard.changeCount()
-                    local copied = trim(pasteboard.getContents())
-                    if oldClipboard ~= nil and newCount ~= oldCount then pasteboard.setContents(oldClipboard) end
-                    pendingCapture = false
-                    -- Text toolbar is only for newly copied plain text. If the
-                    -- copy command produces a file URL, image payload, or no clipboard
-                    -- change, do not display the toolbar.
-                    local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
-                        and not copied:match("^file://")
-                        and not copied:match("^/[^%s]+$")
-                    if newCount ~= oldCount and isPlainText then
-                        local axValue = selectionFromAccessibility()
-                        local selection = trim(axValue ~= "" and axValue or copied)
-                        if selection ~= "" and not looksLikeImagePayload(selection) then
-                            showIfSelection(selection)
-                        end
-                    end
-                end)
+                return false
             end)
             return false
         end
