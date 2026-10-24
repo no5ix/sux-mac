@@ -1052,8 +1052,14 @@ function applyFilters() {
 }
 function setActiveFilter(button) {
   const kind = button.dataset.filter;
-  if (activeTypeFilters.has(kind)) activeTypeFilters.delete(kind);
-  else activeTypeFilters.add(kind);
+  // Text and Images are mutually exclusive. Clicking the active filter again
+  // clears it; clicking the other filter switches directly to that type.
+  if (activeTypeFilters.has(kind)) {
+    activeTypeFilters.clear();
+  } else {
+    activeTypeFilters.clear();
+    activeTypeFilters.add(kind);
+  }
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
     other.setAttribute('aria-pressed', activeTypeFilters.has(other.dataset.filter) ? 'true' : 'false');
   });
