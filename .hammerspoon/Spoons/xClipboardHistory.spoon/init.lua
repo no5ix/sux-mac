@@ -20,10 +20,7 @@ local THUMBNAIL_MAX_DIMENSION = 112
 local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
-local clipboardImageRecoveryTimer = nil
-local lastObservedPasteboardChangeCount = nil
-local lastObservedClipboardSignature = nil
-local imageCaptureInProgress = false
+local imageProcessingCount = 0
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
@@ -412,8 +409,10 @@ function pasteboardToClipboard(item_type, item)
         return
     end
 
-    -- Insert the screenshot into memory immediately so opening the panel never
-    -- waits for disk persistence or thumbnail encoding.
+    -- Process each screenshot in one predictable watcher-driven sequence.
+    -- Opening the panel waits until queued image work has completed.
+    imageProcessingCount = imageProcessingCount + 1
+    local processingOK, processingError = pcall(function()
     local entry = {
         ts=cur_ts,
         imageObject=item,
@@ -423,128 +422,41 @@ function pasteboardToClipboard(item_type, item)
     }
     table.insert(img_clipboard_history, entry)
 
-    -- Persist screenshots regardless of whether the history panel is open.
-    -- Saving is performed asynchronously after this callback returns, but must
-    -- not depend on panel visibility: otherwise rapid screenshots can remain
-    -- only in memory while a panel stays open or the deferred chain is delayed.
-    local processImageWhenIdle
-    processImageWhenIdle = function()
-        if imageCaptureInProgress then
-            hs.timer.doAfter(0.2, processImageWhenIdle)
-            return
-        end
-        imageCaptureInProgress = true
-        local imagePath = saveImageFile(localDateKey(cur_ts), item, cur_ts)
-        imageCaptureInProgress = false
-        entry.imagePath = imagePath
-        if imagePath then
-            -- Register the already-saved image in JSON without encoding/saving
-            -- it a second time through persistClipboardEntry().
-            local dateKey = localDateKey(cur_ts)
-            local records = readDayHistory(dateKey)
-            records[#records + 1] = {type="image", ts=cur_ts, imagePath=imagePath}
-            if not writeDayHistory(dateKey, records) then
-                logger.w("Clipboard screenshot was saved but its history record could not be written")
-            end
-        else
-            logger.w("Clipboard screenshot remains available in memory but could not be persisted")
-        end
-
-        -- Thumbnail work is separate so it cannot delay the first panel open.
-        hs.timer.doAfter(0.15, function()
-            local ok, thumbnailData = pcall(function()
-                local size = item:size()
-                local width = tonumber(size and size.w) or 0
-                local height = tonumber(size and size.h) or 0
-                if width <= 0 or height <= 0 then return "" end
-                local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-                local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
-                local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
-                local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
-                return thumbnail and thumbnail:encodeAsURLString() or ""
-            end)
-            entry.thumbnailData = ok and thumbnailData or ""
-            entry.thumbnailPending = false
-
-            -- Persist the thumbnail-independent image path and JSON record after
-            -- thumbnail generation. Updating the in-memory card is best-effort.
-            if clipboard_webview and clipboard_webview:isVisible() and entry.thumbnailData ~= "" then
-                local js = {}
-                for index, menuEntry in ipairs(menuData or {}) do
-                    if menuEntry.type == "image" and menuEntry.rowTs == cur_ts then
-                        if menuEntry.historyEntry then
-                            menuEntry.historyEntry.thumbnailData = entry.thumbnailData
-                            menuEntry.historyEntry.imagePath = imagePath
-                        end
-                        js[#js + 1] = "window.setImageThumbnail && window.setImageThumbnail(" ..
-                            tostring(index) .. "," .. jsStringLiteral(entry.thumbnailData) .. ");"
-                    end
-                end
-                if #js > 0 then
-                    clipboard_webview:evaluateJavaScript(table.concat(js, "\n"))
-                end
-            end
-
-            -- Write the daily JSON after all image metadata is ready.
-            local dateKey = localDateKey(cur_ts)
-            local records = readDayHistory(dateKey)
-            local found = false
-            for _, record in ipairs(records) do
-                if record.type == "image" and tonumber(record.ts) == cur_ts and record.imagePath == imagePath then
-                    record.thumbnailData = entry.thumbnailData
-                    found = true
-                end
-            end
-            if not found and imagePath then
-                records[#records + 1] = {type="image", ts=cur_ts, imagePath=imagePath, thumbnailData=entry.thumbnailData}
-            end
-            if imagePath then writeDayHistory(dateKey, records) end
-        end)
-    end
-    hs.timer.doAfter(0.1, processImageWhenIdle)
-end
-
-local function clipboardImageSignature(item)
-    if not item then return nil end
-    local ok, size = pcall(function() return item:size() end)
-    if not ok or type(size) ~= "table" then return tostring(item) end
-    -- Object identity is deliberately excluded: repeated readImage() calls can
-    -- return distinct Lua wrappers for the same unchanged pasteboard image.
-    return tostring(size.w) .. "x" .. tostring(size.h) .. ":" .. tostring(item:encodeAsURLString():sub(1, 96))
-end
-
-local function captureCurrentClipboardImage(reason)
-    if imageCaptureInProgress then return false end
-    local currentCount = pasteboard.changeCount()
-    local ok, clipboardImage = pcall(pasteboard.readImage)
-    if not ok or not clipboardImage then return false end
-
-    local signatureOk, signature = pcall(clipboardImageSignature, clipboardImage)
-    if not signatureOk or not signature then return false end
-    if currentCount == lastObservedPasteboardChangeCount and signature == lastObservedClipboardSignature then
-        return false
+    local dateKey = localDateKey(cur_ts)
+    local imagePath = saveImageFile(dateKey, item, cur_ts)
+    entry.imagePath = imagePath
+    if not imagePath then
+        logger.e("Clipboard screenshot could not be saved; keeping it in memory")
     end
 
-    -- Don't duplicate an image already represented by the newest history entry.
-    local newestImage = img_clipboard_history[#img_clipboard_history]
-    local newestText = text_clipboard_history[#text_clipboard_history]
-    if newestImage and newestImage.imageObject then
-        local newestSignatureOk, newestSignature = pcall(clipboardImageSignature, newestImage.imageObject)
-        if newestSignatureOk and newestSignature == signature and (not newestText or newestImage.ts >= newestText.ts) then
-            lastObservedPasteboardChangeCount = currentCount
-            lastObservedClipboardSignature = signature
-            return false
+    local thumbnailOK, thumbnailData = pcall(function()
+        local size = item:size()
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
+        if width <= 0 or height <= 0 then return "" end
+        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+        local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
+        local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
+        local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+        return thumbnail and thumbnail:encodeAsURLString() or ""
+    end)
+    entry.thumbnailData = thumbnailOK and thumbnailData or ""
+    entry.thumbnailPending = false
+
+    if imagePath then
+        local records = readDayHistory(dateKey)
+        local record = {type="image", ts=cur_ts, imagePath=imagePath}
+        if entry.thumbnailData ~= "" then record.thumbnailData = entry.thumbnailData end
+        records[#records + 1] = record
+        if not writeDayHistory(dateKey, records) then
+            logger.e("Clipboard screenshot was saved but its history record could not be written")
         end
     end
-
-    lastObservedPasteboardChangeCount = currentCount
-    lastObservedClipboardSignature = signature
-    logger.i("Recovered clipboard image from pasteboard polling (" .. tostring(reason or "poll") .. ")")
-    pasteboardToClipboard("image", clipboardImage)
-    if #img_clipboard_history > max_history_size_for_img then
-        table.remove(img_clipboard_history, 1)
+    end)
+    imageProcessingCount = math.max(0, imageProcessingCount - 1)
+    if not processingOK then
+        logger.e("Clipboard screenshot processing failed: " .. tostring(processingError))
     end
-    return true
 end
 
 -- Add this function to handle clipboard changes
@@ -573,7 +485,6 @@ function handleClipboardChange(content)
     end
 
     pasteboard_watcher:start()
-    lastObservedPasteboardChangeCount = pasteboard.changeCount()
 
     -- cur_change_cnt = pasteboard.changeCount()
     -- print("[handleClipboardChange] start, cur_change_cnt = " .. tostring(cur_change_cnt) .. ", last_change = " .. tostring(last_change))
@@ -591,7 +502,6 @@ function handleClipboardChange(content)
             end
         end
         if (content == nil) and (pasteboardImg ~= nil) then
-            lastObservedClipboardSignature = clipboardImageSignature(pasteboardImg)
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
                 (#text_clipboard_history == 0 or (img_clipboard_history[#img_clipboard_history].ts > text_clipboard_history[#text_clipboard_history].ts)) then
@@ -1593,6 +1503,14 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
+    if imageProcessingCount > 0 then
+        hs.timer.doAfter(0.1, function()
+            if imageProcessingCount == 0 then
+                showClipboardHistory()
+            end
+        end)
+        return
+    end
     -- Run daily retention cleanup when the panel is first requested that day too.
     runDailyCleanupIfNeeded()
     -- Initialize defensively in case the watcher was torn down during reload.
@@ -1755,35 +1673,6 @@ cleanupOnNextClipboardChange = true
 -- Start the pasteboard watcher
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
 pasteboard_watcher:start()
-lastObservedPasteboardChangeCount = pasteboard.changeCount()
-lastObservedClipboardSignature = clipboardImageSignature(pasteboard.readImage())
-
--- Hammerspoon's pasteboard watcher is notification-driven; periodically inspect
--- the current pasteboard as a recovery path for screenshot apps whose image
--- flavor appears after the initial notification or whose change notification is
--- missed. This is image-only and de-duplicates unchanged clipboard contents.
-clipboardImageRecoveryTimer = hs.timer.doEvery(0.75, function()
-    local currentCount = pasteboard.changeCount()
-    if currentCount ~= lastObservedPasteboardChangeCount then
-        local previousCount = lastObservedPasteboardChangeCount
-        -- The callback can fire before screenshot apps publish their image flavor.
-        -- Retry briefly after a change so the image can become readable.
-        captureCurrentClipboardImage("change-count")
-        if currentCount ~= lastObservedPasteboardChangeCount then
-            lastObservedPasteboardChangeCount = currentCount
-        end
-        hs.timer.doAfter(0.18, function()
-            if pasteboard.changeCount() == currentCount then
-                captureCurrentClipboardImage("delayed-image-read")
-            end
-        end)
-    else
-        -- Even if the change count was observed, a screenshot provider can expose
-        -- its image representation a little later. Polling is image-only and
-        -- signature-deduplicated, so unchanged images won't be inserted again.
-        captureCurrentClipboardImage("periodic-image-check")
-    end
-end)
 
 -- Keep an explicit reference to the global shortcut so it remains live after
 -- Spoon reloads. Bindings are global, so browser password fields should not
