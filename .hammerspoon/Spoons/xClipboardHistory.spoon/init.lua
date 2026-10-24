@@ -1296,7 +1296,7 @@ local function updateClipboardPanel(query, kind, offset, append)
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
     clipboard_webview:evaluateJavaScript(script, function(_, error)
         if error then
-            logger.w("Clipboard panel update failed (" .. (append and "load more" or "filter/search") .. "): " .. tostring(error))
+            -- logger.w("Clipboard panel update failed (" .. (append and "load more" or "filter/search") .. "): " .. tostring(error))
         end
     end)
     clipboard_search = query
