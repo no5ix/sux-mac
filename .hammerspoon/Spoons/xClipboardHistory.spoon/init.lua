@@ -409,26 +409,26 @@ function pasteboardToClipboard(item_type, item)
         return
     end
 
-    -- Process each screenshot in one predictable watcher-driven sequence.
-    -- Opening the panel waits until queued image work has completed.
+    -- Keep image handling simple and synchronous inside the pasteboard watcher:
+    -- insert -> save PNG -> create thumbnail -> write the history record.
     imageProcessingCount = imageProcessingCount + 1
     local processingOK, processingError = pcall(function()
-            local entry = {
-            ts=cur_ts,
-            imageObject=item,
-            thumbnailData="",
-            imagePath=nil,
-            thumbnailPending=true
+        local entry = {
+            ts = cur_ts,
+            imageObject = item,
+            thumbnailData = "",
+            imagePath = nil,
+            thumbnailPending = true
         }
         table.insert(img_clipboard_history, entry)
-    
+
         local dateKey = localDateKey(cur_ts)
         local imagePath = saveImageFile(dateKey, item, cur_ts)
         entry.imagePath = imagePath
         if not imagePath then
             logger.e("Clipboard screenshot could not be saved; keeping it in memory")
         end
-    
+
         local thumbnailOK, thumbnailData = pcall(function()
             local size = item:size()
             local width = tonumber(size and size.w) or 0
@@ -437,22 +437,21 @@ function pasteboardToClipboard(item_type, item)
             local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
             local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
             local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
-            local thumbnail = item:bitmapRepresentation({w=thumbWidth, h=thumbHeight})
+            local thumbnail = item:bitmapRepresentation({w = thumbWidth, h = thumbHeight})
             return thumbnail and thumbnail:encodeAsURLString() or ""
         end)
         entry.thumbnailData = thumbnailOK and thumbnailData or ""
         entry.thumbnailPending = false
-    
+
         if imagePath then
             local records = readDayHistory(dateKey)
-            local record = {type="image", ts=cur_ts, imagePath=imagePath}
+            local record = {type = "image", ts = cur_ts, imagePath = imagePath}
             if entry.thumbnailData ~= "" then record.thumbnailData = entry.thumbnailData end
             records[#records + 1] = record
             if not writeDayHistory(dateKey, records) then
                 logger.e("Clipboard screenshot was saved but its history record could not be written")
             end
         end
-    
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not processingOK then
