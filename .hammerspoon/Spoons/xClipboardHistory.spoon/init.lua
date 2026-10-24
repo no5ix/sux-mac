@@ -20,6 +20,10 @@ local THUMBNAIL_MAX_DIMENSION = 112
 local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
+local clipboardImageRecoveryTimer = nil
+local lastObservedPasteboardChangeCount = nil
+local lastObservedClipboardSignature = nil
+local imageCaptureInProgress = false
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
@@ -419,15 +423,19 @@ function pasteboardToClipboard(item_type, item)
     }
     table.insert(img_clipboard_history, entry)
 
-    -- Defer the expensive screenshot work until after the clipboard watcher
-    -- callback returns. Native PNG saving avoids the large base64 round trip.
+    -- Persist screenshots regardless of whether the history panel is open.
+    -- Saving is performed asynchronously after this callback returns, but must
+    -- not depend on panel visibility: otherwise rapid screenshots can remain
+    -- only in memory while a panel stays open or the deferred chain is delayed.
     local processImageWhenIdle
     processImageWhenIdle = function()
-        if clipboard_webview and clipboard_webview:isVisible() then
-            hs.timer.doAfter(0.5, processImageWhenIdle)
+        if imageCaptureInProgress then
+            hs.timer.doAfter(0.2, processImageWhenIdle)
             return
         end
+        imageCaptureInProgress = true
         local imagePath = saveImageFile(localDateKey(cur_ts), item, cur_ts)
+        imageCaptureInProgress = false
         entry.imagePath = imagePath
         if imagePath then
             -- Register the already-saved image in JSON without encoding/saving
@@ -493,8 +501,49 @@ function pasteboardToClipboard(item_type, item)
             if imagePath then writeDayHistory(dateKey, records) end
         end)
     end
-    hs.timer.doAfter(0.25, processImageWhenIdle)
+    hs.timer.doAfter(0.1, processImageWhenIdle)
 end
+
+local function clipboardImageSignature(item)
+    if not item then return nil end
+    local ok, size = pcall(function() return item:size() end)
+    if not ok or type(size) ~= "table" then return tostring(item) end
+    return tostring(size.w) .. "x" .. tostring(size.h) .. ":" .. tostring(item)
+end
+
+local function captureCurrentClipboardImage(reason)
+    if imageCaptureInProgress then return false end
+    local ok, clipboardImage = pcall(pasteboard.readImage)
+    if not ok or not clipboardImage then return false end
+
+    local signature = clipboardImageSignature(clipboardImage)
+    local changeCount = pasteboard.changeCount()
+    if changeCount == lastObservedPasteboardChangeCount and signature == lastObservedClipboardSignature then
+        return false
+    end
+
+    -- Only accept a clipboard image after an observed pasteboard change or when
+    -- the watcher missed the notification entirely. The dimensions/signature
+    -- also prevent repeated polling from inserting the same unchanged image.
+    local newestImage = img_clipboard_history[#img_clipboard_history]
+    local newestText = text_clipboard_history[#text_clipboard_history]
+    if newestImage and newestImage.imageObject and clipboardImageSignature(newestImage.imageObject) == signature
+        and (not newestText or newestImage.ts >= newestText.ts) then
+        lastObservedPasteboardChangeCount = changeCount
+        lastObservedClipboardSignature = signature
+        return false
+    end
+
+    lastObservedPasteboardChangeCount = changeCount
+    lastObservedClipboardSignature = signature
+    logger.i("Recovered clipboard image from pasteboard polling (" .. tostring(reason or "poll") .. ")")
+    pasteboardToClipboard("image", clipboardImage)
+    if #img_clipboard_history > max_history_size_for_img then
+        table.remove(img_clipboard_history, 1)
+    end
+    return true
+end
+
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
     -- Startup cleanup alone is not enough: users may create an expired folder
@@ -521,6 +570,7 @@ function handleClipboardChange(content)
     end
 
     pasteboard_watcher:start()
+    lastObservedPasteboardChangeCount = pasteboard.changeCount()
 
     -- cur_change_cnt = pasteboard.changeCount()
     -- print("[handleClipboardChange] start, cur_change_cnt = " .. tostring(cur_change_cnt) .. ", last_change = " .. tostring(last_change))
@@ -538,6 +588,7 @@ function handleClipboardChange(content)
             end
         end
         if (content == nil) and (pasteboardImg ~= nil) then
+            lastObservedClipboardSignature = clipboardImageSignature(pasteboardImg)
             -- Don't add if it's the same as the last entry
             if #img_clipboard_history ~= 0 and 
                 (#text_clipboard_history == 0 or (img_clipboard_history[#img_clipboard_history].ts > text_clipboard_history[#text_clipboard_history].ts)) then
@@ -1701,6 +1752,21 @@ cleanupOnNextClipboardChange = true
 -- Start the pasteboard watcher
 pasteboard_watcher = pbwatcher.new(handleClipboardChange)
 pasteboard_watcher:start()
+lastObservedPasteboardChangeCount = pasteboard.changeCount()
+lastObservedClipboardSignature = clipboardImageSignature(pasteboard.readImage())
+
+-- Hammerspoon's pasteboard watcher is notification-driven; periodically inspect
+-- the current pasteboard as a recovery path for screenshot apps whose image
+-- flavor appears after the initial notification or whose change notification is
+-- missed. This is image-only and de-duplicates unchanged clipboard contents.
+clipboardImageRecoveryTimer = hs.timer.doEvery(0.75, function()
+    local currentCount = pasteboard.changeCount()
+    if currentCount ~= lastObservedPasteboardChangeCount then
+        captureCurrentClipboardImage("change-count")
+    elseif not lastObservedClipboardSignature then
+        captureCurrentClipboardImage("image-appeared-late")
+    end
+end)
 
 -- Keep an explicit reference to the global shortcut so it remains live after
 -- Spoon reloads. Bindings are global, so browser password fields should not
