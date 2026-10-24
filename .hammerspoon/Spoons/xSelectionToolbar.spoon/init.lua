@@ -841,7 +841,46 @@ function obj:start()
     local lastText = ""
     local lastShownAt = 0
     local pendingCapture = false
+    local eventTapHealthTimer = nil
     local captureSelectionFromClipboardFallback
+
+    local function reportEventTapState(reason)
+        local enabled = false
+        if mouseSelectionTap then
+            local ok, value = pcall(function() return mouseSelectionTap:isEnabled() end)
+            enabled = ok and value == true
+        end
+        logger.w(string.format(
+            "Selection mouse event tap %s (enabled=%s, reason=%s)",
+            enabled and "healthy" or "disabled",
+            tostring(enabled),
+            tostring(reason or "health-check")
+        ))
+        return enabled
+    end
+
+    local function ensureMouseSelectionTap()
+        if not mouseSelectionTap then return false end
+        local enabled = false
+        local ok, value = pcall(function() return mouseSelectionTap:isEnabled() end)
+        enabled = ok and value == true
+        if enabled then return true end
+
+        logger.w("Selection mouse event tap is disabled; attempting to restart it")
+        pcall(function() mouseSelectionTap:stop() end)
+        local started, err = pcall(function() mouseSelectionTap:start() end)
+        if not started then
+            logger.e("Failed to restart selection mouse event tap: " .. tostring(err))
+            return false
+        end
+        local checkOk, checkEnabled = pcall(function() return mouseSelectionTap:isEnabled() end)
+        if not checkOk or not checkEnabled then
+            logger.e("Selection mouse event tap is still disabled after restart")
+            return false
+        end
+        logger.i("Selection mouse event tap recovered")
+        return true
+    end
 
     local function selectionFromAccessibility()
         local ok, value = pcall(function()
@@ -1010,6 +1049,17 @@ function obj:start()
         return false
     end)
     mouseSelectionTap:start()
+    reportEventTapState("after-start")
+
+    -- Recover if macOS disables the event tap temporarily. This timer also emits
+    -- a diagnostic only when it observes a disabled tap, avoiding noisy logs.
+    eventTapHealthTimer = timer.doEvery(5, function()
+        if not mouseSelectionTap then
+            if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
+            return
+        end
+        ensureMouseSelectionTap()
+    end)
 
     -- Keyboard-based selection detection intentionally disabled; only mouse drag selection is supported.
     return self
@@ -1018,6 +1068,7 @@ function obj:stop()
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
+    if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
     return self
