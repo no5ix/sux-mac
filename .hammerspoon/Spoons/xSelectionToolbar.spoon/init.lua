@@ -883,14 +883,13 @@ function obj:start()
             lastShownAt = now
             return true
         end
-        if (now - lastShownAt) > 0.15 or selectedText ~= value then
-            selectedText = value
-            lastText = value
-            lastShownAt = now
-            buildToolbar(value)
-            return true
-        end
-        return false
+        -- A hidden toolbar must never suppress a genuine new selection, even if
+        -- the user selects the same text again quickly.
+        selectedText = value
+        lastText = value
+        lastShownAt = now
+        buildToolbar(value)
+        return true
     end
 
     local function captureAfterMouseSelection()
@@ -916,6 +915,40 @@ function obj:start()
         -- eventtap's mouse-up callback below records whether the pointer moved while down.
     end
 
+    local function captureSelectionFromClipboardFallback()
+        if pendingCapture then return end
+        local fallbackApp = hs.application.frontmostApplication()
+        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+        local appName = string.lower(fallbackApp:name() or "")
+        local bundleID = string.lower(fallbackApp:bundleID() or "")
+        if bundleID == "com.apple.finder" or appName == "finder" then return end
+
+        pendingCapture = true
+        local oldClipboard = pasteboard.getContents()
+        local oldCount = pasteboard.changeCount()
+        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
+        hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
+        timer.doAfter(0.22, function()
+            local newCount = pasteboard.changeCount()
+            local copied = trim(pasteboard.getContents())
+            if oldClipboard ~= nil and newCount ~= oldCount then
+                pasteboard.setContents(oldClipboard)
+            end
+            pendingCapture = false
+
+            local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
+                and not copied:match("^file://")
+                and not copied:match("^/[^%s]+$")
+            if newCount ~= oldCount and isPlainText then
+                local axValue = selectionFromAccessibility()
+                local selection = trim(axValue ~= "" and axValue or copied)
+                if selection ~= "" and not looksLikeImagePayload(selection) then
+                    showIfSelection(selection)
+                end
+            end
+        end)
+    end
+
     local mouseDownPoint = nil
     local mouseDragDistance = 0
     mouseSelectionTap = hs.eventtap.new({
@@ -926,7 +959,7 @@ function obj:start()
         local eventType = event:getType()
         if eventType == hs.eventtap.event.types.leftMouseDown then
             local p = hs.mouse.absolutePosition()
-            mouseDownPoint = { x = p.x, y = p.y }
+            mouseDownPoint = {x=p.x, y=p.y}
             mouseDragDistance = 0
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseDragged then
@@ -940,6 +973,7 @@ function obj:start()
             local didDrag = mouseDragDistance >= 4
             mouseDownPoint = nil
             mouseDragDistance = 0
+
             timer.doAfter(0.12, function()
                 if toolbar and toolbar:isVisible() then
                     local p = hs.mouse.absolutePosition()
@@ -950,62 +984,26 @@ function obj:start()
                     return
                 end
 
-                local app = hs.application.frontmostApplication()
-                if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
-                local value = selectionFromAccessibility()
-                if showIfSelection(value) then return end
-
-                -- Accessibility can update the selected-text attribute slightly
-                -- after mouse-up, especially in browser/WebView-based editors.
-                -- Retry briefly before giving up or using the Cmd+C fallback.
                 local attempts = 0
-                local function retryAccessibilitySelection()
+                local function retrySelectionRead()
                     if toolbar and toolbar:isVisible() then return end
+                    local app = hs.application.frontmostApplication()
+                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+
                     attempts = attempts + 1
-                    local retryValue = selectionFromAccessibility()
-                    if showIfSelection(retryValue) then return end
+                    local value = selectionFromAccessibility()
+                    if showIfSelection(value) then return end
+
+                    -- AXSelectedText can lag behind mouse-up in browsers and other
+                    -- apps. Retry for ~320 ms; only then use clipboard fallback
+                    -- for an actual drag so normal clicks never synthesize Cmd+C.
                     if attempts < 4 then
-                        timer.doAfter(0.08, retryAccessibilitySelection)
-                    elseif didDrag and not pendingCapture then
+                        timer.doAfter(0.08, retrySelectionRead)
+                    elseif didDrag then
                         captureSelectionFromClipboardFallback()
                     end
                 end
-
-                if didDrag and not pendingCapture then
-                    captureSelectionFromClipboardFallback = function()
-                        if pendingCapture then return end
-                        -- Do not synthesize Cmd+C for Finder or other file-oriented apps.
-                        local fallbackApp = hs.application.frontmostApplication()
-                        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
-                        local appName = string.lower(fallbackApp:name() or "")
-                        local bundleID = string.lower(fallbackApp:bundleID() or "")
-                        if bundleID == "com.apple.finder" or appName == "finder" then return end
-
-                        pendingCapture = true
-                        local oldClipboard = pasteboard.getContents()
-                        local oldCount = pasteboard.changeCount()
-                        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
-                        hs.eventtap.keyStroke({ "cmd" }, "c", 0.02)
-                        timer.doAfter(0.22, function()
-                            local newCount = pasteboard.changeCount()
-                            local copied = trim(pasteboard.getContents())
-                            if oldClipboard ~= nil and newCount ~= oldCount then pasteboard.setContents(oldClipboard) end
-                            pendingCapture = false
-                            local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
-                                and not copied:match("^file://")
-                                and not copied:match("^/[^%s]+$")
-                            if newCount ~= oldCount and isPlainText then
-                                local axValue = selectionFromAccessibility()
-                                local selection = trim(axValue ~= "" and axValue or copied)
-                                if selection ~= "" and not looksLikeImagePayload(selection) then showIfSelection(selection) end
-                            end
-                        end)
-                    end
-                    timer.doAfter(0.08, retryAccessibilitySelection)
-                end
-                if not didDrag or pendingCapture then return end
-
-                return false
+                retrySelectionRead()
             end)
             return false
         end
