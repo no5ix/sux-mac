@@ -508,33 +508,36 @@ local function clipboardImageSignature(item)
     if not item then return nil end
     local ok, size = pcall(function() return item:size() end)
     if not ok or type(size) ~= "table" then return tostring(item) end
-    return tostring(size.w) .. "x" .. tostring(size.h) .. ":" .. tostring(item)
+    -- Object identity is deliberately excluded: repeated readImage() calls can
+    -- return distinct Lua wrappers for the same unchanged pasteboard image.
+    return tostring(size.w) .. "x" .. tostring(size.h) .. ":" .. tostring(item:encodeAsURLString():sub(1, 96))
 end
 
 local function captureCurrentClipboardImage(reason)
     if imageCaptureInProgress then return false end
+    local currentCount = pasteboard.changeCount()
     local ok, clipboardImage = pcall(pasteboard.readImage)
     if not ok or not clipboardImage then return false end
 
-    local signature = clipboardImageSignature(clipboardImage)
-    local changeCount = pasteboard.changeCount()
-    if changeCount == lastObservedPasteboardChangeCount and signature == lastObservedClipboardSignature then
+    local signatureOk, signature = pcall(clipboardImageSignature, clipboardImage)
+    if not signatureOk or not signature then return false end
+    if currentCount == lastObservedPasteboardChangeCount and signature == lastObservedClipboardSignature then
         return false
     end
 
-    -- Only accept a clipboard image after an observed pasteboard change or when
-    -- the watcher missed the notification entirely. The dimensions/signature
-    -- also prevent repeated polling from inserting the same unchanged image.
+    -- Don't duplicate an image already represented by the newest history entry.
     local newestImage = img_clipboard_history[#img_clipboard_history]
     local newestText = text_clipboard_history[#text_clipboard_history]
-    if newestImage and newestImage.imageObject and clipboardImageSignature(newestImage.imageObject) == signature
-        and (not newestText or newestImage.ts >= newestText.ts) then
-        lastObservedPasteboardChangeCount = changeCount
-        lastObservedClipboardSignature = signature
-        return false
+    if newestImage and newestImage.imageObject then
+        local newestSignatureOk, newestSignature = pcall(clipboardImageSignature, newestImage.imageObject)
+        if newestSignatureOk and newestSignature == signature and (not newestText or newestImage.ts >= newestText.ts) then
+            lastObservedPasteboardChangeCount = currentCount
+            lastObservedClipboardSignature = signature
+            return false
+        end
     end
 
-    lastObservedPasteboardChangeCount = changeCount
+    lastObservedPasteboardChangeCount = currentCount
     lastObservedClipboardSignature = signature
     logger.i("Recovered clipboard image from pasteboard polling (" .. tostring(reason or "poll") .. ")")
     pasteboardToClipboard("image", clipboardImage)
@@ -1762,9 +1765,23 @@ lastObservedClipboardSignature = clipboardImageSignature(pasteboard.readImage())
 clipboardImageRecoveryTimer = hs.timer.doEvery(0.75, function()
     local currentCount = pasteboard.changeCount()
     if currentCount ~= lastObservedPasteboardChangeCount then
+        local previousCount = lastObservedPasteboardChangeCount
+        -- The callback can fire before screenshot apps publish their image flavor.
+        -- Retry briefly after a change so the image can become readable.
         captureCurrentClipboardImage("change-count")
-    elseif not lastObservedClipboardSignature then
-        captureCurrentClipboardImage("image-appeared-late")
+        if currentCount ~= lastObservedPasteboardChangeCount then
+            lastObservedPasteboardChangeCount = currentCount
+        end
+        hs.timer.doAfter(0.18, function()
+            if pasteboard.changeCount() == currentCount then
+                captureCurrentClipboardImage("delayed-image-read")
+            end
+        end)
+    else
+        -- Even if the change count was observed, a screenshot provider can expose
+        -- its image representation a little later. Polling is image-only and
+        -- signature-deduplicated, so unchanged images won't be inserted again.
+        captureCurrentClipboardImage("periodic-image-check")
     end
 end)
 
