@@ -956,7 +956,7 @@ main:focus { outline:none; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
-.action.danger { color:#ff9b9b; }
+.action.danger { color:#991b1b; font-weight:650; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
 .load-more-wrap { grid-column:1 / -1; display:flex; justify-content:flex-start; padding:0 0 2px; }
 .item { position:relative; cursor:pointer; }
@@ -994,7 +994,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); border-top:1px solid var(--border); font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
-<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
+<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
@@ -1506,7 +1506,8 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
                         type = metadata.type, rowTs = metadata.ts, data = record.content,
                         historyKey = metadata.key, metadata = metadata,
                         historyEntry = metadata.type == "image" and {
-                            ts=metadata.ts, thumbnailData=loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath),
+                            ts=metadata.ts,
+                            thumbnailData=loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath),
                             thumbnailPath=record.thumbnailPath or metadata.thumbnailPath,
                             imagePath=record.imagePath, key=metadata.key
                         } or nil
@@ -1519,14 +1520,18 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
             end
         end
         searchResults = {}
-        local first = tonumber(requestedStart) or 1
-        if first < 1 then first = 1 end
-        local last = math.min(#matchingEntries, first + PAGE_SIZE - 1)
+        local first = 1
+        local last = #matchingEntries
+        if clipboard_date_filter == "all" then
+            first = tonumber(requestedStart) or 1
+            if first < 1 then first = 1 end
+            last = math.min(#matchingEntries, first + PAGE_SIZE - 1)
+        end
         for index = first, last do searchResults[#searchResults + 1] = matchingEntries[index] end
         local cards = {}
         for index, entry in ipairs(searchResults) do cards[#cards + 1] = historyItemHTML(entry, first + index - 1) end
         local cardsHTML = table.concat(cards, "\n")
-        local hasMore = (first + #searchResults) <= #matchingEntries
+        local hasMore = clipboard_date_filter == "all" and (first + #searchResults) <= #matchingEntries
         local loadMoreHTML = hasMore and
             '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
             (first + #searchResults) .. '">Load More</button></div>' or ''
