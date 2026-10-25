@@ -781,8 +781,9 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    matchingCount = persistentHistoryCount()
-    local hasMoreOnDisk = matchingCount > renderedCount
+    -- Opening the panel must not scan every daily file just to calculate a count.
+    matchingCount = math.max(matchingCount, #menuData)
+    local hasMoreOnDisk = allHistoryTotalCount == nil or allHistoryTotalCount > renderedCount
     local loadMoreHTML = hasMoreOnDisk and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         renderedCount .. '">Load more</button></div>' or ''
@@ -1405,14 +1406,10 @@ local function updateClipboardPanel(query,kind,offset,append)
     end
 
     local visibleCount=#matches
-    if query=="" then
-        if clipboardDateFilter then
-            visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
-        elseif allHistoryTotalCount then
-            visibleCount=kind=="all" and allHistoryTotalCount or #matches
-        else
-            visibleCount=#matches
-        end
+    if query=="" and clipboardDateFilter then
+        visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
+    elseif query=="" and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
+        if kind=="all" then visibleCount=allHistoryTotalCount end
     end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
