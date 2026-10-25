@@ -25,7 +25,6 @@ local PAGE_SIZE = 30
 local activeWindowStart = 1
 local activeWindowCount = PAGE_SIZE
 local allHistoryMetadata = {}
-local historyMetadataByKey = {}
 
 local text_clipboard_history = {}  -- Bounded active cache: text entries in the current 30-item window
 local img_clipboard_history = {}  -- Bounded active cache: image metadata in the current 30-item window
@@ -305,7 +304,6 @@ end
 
 local function scanPersistentHistoryMetadata()
     allHistoryMetadata = {}
-    historyMetadataByKey = {}
     if not fs.attributes(HISTORY_ROOT) then
         ensureDirectory(HISTORY_ROOT)
         return
@@ -330,7 +328,6 @@ local function scanPersistentHistoryMetadata()
                         }
                         metadata.key = historyRecordKey(metadata)
                         allHistoryMetadata[#allHistoryMetadata + 1] = metadata
-                        historyMetadataByKey[metadata.key] = metadata
                     end
                 end
                 records = nil
@@ -340,7 +337,10 @@ local function scanPersistentHistoryMetadata()
     if not ok then logger.w("Clipboard history metadata scan stopped safely: " .. tostring(err)) end
 
     table.sort(allHistoryMetadata, function(a, b)
-        if a.ts == b.ts then return a.key > b.key end
+        if a.ts == b.ts then
+            if a.dateKey == b.dateKey then return (a.recordIndex or 0) > (b.recordIndex or 0) end
+            return tostring(a.dateKey) > tostring(b.dateKey)
+        end
         return a.ts > b.ts
     end)
 end
@@ -435,7 +435,6 @@ local function clearClipboardHistory()
     img_clipboard_history = {}
     menuData = {}
     allHistoryMetadata = {}
-    historyMetadataByKey = {}
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -494,8 +493,7 @@ function pasteboardToClipboard(item_type, item)
         }
         metadata.key = historyRecordKey(metadata)
         table.insert(allHistoryMetadata, 1, metadata)
-        historyMetadataByKey[metadata.key] = metadata
-        loadWindowFromDisk(1)
+        if not (clipboard_webview and clipboard_webview:isVisible()) then loadWindowFromDisk(1) end
         return
     end
 
@@ -527,8 +525,7 @@ function pasteboardToClipboard(item_type, item)
         }
         metadata.key = historyRecordKey(metadata)
         table.insert(allHistoryMetadata, 1, metadata)
-        historyMetadataByKey[metadata.key] = metadata
-        loadWindowFromDisk(1)
+        if not (clipboard_webview and clipboard_webview:isVisible()) then loadWindowFromDisk(1) end
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
@@ -608,6 +605,7 @@ end
 
 -- restore the newest clipboard content
 function restoreNewestClipContent()
+    loadWindowFromDisk(1)
     local newest = allHistoryMetadata[1]
     if not newest then return end
     if newest.type == "image" then
