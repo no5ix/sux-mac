@@ -1509,7 +1509,7 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
-        local entry = clipboard_search ~= "" and searchResults and searchResults[index] or (index and menuData[index])
+        local entry = (clipboard_search ~= "" and searchResults and searchResults[index]) or (index and menuData[index])
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
@@ -1529,7 +1529,7 @@ function handleClipboardPanelMessage(message)
         end
     elseif body.action == "loadImagePreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = (clipboard_search ~= "" and searchResults and searchResults[index]) or (index and menuData[index])
         local historyEntry = entry and entry.historyEntry
         local image = historyEntry and decodeImage(historyEntry)
         if image and clipboard_webview then
