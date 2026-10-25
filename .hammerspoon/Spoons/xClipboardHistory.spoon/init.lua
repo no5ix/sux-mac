@@ -302,6 +302,87 @@ local function historyRecordKey(record)
         tostring(record.dateKey or "") .. ":" .. tostring(record.recordIndex or record.imagePath or "")
 end
 
+local function historyIndexPath(dateKey)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-index.json"
+end
+
+local function historyEntryPath(dateKey, recordIndex)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-entry-" ..
+        string.format("%06d", recordIndex) .. ".json"
+end
+
+local function readHistoryIndex(dateKey)
+    local indexPath = historyIndexPath(dateKey)
+    local file = io.open(indexPath, "rb")
+    if file then
+        local raw = file:read("*a")
+        file:close()
+        local ok, entries = pcall(json.decode, raw or "")
+        if ok and type(entries) == "table" then return entries end
+        logger.w("Invalid clipboard history index; rebuilding it: " .. indexPath)
+    end
+
+    -- Backward-compatible one-time migration from the old daily JSON file.
+    -- Legacy content is decoded transiently, then split into per-entry records.
+    local legacyRecords = readDayHistory(dateKey)
+    local entries = {}
+    for legacyIndex, record in ipairs(legacyRecords) do
+        local timestamp = tonumber(record.ts)
+        if timestamp and
+            ((record.type == "text" and type(record.content) == "string") or
+             (record.type == "image" and type(record.imagePath) == "string")) then
+            local recordIndex = legacyIndex
+            local path = historyEntryPath(dateKey, recordIndex)
+            local encodedOK, encoded = pcall(json.encode, record, true)
+            if encodedOK and type(encoded) == "string" then
+                local saved, saveError = atomicWrite(path, encoded)
+                if not saved then
+                    logger.w("Could not migrate clipboard record " .. path .. ": " .. tostring(saveError))
+                else
+                    entries[#entries + 1] = {
+                        type = record.type,
+                        ts = timestamp,
+                        dateKey = dateKey,
+                        recordIndex = recordIndex,
+                        recordPath = path,
+                        imagePath = record.type == "image" and record.imagePath or nil,
+                        thumbnailPath = record.thumbnailPath
+                    }
+                end
+            end
+        end
+    end
+    local encodedOK, encoded = pcall(json.encode, entries, true)
+    if encodedOK and type(encoded) == "string" then
+        local saved, saveError = atomicWrite(indexPath, encoded)
+        if not saved then logger.w("Could not save clipboard history index: " .. tostring(saveError)) end
+    end
+    legacyRecords = nil
+    return entries
+end
+
+local function writeHistoryIndex(dateKey, entries)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
+    local encodedOK, encoded = pcall(json.encode, entries, true)
+    if not encodedOK or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history index for " .. dateKey)
+        return false
+    end
+    return atomicWrite(historyIndexPath(dateKey), encoded)
+end
+
+local function readHistoryEntryRecord(metadata)
+    if not metadata then return nil end
+    local path = metadata.recordPath or historyEntryPath(metadata.dateKey, metadata.recordIndex)
+    local file = io.open(path, "rb")
+    if not file then return nil end
+    local raw = file:read("*a")
+    file:close()
+    if not raw or raw == "" then return nil end
+    local ok, record = pcall(json.decode, raw)
+    return ok and type(record) == "table" and record or nil
+end
+
 local function scanPersistentHistoryMetadata()
     allHistoryMetadata = {}
     if not fs.attributes(HISTORY_ROOT) then
@@ -312,25 +393,22 @@ local function scanPersistentHistoryMetadata()
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
             if validDateKey(name) then
-                local records = readDayHistory(name)
-                for recordIndex, record in ipairs(records) do
-                    local timestamp = tonumber(record.ts)
-                    if timestamp and
-                        ((record.type == "text" and type(record.content) == "string") or
-                         (record.type == "image" and type(record.imagePath) == "string")) then
+                for _, descriptor in ipairs(readHistoryIndex(name)) do
+                    local timestamp = tonumber(descriptor.ts)
+                    if timestamp and type(descriptor.recordPath) == "string" then
                         local metadata = {
-                            type = record.type,
+                            type = descriptor.type,
                             ts = timestamp,
                             dateKey = name,
-                            recordIndex = recordIndex,
-                            imagePath = record.type == "image" and record.imagePath or nil,
-                            thumbnailPath = record.type == "image" and record.thumbnailPath or nil
+                            recordIndex = tonumber(descriptor.recordIndex),
+                            recordPath = descriptor.recordPath,
+                            imagePath = descriptor.type == "image" and descriptor.imagePath or nil,
+                            thumbnailPath = descriptor.type == "image" and descriptor.thumbnailPath or nil
                         }
                         metadata.key = historyRecordKey(metadata)
                         allHistoryMetadata[#allHistoryMetadata + 1] = metadata
                     end
                 end
-                records = nil
             end
         end
     end)
