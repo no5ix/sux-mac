@@ -1357,7 +1357,7 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local js
     if append then
-        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e&&"..tostring(#matches>0)..")e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");"
+        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");"
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
@@ -1704,6 +1704,8 @@ function showClipboardHistory()
         "main.innerHTML=" .. jsStringLiteral(initialCardsHTML .. loadMoreHTML) .. ";" ..
         "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
         "document.getElementById('search').value='';" ..
+        "document.querySelectorAll('.date-filter').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.action==='dateScope'?'true':'false');});" ..
+        "document.querySelectorAll('.type-filter').forEach(function(b){b.setAttribute('aria-pressed','false');});" ..
         "document.body.classList.add('keyboard-mode');" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
     view:evaluateJavaScript(updateScript, function(result, error)
