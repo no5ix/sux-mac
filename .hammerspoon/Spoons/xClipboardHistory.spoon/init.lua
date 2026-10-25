@@ -1388,8 +1388,20 @@ local function updateClipboardPanel(query,kind,offset,append)
     local previousMenuDataCount=append and #menuData or 0
 
     if query~="" then
-        menuData=searchPersistentHistory(query,kind)
-        browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
+        -- Apply the submitted query inside the active date scope when one is selected.
+        if clipboardDateFilter then
+            local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
+            menuData={}
+            for _,entry in ipairs(dayEntries) do
+                if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+            end
+            table.sort(menuData,function(a,b)return a.ts>b.ts end)
+            browseMode="date"
+        else
+            menuData=searchPersistentHistory(query,kind)
+            browseMode="search"
+        end
+        browseCursor=0
     elseif clipboardDateFilter then
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
@@ -1463,12 +1475,13 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or "",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         local query=tostring(body.query or "")
-        if body.action=="search" and query~=clipboard_search then
+        if body.action=="search" and query~=clipboard_search and query~="" then
+            -- A newly submitted query starts from All Dates; date buttons later
+            -- pass this committed query through the dateFilter action.
             clipboardDateFilter=nil
             allDatesFilterSelected=false
         end
         local kind=body.kind or clipboard_type_filter or "all"
-        if clipboardDateFilter then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
