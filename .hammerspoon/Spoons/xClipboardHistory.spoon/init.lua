@@ -1347,7 +1347,7 @@ function handleClipboardPanelMessage(message)
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
-            local content = tostring(entry.data or "")
+            local content = tostring(entry.data or entry.content or "")
             for line in (content .. "\n"):gmatch("(.-)\n") do
                 lineCount = lineCount + 1
                 if lineCount > TEXT_HOVER_MAX_LINES then break end
@@ -1488,7 +1488,7 @@ local function pasteAllRowsStep(row)
     if entry.type == "text" then
         wroteContent = pasteboard.setContents(entry.data .. "\n") ~= false
     else
-        local image = decodeImage(entry.historyEntry)
+        local image = decodeImage(entry.historyEntry or entry)
         if image then
             wroteContent = pasteboard.writeObjects(image) ~= false
         else
