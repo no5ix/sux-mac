@@ -40,6 +40,7 @@ local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 32
 local CLIPBOARD_CACHE_SIZE = 32
 local clipboardDateFilter = nil
+local lastSearchRestoreDateKey = nil
 local browseCursor = 0
 local browseMode = "all"
 local typeBrowseCursor = {text = nil, image = nil}
@@ -1524,13 +1525,15 @@ function handleClipboardPanelMessage(message)
         local query=tostring(body.query or "")
         local kind=body.kind or clipboard_type_filter or "all"
         if body.action=="search" and query~=clipboard_search then
-            -- Remember the previous scope before a global search. New searches
-            -- always start in All Dates; result dates are not inferred as a filter.
-            if clipboardDateFilter then
-                -- Keep the last explicit date scope available when clearing the query.
+            if query=="" then
+                -- Clear-query requests should restore the previous chosen date scope.
+                if lastSearchRestoreDateKey then clipboardDateFilter=lastSearchRestoreDateKey
+                else clipboardDateFilter=nil end
+            else
+                if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
+                clipboardDateFilter=nil
+                allDatesFilterSelected=true
             end
-            clipboardDateFilter=nil
-            allDatesFilterSelected=true
         end
         updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
