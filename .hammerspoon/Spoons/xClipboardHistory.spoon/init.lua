@@ -1104,8 +1104,8 @@ function setActiveFilter(button) {
   document.querySelectorAll('.type-filter').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
-  // Keep the date-scope highlight unchanged while toggling type.
-  bridge('search', 0, search.value, currentTypeFilter());
+  // Keep the selected date highlighted while applying the new type.
+  bridge(clipboardDateFilter ? 'filter' : 'search', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
   if (searchTimer) clearTimeout(searchTimer);
