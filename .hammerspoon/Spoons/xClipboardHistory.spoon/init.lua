@@ -868,22 +868,16 @@ document.addEventListener('click', event => {
     if (action === 'dateScope' || action === 'dateFilter') {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
       const selectedKind = currentTypeFilter();
-      if (action === 'dateScope') {
+      if (action === 'dateScope' || wasSelected) {
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = true;
         button.setAttribute('aria-pressed','true');
-        bridge('showLatest',0,'',selectedKind);
-      } else if (wasSelected) {
-        // Clicking the current date again returns to All Dates.
-        document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-        document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
-        allDatesFilterSelected = true;
         bridge('showLatest',0,'',selectedKind);
       } else {
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = false;
         button.setAttribute('aria-pressed','true');
-        bridge('dateFilter',0,'','all',button.dataset.dateKey);
+        bridge('dateFilter',0,'',selectedKind,button.dataset.dateKey);
       }
       return;
     }
@@ -1370,8 +1364,9 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "dateFilter" then
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
-        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
-        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("","all",0,false)
+        local kind=body.kind or "all"
+        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter=kind
+        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("",kind,0,false)
     elseif body.action == "showLatest" then
         clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"; browseCursor=0
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
