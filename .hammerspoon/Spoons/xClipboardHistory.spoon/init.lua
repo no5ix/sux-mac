@@ -380,6 +380,8 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    allHistoryMetadata = {}
+    historyMetadataByKey = {}
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -749,16 +751,11 @@ end
 local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
-    offset = math.max(0, tonumber(offset) or 0)
-    -- Render the loaded 30-item window. Filtering never fetches additional records.
-    local batchSize = PAGE_SIZE
-    local last = math.min(#matches, offset + batchSize)
-    for position = offset + 1, last do
-        local index = matches[position]
+    for _, index in ipairs(matches) do
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
     visibleIndices = matches
-    return table.concat(cards, "\n"), #matches, last
+    return table.concat(cards, "\n"), #matches, #matches
 end
 
 function clipboardPanelHTML()
@@ -1326,7 +1323,7 @@ local function updateClipboardPanel(query, kind, offset, append)
     local hasMore = kind ~= "none" and (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata
     local loadMoreHTML = hasMore and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        (activeWindowStart + PAGE_SIZE - 1) .. '">Load More</button></div>' or ''
+        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
     if cardsHTML == "" and not append then
         cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>'
     end
@@ -1608,8 +1605,9 @@ function showClipboardHistory()
         end)
         return
     end
-    -- Run daily retention cleanup when the panel is first requested that day too.
+    -- Refresh lightweight disk metadata on open; hydrate only the newest page.
     runDailyCleanupIfNeeded()
+    scanPersistentHistoryMetadata()
     -- Initialize defensively in case the watcher was torn down during reload.
     if not pasteboard_watcher then
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
