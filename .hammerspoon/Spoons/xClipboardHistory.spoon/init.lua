@@ -153,6 +153,51 @@ local function writeDayHistory(dateKey, records)
     return atomicWrite(historyJSONPath(dateKey), encoded)
 end
 
+local function saveThumbnailFile(dateKey, item, timestamp)
+    local directory = historyImageDirectory(dateKey)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
+        return nil
+    end
+    local baseName = os.date("%Y%m%d%H%M%S", timestamp) .. "-thumb"
+    local path = directory .. "/" .. baseName .. ".png"
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. ".png"
+    end
+    local ok, saved = pcall(function()
+        local size = item:size()
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
+        if width <= 0 or height <= 0 then return false end
+        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+        local thumbnail = item:bitmapRepresentation({
+            w = math.max(1, math.floor(width * scale + 0.5)),
+            h = math.max(1, math.floor(height * scale + 0.5))
+        })
+        if not thumbnail then return false end
+        local result = thumbnail:saveToFile(path, false, "PNG")
+        thumbnail = nil
+        return result == true
+    end)
+    if not ok or not saved then
+        os.remove(path)
+        logger.w("Unable to save clipboard thumbnail: " .. tostring(saved))
+        return nil
+    end
+    return path
+end
+
+local function loadThumbnailData(path)
+    if type(path) ~= "string" then return "" end
+    local file = io.open(path, "rb")
+    if not file then return "" end
+    local bytes = file:read("*a")
+    file:close()
+    if not bytes or #bytes == 0 then return "" end
+    return "data:image/png;base64," .. hs.base64.encode(bytes)
+end
+
 local function persistClipboardEntry(itemType, content, timestamp)
     timestamp = timestamp or os.time()
     local dateKey = localDateKey(timestamp)
@@ -324,10 +369,18 @@ local function loadWindowFromDisk(startIndex)
                     ts = metadata.ts, content = record.content, key = metadata.key
                 }
             elseif metadata.type == "image" and type(record.imagePath) == "string" then
+                local thumbnailPath = type(record.thumbnailPath) == "string" and record.thumbnailPath or nil
+                local thumbnailData = ""
+                if thumbnailPath then
+                    thumbnailData = loadThumbnailData(thumbnailPath)
+                elseif type(record.thumbnailData) == "string" then
+                    -- Backward compatibility with older daily JSON records.
+                    thumbnailData = record.thumbnailData
+                end
                 img_clipboard_history[#img_clipboard_history + 1] = {
                     ts = metadata.ts, imagePath = record.imagePath,
-                    thumbnailPath = metadata.thumbnailPath,
-                    thumbnailData = type(record.thumbnailData) == "string" and record.thumbnailData or "",
+                    thumbnailPath = thumbnailPath,
+                    thumbnailData = thumbnailData,
                     key = metadata.key
                 }
             end
@@ -454,27 +507,11 @@ function pasteboardToClipboard(item_type, item)
             return
         end
 
-        local thumbnailData = ""
-        local thumbnailOK, generated = pcall(function()
-            local size = item:size()
-            local width = tonumber(size and size.w) or 0
-            local height = tonumber(size and size.h) or 0
-            if width <= 0 or height <= 0 then return "" end
-            local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-            local thumbnail = item:bitmapRepresentation({
-                w = math.max(1, math.floor(width * scale + 0.5)),
-                h = math.max(1, math.floor(height * scale + 0.5))
-            })
-            local encoded = thumbnail and thumbnail:encodeAsURLString() or ""
-            thumbnail = nil
-            return encoded
-        end)
-        thumbnailData = thumbnailOK and generated or ""
-
+        local thumbnailPath = saveThumbnailFile(dateKey, item, cur_ts)
         local records = readDayHistory(dateKey)
         records[#records + 1] = {
             type = "image", ts = cur_ts, imagePath = imagePath,
-            thumbnailData = thumbnailData ~= "" and thumbnailData or nil
+            thumbnailPath = thumbnailPath
         }
         local recordIndex = #records
         if not writeDayHistory(dateKey, records) then
@@ -484,7 +521,8 @@ function pasteboardToClipboard(item_type, item)
 
         local metadata = {
             type = "image", ts = cur_ts, dateKey = dateKey,
-            recordIndex = recordIndex, imagePath = imagePath
+            recordIndex = recordIndex, imagePath = imagePath,
+            thumbnailPath = thumbnailPath
         }
         metadata.key = historyRecordKey(metadata)
         table.insert(allHistoryMetadata, 1, metadata)
