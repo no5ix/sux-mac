@@ -663,13 +663,15 @@ local function ensureAllHistoryCache(requiredCount)
         allHistoryCacheLoaded=#allHistoryCache
     end
     while allHistoryCacheLoaded<requiredCount and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount) do
-        local nextPage=loadPersistentHistoryPage(allHistoryCacheLoaded,CLIPBOARD_RENDER_BATCH_SIZE,nil)
+        local before=allHistoryCacheLoaded
+        local nextPage=loadPersistentHistoryPage(before,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         if #nextPage==0 then
             allHistoryTotalCount=allHistoryCacheLoaded
             break
         end
         for _,entry in ipairs(nextPage) do allHistoryCache[#allHistoryCache+1]=entry end
         allHistoryCacheLoaded=#allHistoryCache
+        -- Exhaustion is known only when the disk loader returns fewer than a full page.
         if #nextPage<CLIPBOARD_RENDER_BATCH_SIZE then
             allHistoryTotalCount=allHistoryCacheLoaded
         end
