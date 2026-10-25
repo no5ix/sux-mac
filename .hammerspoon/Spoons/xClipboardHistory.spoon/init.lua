@@ -21,14 +21,21 @@ local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
 local imageProcessingCount = 0
+local PAGE_SIZE = 32
+local activeWindowStart = 1
+local activeWindowCount = PAGE_SIZE
+local allHistoryMetadata = {}
+local searchResults = nil
 
-local text_clipboard_history = {}  -- Array to store the clipboard history for text
-local img_clipboard_history = {}  -- Array to store the clipboard history for img
-local menuData = {}  -- Clipboard history data
+local text_clipboard_history = {}  -- Bounded active cache: text entries in the current 32-item window
+local img_clipboard_history = {}  -- Bounded active cache: image metadata in the current 32-item window
+local menuData = {}  -- Only the current window, plus a temporary Load More window while browsing
 local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
+local clipboard_date_filter = "all" -- "all", "today", "yesterday", or "older"
+local loadedHistoryCount = PAGE_SIZE
 local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
@@ -37,7 +44,7 @@ local suppressFocusDismiss = false
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
-local CLIPBOARD_RENDER_BATCH_SIZE = 60
+local CLIPBOARD_RENDER_BATCH_SIZE = PAGE_SIZE
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -123,6 +130,53 @@ local function saveImageFile(dateKey, item, timestamp)
     end
     return path
 end
+
+local function saveThumbnailFile(dateKey, item, timestamp)
+    local directory = historyImageDirectory(dateKey)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
+        return nil
+    end
+    local baseName = os.date("%Y%m%d%H%M%S", timestamp) .. "-thumb"
+    local path = directory .. "/" .. baseName .. ".png"
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-thumb-" .. string.format("%03d", counter) .. ".png"
+    end
+
+    local ok, saved = pcall(function()
+        local size = item:size()
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
+        if width <= 0 or height <= 0 then return false end
+        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+        local thumbnail = item:bitmapRepresentation({
+            w = math.max(1, math.floor(width * scale + 0.5)),
+            h = math.max(1, math.floor(height * scale + 0.5))
+        })
+        if not thumbnail then return false end
+        local result = thumbnail:saveToFile(path, false, "PNG")
+        thumbnail = nil
+        return result == true
+    end)
+    if not ok or not saved then
+        os.remove(path)
+        logger.w("Unable to save clipboard thumbnail: " .. tostring(saved))
+        return nil
+    end
+    return path
+end
+
+local function loadThumbnailData(path)
+    if type(path) ~= "string" then return "" end
+    local file = io.open(path, "rb")
+    if not file then return "" end
+    local bytes = file:read("*a")
+    file:close()
+    if not bytes or #bytes == 0 then return "" end
+    return "data:image/png;base64," .. hs.base64.encode(bytes)
+end
+
 local function readDayHistory(dateKey)
     local path = historyJSONPath(dateKey)
     local file = io.open(path, "rb")
@@ -136,40 +190,6 @@ local function readDayHistory(dateKey)
         return {}
     end
     return records
-end
-
-local function writeDayHistory(dateKey, records)
-    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
-    local encodedOk, encoded = pcall(json.encode, records, true)
-    if not encodedOk or type(encoded) ~= "string" then
-        logger.e("Unable to encode clipboard history JSON for " .. dateKey)
-        return false
-    end
-    return atomicWrite(historyJSONPath(dateKey), encoded)
-end
-
-local function persistClipboardEntry(itemType, content, timestamp)
-    timestamp = timestamp or os.time()
-    local dateKey = localDateKey(timestamp)
-    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
-    -- Daily cleanup runs at startup and on the first copy observed each date.
-    local records = readDayHistory(dateKey)
-    local record = {type=itemType, ts=timestamp}
-    if itemType == "text" then
-        record.content = content
-    elseif itemType == "image" then
-        local imagePath = saveImageFile(dateKey, content, timestamp)
-        if not imagePath then return false end
-        record.imagePath = imagePath
-    else
-        return false
-    end
-    records[#records + 1] = record
-    if not writeDayHistory(dateKey, records) then
-        if record.imagePath then os.remove(record.imagePath) end
-        return false
-    end
-    return true, record.imagePath
 end
 
 local function removeExpiredHistoryDirectories(todayKey)
@@ -244,97 +264,217 @@ end
 -- These limits must be declared before restorePersistentHistory(), because
 -- that function references them when the Spoon is loaded at the bottom of
 -- this file. A later local declaration would be out of scope and evaluate to nil.
-local max_history_size_for_text = 10000
-local max_history_size_for_img = 100
+local max_history_size_for_text = PAGE_SIZE
+local max_history_size_for_img = PAGE_SIZE
 local display_max_text_length = 200
 
-local function restorePersistentHistory()
-    text_clipboard_history = {}
-    img_clipboard_history = {}
-    if not fs.attributes(HISTORY_ROOT) then
-        if not ensureDirectory(HISTORY_ROOT) then
-            logger.w("Skipping clipboard history restore because the history directory cannot be created")
+local function historyRecordKey(record)
+    return tostring(record.type) .. ":" .. tostring(record.ts) .. ":" ..
+        tostring(record.dateKey or "") .. ":" .. tostring(record.recordIndex or record.imagePath or "")
+end
+
+local function historyIndexPath(dateKey)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-index.json"
+end
+
+local function historyEntryPath(dateKey, recordIndex)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-entry-" ..
+        string.format("%06d", recordIndex) .. ".json"
+end
+
+local function readHistoryIndex(dateKey)
+    local indexPath = historyIndexPath(dateKey)
+    local file = io.open(indexPath, "rb")
+    if file then
+        local raw = file:read("*a")
+        file:close()
+        local ok, entries = pcall(json.decode, raw or "")
+        if ok and type(entries) == "table" then return entries end
+        logger.w("Invalid clipboard history index; rebuilding it: " .. indexPath)
+    end
+
+    -- Backward-compatible one-time migration from the old daily JSON file.
+    -- Legacy content is decoded transiently, then split into per-entry records.
+    local legacyRecords = readDayHistory(dateKey)
+    local entries = {}
+    for legacyIndex, record in ipairs(legacyRecords) do
+        local timestamp = tonumber(record.ts)
+        if timestamp and
+            ((record.type == "text" and type(record.content) == "string") or
+             (record.type == "image" and type(record.imagePath) == "string")) then
+            local recordIndex = legacyIndex
+            local path = historyEntryPath(dateKey, recordIndex)
+            local encodedOK, encoded = pcall(json.encode, record, true)
+            if encodedOK and type(encoded) == "string" then
+                local saved, saveError = atomicWrite(path, encoded)
+                if not saved then
+                    logger.w("Could not migrate clipboard record " .. path .. ": " .. tostring(saveError))
+                else
+                    entries[#entries + 1] = {
+                        type = record.type,
+                        ts = timestamp,
+                        dateKey = dateKey,
+                        recordIndex = recordIndex,
+                        recordPath = path,
+                        imagePath = record.type == "image" and record.imagePath or nil,
+                        thumbnailPath = record.thumbnailPath
+                    }
+                end
+            end
         end
+    end
+    local encodedOK, encoded = pcall(json.encode, entries, true)
+    if encodedOK and type(encoded) == "string" then
+        local saved, saveError = atomicWrite(indexPath, encoded)
+        if not saved then logger.w("Could not save clipboard history index: " .. tostring(saveError)) end
+    end
+    legacyRecords = nil
+    return entries
+end
+
+local function writeHistoryIndex(dateKey, entries)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
+    local encodedOK, encoded = pcall(json.encode, entries, true)
+    if not encodedOK or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history index for " .. dateKey)
+        return false
+    end
+    return atomicWrite(historyIndexPath(dateKey), encoded)
+end
+
+local function readHistoryEntryRecord(metadata)
+    if not metadata then return nil end
+    local path = metadata.recordPath or historyEntryPath(metadata.dateKey, metadata.recordIndex)
+    local file = io.open(path, "rb")
+    if not file then return nil end
+    local raw = file:read("*a")
+    file:close()
+    if not raw or raw == "" then return nil end
+    local ok, record = pcall(json.decode, raw)
+    return ok and type(record) == "table" and record or nil
+end
+
+local function scanPersistentHistoryMetadata()
+    allHistoryMetadata = {}
+    if not fs.attributes(HISTORY_ROOT) then
+        ensureDirectory(HISTORY_ROOT)
         return
     end
 
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
             if validDateKey(name) then
-                for _, record in ipairs(readDayHistory(name)) do
-                    local timestamp = tonumber(record.ts)
-                    if timestamp and record.type == "text" and type(record.content) == "string" then
-                        text_clipboard_history[#text_clipboard_history + 1] = {ts=timestamp, content=record.content}
-                    elseif timestamp and record.type == "image" and type(record.imagePath) == "string" then
-                        local file = io.open(record.imagePath, "rb")
-                        if file then
-                            local bytes = file:read("*a")
-                            file:close()
-                            if bytes and #bytes > 0 then
-                                local fileExtension = record.imagePath:match("%.([%w]+)$") or "png"
-                                local mimeByExtension = {
-                                    png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif",
-                                    webp="image/webp", tiff="image/tiff", bmp="image/bmp"
-                                }
-                                local mimeType = mimeByExtension[string.lower(fileExtension)] or "image/png"
-                                local imageData = "data:" .. mimeType .. ";base64," .. hs.base64.encode(bytes)
-                                local imageOK, imageObject = pcall(hs.image.imageFromURL, imageData)
-                                if imageOK and imageObject then
-                                    local size = imageObject:size()
-                                    local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
-                                    local thumbnailData = ""
-                                    if width > 0 and height > 0 then
-                                        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-                                        local thumbnail = imageObject:bitmapRepresentation({
-                                            w=math.max(1, math.floor(width*scale+0.5)),
-                                            h=math.max(1, math.floor(height*scale+0.5))
-                                        })
-                                        if thumbnail then thumbnailData = thumbnail:encodeAsURLString() end
-                                    end
-                                    img_clipboard_history[#img_clipboard_history + 1] = {
-                                        ts=timestamp, imageObject=imageObject, thumbnailData=thumbnailData,
-                                        imagePath=record.imagePath
-                                    }
-                                end
-                            end
-                        end
+                for _, descriptor in ipairs(readHistoryIndex(name)) do
+                    local timestamp = tonumber(descriptor.ts)
+                    if timestamp and type(descriptor.recordPath) == "string" then
+                        local metadata = {
+                            type = descriptor.type,
+                            ts = timestamp,
+                            dateKey = name,
+                            recordIndex = tonumber(descriptor.recordIndex),
+                            recordPath = descriptor.recordPath,
+                            imagePath = descriptor.type == "image" and descriptor.imagePath or nil,
+                            thumbnailPath = descriptor.type == "image" and descriptor.thumbnailPath or nil
+                        }
+                        metadata.key = historyRecordKey(metadata)
+                        allHistoryMetadata[#allHistoryMetadata + 1] = metadata
                     end
                 end
             end
         end
     end)
-    if not ok then
-        logger.w("Clipboard history restore stopped safely: " .. tostring(err))
-    end
-    -- Defensively filter and normalize timestamps before sorting. Never let
-    -- malformed historical records reach the comparator.
-    local function normalizeAndSortHistory(history)
-        local validEntries = {}
-        for _, entry in ipairs(history) do
-            local timestamp = type(entry) == "table" and tonumber(entry.ts) or nil
-            if timestamp then
-                entry.ts = timestamp
-                validEntries[#validEntries + 1] = entry
-            else
-                logger.w("Skipping clipboard history entry with an invalid timestamp")
+    if not ok then logger.w("Clipboard history metadata scan stopped safely: " .. tostring(err)) end
+
+    table.sort(allHistoryMetadata, function(a, b)
+        if a.ts == b.ts then
+            if a.dateKey == b.dateKey then return (a.recordIndex or 0) > (b.recordIndex or 0) end
+            return tostring(a.dateKey) > tostring(b.dateKey)
+        end
+        return a.ts > b.ts
+    end)
+end
+
+local function loadWindowFromDisk(startIndex)
+    startIndex = math.max(1, tonumber(startIndex) or 1)
+    activeWindowStart = startIndex
+    activeWindowCount = PAGE_SIZE
+    text_clipboard_history = {}
+    img_clipboard_history = {}
+    menuData = {}
+
+    local last = math.min(#allHistoryMetadata, startIndex + PAGE_SIZE - 1)
+    for index = startIndex, last do
+        local metadata = allHistoryMetadata[index]
+        local record = readHistoryEntryRecord(metadata)
+        if record and tonumber(record.ts) == metadata.ts and record.type == metadata.type then
+            if metadata.type == "text" and type(record.content) == "string" then
+                text_clipboard_history[#text_clipboard_history + 1] = {
+                    ts = metadata.ts, content = record.content, key = metadata.key
+                }
+            elseif metadata.type == "image" and type(record.imagePath) == "string" then
+                local thumbnailPath = type(record.thumbnailPath) == "string" and record.thumbnailPath or metadata.thumbnailPath
+                local thumbnailData = ""
+                if thumbnailPath then
+                    thumbnailData = loadThumbnailData(thumbnailPath)
+                elseif type(record.thumbnailData) == "string" then
+                    -- Legacy migrated entry: only this visible entry's thumbnail is loaded.
+                    thumbnailData = record.thumbnailData
+                end
+                img_clipboard_history[#img_clipboard_history + 1] = {
+                    ts = metadata.ts, imagePath = record.imagePath,
+                    thumbnailPath = thumbnailPath, thumbnailData = thumbnailData,
+                    key = metadata.key
+                }
             end
         end
-        table.sort(validEntries, function(a, b)
-            return (tonumber(a.ts) or 0) < (tonumber(b.ts) or 0)
-        end)
-        return validEntries
     end
-    text_clipboard_history = normalizeAndSortHistory(text_clipboard_history)
-    img_clipboard_history = normalizeAndSortHistory(img_clipboard_history)
-    while #text_clipboard_history > max_history_size_for_text do table.remove(text_clipboard_history, 1) end
-    while #img_clipboard_history > max_history_size_for_img do table.remove(img_clipboard_history, 1) end
+    collectgarbage("collect")
+end
+
+local function insertHistoryMetadata(metadata)
+    local panelVisible = clipboard_webview and clipboard_webview:isVisible()
+    local currentWindowKey = panelVisible and allHistoryMetadata[activeWindowStart]
+        and allHistoryMetadata[activeWindowStart].key or nil
+    table.insert(allHistoryMetadata, 1, metadata)
+
+    if panelVisible and currentWindowKey then
+        -- Preserve the visible page after newer entries shift global offsets.
+        for index, record in ipairs(allHistoryMetadata) do
+            if record.key == currentWindowKey then
+                activeWindowStart = index
+                break
+            end
+        end
+    else
+        -- Also refresh an empty visible panel when its first item arrives.
+        loadWindowFromDisk(1)
+    end
+end
+
+local function restorePersistentHistory()
+    scanPersistentHistoryMetadata()
+    loadWindowFromDisk(1)
 end
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
 local function decodeImage(entry)
     if not entry then return nil end
-    if entry.imageObject then return entry.imageObject end
-    if entry.imageData then return hs.image.imageFromURL(entry.imageData) end
+    if entry.imagePath then
+        local file = io.open(entry.imagePath, "rb")
+        if not file then return nil end
+        local bytes = file:read("*a")
+        file:close()
+        if not bytes or #bytes == 0 then return nil end
+        local ext = string.lower(entry.imagePath:match("%.([%w]+)$") or "png")
+        local mime = ({png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif", webp="image/webp", tiff="image/tiff", bmp="image/bmp"})[ext] or "image/png"
+        local dataURL = "data:" .. mime .. ";base64," .. hs.base64.encode(bytes)
+        local ok, result = pcall(hs.image.imageFromURL, dataURL)
+        if ok then return result end
+    end
+    if entry.imageData then
+        local ok, result = pcall(hs.image.imageFromURL, entry.imageData)
+        if ok then return result end
+    end
     return nil
 end
 
@@ -354,6 +494,9 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    searchResults = nil
+    clipboard_search = ""
+    allHistoryMetadata = {}
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -401,62 +544,77 @@ end
 -- local last_change = pasteboard.changeCount() -- keeps track of how many times the pasteboard owner has changed // Indicates a new copy has been made
 
 -- Add the given string to the history
+local function appendPersistentEntry(dateKey, record)
+    local entries = readHistoryIndex(dateKey)
+    local nextIndex = 1
+    for _, entry in ipairs(entries) do
+        nextIndex = math.max(nextIndex, (tonumber(entry.recordIndex) or 0) + 1)
+    end
+
+    local path = historyEntryPath(dateKey, nextIndex)
+    local encodedOK, encoded = pcall(json.encode, record, true)
+    if not encodedOK or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history entry for " .. dateKey)
+        return nil
+    end
+    if not atomicWrite(path, encoded) then
+        logger.e("Unable to write clipboard history entry: " .. path)
+        return nil
+    end
+
+    local descriptor = {
+        type = record.type,
+        ts = tonumber(record.ts),
+        dateKey = dateKey,
+        recordIndex = nextIndex,
+        recordPath = path,
+        imagePath = record.type == "image" and record.imagePath or nil,
+        thumbnailPath = record.type == "image" and record.thumbnailPath or nil
+    }
+    descriptor.key = historyRecordKey(descriptor)
+    entries[#entries + 1] = descriptor
+    if not writeHistoryIndex(dateKey, entries) then
+        os.remove(path)
+        logger.e("Unable to update clipboard history index for " .. dateKey)
+        return nil
+    end
+    return descriptor
+end
+
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
     if item_type == "text" then
-        table.insert(text_clipboard_history, {ts=cur_ts, content=item})
-        persistClipboardEntry("text", item, cur_ts)
+        local dateKey = localDateKey(cur_ts)
+        local metadata = appendPersistentEntry(dateKey, {type = "text", ts = cur_ts, content = item})
+        if not metadata then return end
+        insertHistoryMetadata(metadata)
         return
     end
 
-    -- Keep image handling simple and synchronous inside the pasteboard watcher:
-    -- insert -> save PNG -> create thumbnail -> write the history record.
     imageProcessingCount = imageProcessingCount + 1
-    local processingOK, processingError = pcall(function()
-        local entry = {
-            ts = cur_ts,
-            imageObject = item,
-            thumbnailData = "",
-            imagePath = nil,
-            thumbnailPending = true
-        }
-        table.insert(img_clipboard_history, entry)
-
+    local ok, err = pcall(function()
         local dateKey = localDateKey(cur_ts)
         local imagePath = saveImageFile(dateKey, item, cur_ts)
-        entry.imagePath = imagePath
         if not imagePath then
-            logger.e("Clipboard screenshot could not be saved; keeping it in memory")
+            logger.e("Clipboard screenshot could not be saved; image was not added to the persistent history")
+            return
         end
 
-        local thumbnailOK, thumbnailData = pcall(function()
-            local size = item:size()
-            local width = tonumber(size and size.w) or 0
-            local height = tonumber(size and size.h) or 0
-            if width <= 0 or height <= 0 then return "" end
-            local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-            local thumbWidth = math.max(1, math.floor(width * scale + 0.5))
-            local thumbHeight = math.max(1, math.floor(height * scale + 0.5))
-            local thumbnail = item:bitmapRepresentation({w = thumbWidth, h = thumbHeight})
-            return thumbnail and thumbnail:encodeAsURLString() or ""
-        end)
-        entry.thumbnailData = thumbnailOK and thumbnailData or ""
-        entry.thumbnailPending = false
-
-        if imagePath then
-            local records = readDayHistory(dateKey)
-            local record = {type = "image", ts = cur_ts, imagePath = imagePath}
-            if entry.thumbnailData ~= "" then record.thumbnailData = entry.thumbnailData end
-            records[#records + 1] = record
-            if not writeDayHistory(dateKey, records) then
-                logger.e("Clipboard screenshot was saved but its history record could not be written")
-            end
+        local thumbnailPath = saveThumbnailFile(dateKey, item, cur_ts)
+        local metadata = appendPersistentEntry(dateKey, {
+            type = "image", ts = cur_ts, imagePath = imagePath,
+            thumbnailPath = thumbnailPath
+        })
+        if not metadata then
+            os.remove(imagePath)
+            if thumbnailPath then os.remove(thumbnailPath) end
+            logger.e("Clipboard screenshot could not be indexed after saving")
+            return
         end
+        insertHistoryMetadata(metadata)
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
-    if not processingOK then
-        logger.e("Clipboard screenshot processing failed: " .. tostring(processingError))
-    end
+    if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
 end
 
 -- Add this function to handle clipboard changes
@@ -467,6 +625,7 @@ function handleClipboardChange(content)
     if cleanupOnNextClipboardChange then
         cleanupOnNextClipboardChange = false
         runDailyCleanupIfNeeded(true)
+        scanPersistentHistoryMetadata()
     else
         runDailyCleanupIfNeeded()
     end
@@ -502,22 +661,12 @@ function handleClipboardChange(content)
             end
         end
         if (content == nil) and (pasteboardImg ~= nil) then
-            -- Don't add if it's the same as the last entry
-            if #img_clipboard_history ~= 0 and 
-                (#text_clipboard_history == 0 or (img_clipboard_history[#img_clipboard_history].ts > text_clipboard_history[#text_clipboard_history].ts)) then
-                    if img_clipboard_history[#img_clipboard_history].imageObject == pasteboardImg then
-                        -- print("[handleClipboardChange] it's the same as the last img")
-                        return
-                    end
-            end
+            -- The watcher is the sole source for new clipboard images.
             -- print("pasteboardImg.toASCII() = " .. pasteboardImg:toASCII())
             -- local sss = content:encodeAsURLString()
             -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
             pasteboardToClipboard("image", pasteboardImg)
-            -- Trim history if it gets too long
-            if #img_clipboard_history > max_history_size_for_img then
-                table.remove(img_clipboard_history, 1)
-            end
+            -- Cache was rebuilt from the latest 30 disk-backed records by pasteboardToClipboard().
             -- print("[handleClipboardChange] img.size.h = " .. content:size()["h"] .. ", img.size.w = " .. content:size()["w"])
             -- print("[handleClipboardChange] img")
         elseif content ~= nil then
@@ -530,19 +679,14 @@ function handleClipboardChange(content)
             -- writers or keyboard-remapping tools instead of altering stored text.
             -- logger.i("Clipboard history captured text: " .. string.format("%q", content))
 
-            -- Don't add if it's the same as the last entry
-            if #text_clipboard_history ~= 0 and 
-                (#img_clipboard_history == 0 or (text_clipboard_history[#text_clipboard_history].ts > img_clipboard_history[#img_clipboard_history].ts)) then
-                    if text_clipboard_history[#text_clipboard_history].content == content then
-                        -- print("[handleClipboardChange] it's the same as the last text, content = " .. string.sub(content, 0, display_max_text_length))
-                        return
-                    end
+            -- Skip only an exact duplicate of the newest cached entry.
+            local newestMetadata = allHistoryMetadata[1]
+            if newestMetadata and newestMetadata.type == "text" then
+                local newestRecord = readHistoryEntryRecord(newestMetadata)
+                if newestRecord and newestRecord.content == content then return end
             end
             pasteboardToClipboard("text", content)
-            -- Trim history if it gets too long
-            if #text_clipboard_history > max_history_size_for_text then
-                table.remove(text_clipboard_history, 1)
-            end
+            -- Cache was rebuilt from the latest 30 disk-backed records by pasteboardToClipboard().
             -- print("[handleClipboardChange] text")
         end
     -- end
@@ -550,14 +694,15 @@ end
 
 -- restore the newest clipboard content
 function restoreNewestClipContent()
-    local newestText = text_clipboard_history[#text_clipboard_history]
-    local newestImage = img_clipboard_history[#img_clipboard_history]
-    if not newestText and not newestImage then return end
-    if newestImage and (not newestText or newestImage.ts > newestText.ts) then
-        local image = decodeImage(newestImage)
+    loadWindowFromDisk(1)
+    local newest = allHistoryMetadata[1]
+    if not newest then return end
+    if newest.type == "image" then
+        local image = decodeImage(newest)
         if image then pasteboard.writeObjects(image) end
-    elseif newestText then
-        pasteboard.setContents(newestText.content)
+    else
+        local loaded = text_clipboard_history[1]
+        if loaded and loaded.key == newest.key then pasteboard.setContents(loaded.content) end
     end
 end
 
@@ -634,8 +779,58 @@ local function historyItemHTML(entry, index)
         '<div class="hover-full-text" data-loaded="false">Loading preview…</div></div></button>'
 end
 
-local function clipboardEntryMatches(entry, query, kind)
+local function searchAllTextHistory(query)
+    query = string.lower(tostring(query or ""))
+    if query == "" then return {} end
+
+    local matches = {}
+    for _, metadata in ipairs(allHistoryMetadata) do
+        if metadata.type == "text" then
+            local record = readHistoryEntryRecord(metadata)
+            local content = record and type(record.content) == "string" and record.content or nil
+            if content and string.lower(content):find(query, 1, true) then
+                matches[#matches + 1] = {
+                    text = "[" .. os.date("%Y-%m-%d %H:%M:%S", metadata.ts) .. "] " ..
+                        string.sub(content, 1, display_max_text_length),
+                    type = "text",
+                    rowTs = metadata.ts,
+                    data = content,
+                    historyKey = metadata.key,
+                    metadata = metadata
+                }
+            end
+        end
+    end
+    return matches
+end
+
+local function renderSearchMatches(matches)
+    local cards = {}
+    searchResults = matches
+    for index, entry in ipairs(searchResults) do
+        entry.historyKey = entry.historyKey or (entry.metadata and entry.metadata.key)
+        cards[#cards + 1] = historyItemHTML(entry, index)
+    end
+    visibleIndices = {}
+    for index = 1, #searchResults do visibleIndices[index] = index end
+    return table.concat(cards, "\n"), #searchResults
+end
+
+local function clipboardEntryMatches(entry, query, kind, dateFilter)
     if kind == "none" then return false end
+    dateFilter = dateFilter or clipboard_date_filter or "all"
+    if dateFilter ~= "all" then
+        local entryDate = localDateKey(entry.rowTs or os.time())
+        local today = localDateKey()
+        if dateFilter == "today" and entryDate ~= today then return false end
+        if dateFilter == "yesterday" then
+            local year, month, day = today:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+            local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
+            local yesterday = todayNoon and os.date("%Y-%m-%d", todayNoon - 24 * 60 * 60) or ""
+            if entryDate ~= yesterday then return false end
+        end
+        if dateFilter == "older" and entryDate >= today then return false end
+    end
     if kind ~= "all" and entry.type ~= kind then return false end
     query = string.lower(tostring(query or ""))
     -- Filter-only clicks normally have no search query; don't scan or lowercase
@@ -647,30 +842,47 @@ local function clipboardEntryMatches(entry, query, kind)
     return searchable:find(query, 1, true) ~= nil
 end
 
-local function getClipboardMatches(query, kind)
+local function getClipboardMatches(query, kind, dateFilter)
     local matches = {}
     for index, entry in ipairs(menuData or {}) do
         if (entry.type == "text" or entry.type == "image")
-            and clipboardEntryMatches(entry, query, kind) then
+            and clipboardEntryMatches(entry, query, kind, dateFilter) then
             matches[#matches + 1] = index
         end
     end
     return matches
 end
 
+local function buildMenuDataFromActiveWindow()
+    menuData = {}
+    for _, entry in ipairs(text_clipboard_history) do
+        menuData[#menuData + 1] = {
+            text = "[" .. os.date("%Y-%m-%d %H:%M:%S", entry.ts) .. "] " .. string.sub(entry.content or "", 1, display_max_text_length),
+            type = "text", rowTs = entry.ts, data = entry.content
+        }
+    end
+    for _, entry in ipairs(img_clipboard_history) do
+        menuData[#menuData + 1] = {
+            text = "[" .. os.date("%Y-%m-%d %H:%M:%S", entry.ts) .. "] [IMG]",
+            type = "image", rowTs = entry.ts,
+            historyEntry = {
+                ts = entry.ts, thumbnailData = entry.thumbnailData or "",
+                thumbnailPath = entry.thumbnailPath, imagePath = entry.imagePath, key = entry.key
+            }
+        }
+    end
+    table.sort(menuData, function(a, b) return a.rowTs > b.rowTs end)
+    for index, entry in ipairs(menuData) do entry.menuItemIdx = index end
+end
+
 local function renderClipboardBatch(query, kind, offset)
-    local matches = getClipboardMatches(query, kind)
+    local matches = getClipboardMatches(query, kind, clipboard_date_filter)
     local cards = {}
-    offset = math.max(0, tonumber(offset) or 0)
-    -- Use consistent 60-item pagination for text and image filters.
-    local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
-    local last = math.min(#matches, offset + batchSize)
-    for position = offset + 1, last do
-        local index = matches[position]
+    for _, index in ipairs(matches) do
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
     visibleIndices = matches
-    return table.concat(cards, "\n"), #matches, last
+    return table.concat(cards, "\n"), #matches, #matches
 end
 
 function clipboardPanelHTML()
@@ -678,9 +890,11 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    local loadMoreHTML = renderedCount < matchingCount and
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
+    clipboard_date_filter = "all"
+    local loadMoreHTML = loadedHistoryCount < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+        (loadedHistoryCount + 1) .. '">Load More</button></div>' or ''
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -742,8 +956,9 @@ main:focus { outline:none; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
-.action.danger { color:#ff9b9b; }
+.action.danger { color:#991b1b; font-weight:650; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+.load-more-wrap { grid-column:1 / -1; display:flex; justify-content:flex-start; padding:0 0 2px; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
@@ -779,16 +994,20 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); border-top:1px solid var(--border); font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
-<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
+<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
-<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button></div></header>
+<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="today" aria-pressed="false">Today</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="yesterday" aria-pressed="false">Yesterday</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="older" aria-pressed="false">Earlier Dates</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="all" aria-pressed="true">All Dates</button></div></header>
 <main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
 <footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
-const bridge = (action, index, query, kind) => {
-  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind}); } catch (_) {}
+const bridge = (action, index, query, kind, dateFilter) => {
+  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind, dateFilter}); } catch (_) {}
 };
 document.addEventListener('click', event => {
   const contextItem = event.target.closest('#clipboard-context-menu');
@@ -801,8 +1020,12 @@ document.addEventListener('click', event => {
       setActiveFilter(button);
       return;
     }
+    if (action === 'dateFilter') {
+      setActiveDateFilter(button);
+      return;
+    }
     if (action === 'loadMore') {
-      bridge('loadMore', index, search.value, currentTypeFilter());
+      bridge('loadMore', index, search.value, currentTypeFilter(), activeDateFilter);
       return;
     }
     if (action === 'clearAll') {
@@ -831,9 +1054,26 @@ let pointerInsideResults = false;
 let suppressHoverUntilPointerMoves = false;
 let resumeHoverAfterScrollTimer = null;
 function hideHoverDetail(item) {
-  if (item) {
-    item.classList.remove('detail-open');
-    item.classList.remove('preview-loading');
+  if (!item) return;
+  item.classList.remove('detail-open');
+  item.classList.remove('preview-loading');
+
+  // Keep only one full-size hover preview alive at a time.
+  const image = item.querySelector('.hover-image');
+  if (image) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute('src');
+    delete image.dataset.requested;
+    image.style.visibility = 'hidden';
+  }
+
+  // Full text is fetched on hover; don't retain duplicate long-text payloads
+  // in hidden DOM cards after the pointer leaves them.
+  const fullText = item.querySelector('.hover-full-text');
+  if (fullText) {
+    fullText.textContent = 'Loading preview…';
+    fullText.dataset.loaded = 'false';
   }
 }
 function cancelPendingHoverDetail() {
@@ -1006,13 +1246,14 @@ window.setTextPreview = (index, content) => {
 const search = document.getElementById('search');
 let searchTimer = null;
 const activeTypeFilters = new Set();
+let activeDateFilter = 'all';
 function currentTypeFilter() {
   if (activeTypeFilters.size === 0) return 'all';
   if (activeTypeFilters.size === 2) return 'none';
   return activeTypeFilters.has('text') ? 'text' : 'image';
 }
 function applyFilters() {
-  bridge('search', 0, search.value, currentTypeFilter());
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
 }
 function setActiveFilter(button) {
   const kind = button.dataset.filter;
@@ -1027,7 +1268,14 @@ function setActiveFilter(button) {
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
     other.setAttribute('aria-pressed', activeTypeFilters.has(other.dataset.filter) ? 'true' : 'false');
   });
-  bridge('search', 0, search.value, currentTypeFilter());
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
+}
+function setActiveDateFilter(button) {
+  activeDateFilter = button.dataset.filter || 'all';
+  document.querySelectorAll('[data-action="dateFilter"]').forEach(other => {
+    other.setAttribute('aria-pressed', other.dataset.filter === activeDateFilter ? 'true' : 'false');
+  });
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
 }
 search.addEventListener('input', () => {
   if (searchTimer) clearTimeout(searchTimer);
@@ -1186,7 +1434,7 @@ search.focus();
 end
 
 local function pasteHistoryEntry(index)
-    local choice = menuData and menuData[index]
+    local choice = (clipboard_search ~= "" and searchResults and searchResults[index]) or (menuData and menuData[index])
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
     if choice.type == "text" then
@@ -1231,17 +1479,108 @@ local function pasteHistoryEntry(index)
     end)
 end
 
-local function updateClipboardPanel(query, kind, offset, append)
+local function updateClipboardPanel(query, kind, offset, append, dateFilter, requestedStart)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
-    local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
-    local hasMore = kind ~= "none" and renderedCount < matchingCount
-    local loadMoreHTML = hasMore and
-        '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
-    if cardsHTML == "" and not append then
-        cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>'
+    if dateFilter ~= nil then
+        if dateFilter ~= "today" and dateFilter ~= "yesterday" and dateFilter ~= "older" then dateFilter = "all" end
+        clipboard_date_filter = dateFilter
     end
+    local today = localDateKey()
+    local year, month, day = today:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
+    local yesterday = todayNoon and os.date("%Y-%m-%d", todayNoon - 24 * 60 * 60) or ""
+    local useFullHistory = query ~= "" or clipboard_date_filter ~= "all" or append
+
+    if useFullHistory then
+        local matchingEntries = {}
+        for _, metadata in ipairs(allHistoryMetadata) do
+            local dateMatches = clipboard_date_filter == "all"
+                or (clipboard_date_filter == "today" and metadata.dateKey == today)
+                or (clipboard_date_filter == "yesterday" and metadata.dateKey == yesterday)
+                or (clipboard_date_filter == "older" and metadata.dateKey < yesterday)
+            if dateMatches and kind ~= "none" and (kind == "all" or metadata.type == kind) then
+                local record = readHistoryEntryRecord(metadata)
+                if record and record.type == metadata.type and tonumber(record.ts) == metadata.ts then
+                    local entry = {
+                        type = metadata.type, rowTs = metadata.ts, data = record.content,
+                        historyKey = metadata.key, metadata = metadata,
+                        historyEntry = metadata.type == "image" and {
+                            ts=metadata.ts,
+                            thumbnailData=(function()
+                                local thumbnailPath = record.thumbnailPath or metadata.thumbnailPath
+                                if thumbnailPath then
+                                    local thumbnailData = loadThumbnailData(thumbnailPath)
+                                    if thumbnailData ~= "" then return thumbnailData end
+                                end
+                                return type(record.thumbnailData) == "string" and record.thumbnailData or ""
+                            end)(),
+                            thumbnailPath=record.thumbnailPath or metadata.thumbnailPath,
+                            imagePath=record.imagePath, key=metadata.key
+                        } or nil
+                    }
+                    local searchMatch = query == ""
+                        or (entry.type == "text" and string.lower(tostring(entry.data or "")):find(string.lower(query), 1, true))
+                        or (entry.type == "image" and string.lower("[image] " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs)):find(string.lower(query), 1, true))
+                    if searchMatch then matchingEntries[#matchingEntries + 1] = entry end
+                end
+            end
+        end
+        searchResults = {}
+        local first = 1
+        local last = #matchingEntries
+        if clipboard_date_filter == "all" then
+            first = tonumber(requestedStart) or 1
+            if first < 1 then first = 1 end
+            last = math.min(#matchingEntries, first + PAGE_SIZE - 1)
+        end
+        for index = first, last do searchResults[#searchResults + 1] = matchingEntries[index] end
+        local cards = {}
+        for index, entry in ipairs(searchResults) do cards[#cards + 1] = historyItemHTML(entry, first + index - 1) end
+        local cardsHTML = table.concat(cards, "\n")
+        local thumbnailUpdates = {}
+        for index, entry in ipairs(searchResults) do
+            if entry.type == "image" and entry.historyEntry and entry.historyEntry.thumbnailData
+                and entry.historyEntry.thumbnailData ~= "" then
+                thumbnailUpdates[#thumbnailUpdates + 1] = "window.setImageThumbnail && window.setImageThumbnail(" ..
+                    tostring(first + index - 1) .. "," .. jsStringLiteral(entry.historyEntry.thumbnailData) .. ");"
+            end
+        end
+        local thumbnailScript = table.concat(thumbnailUpdates, "")
+        local hasMore = clipboard_date_filter == "all" and (first + #searchResults) <= #matchingEntries
+            and query ~= ""
+        local loadMoreHTML = hasMore and
+            '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+            (first + #searchResults) .. '">Load More</button></div>' or ''
+        if cardsHTML == "" then cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>' end
+        local script
+        if append then
+            script = "var main=document.getElementById('clipboard-items');" ..
+                "if(!main)throw new Error('clipboard results container is unavailable');" ..
+                "var oldMore=main.querySelector('.load-more-wrap');if(oldMore)oldMore.remove();" ..
+                "var oldEmpty=main.querySelector('.empty');if(oldEmpty)oldEmpty.remove();" ..
+                "main.insertAdjacentHTML('beforeend'," .. jsStringLiteral(table.concat(cards, "\n") .. loadMoreHTML) .. ");"
+        else
+            script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
+        end
+        script = script .. thumbnailScript ..
+            "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(#matchingEntries) .. " matching items") .. ";" ..
+            "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
+            "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
+            "if(window.resetClipboardSelection)window.resetClipboardSelection();"
+        clipboard_webview:evaluateJavaScript(script, function(_, error) end)
+        clipboard_search = query
+        clipboard_type_filter = kind
+        return
+    end
+
+    searchResults = nil
+    buildMenuDataFromActiveWindow()
+    local cardsHTML, matchingCount = renderClipboardBatch(query, kind, 0)
+    local loadMoreHTML = loadedHistoryCount < #allHistoryMetadata and
+        '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+        (loadedHistoryCount + 1) .. '">Load More</button></div>' or ''
+    if cardsHTML == "" then cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>' end
     local script
     if append then
         script = "var main=document.getElementById('clipboard-items');" ..
@@ -1250,19 +1589,14 @@ local function updateClipboardPanel(query, kind, offset, append)
             "var oldEmpty=main.querySelector('.empty');if(oldEmpty)oldEmpty.remove();" ..
             "main.insertAdjacentHTML('beforeend'," .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ");"
     else
-        script = "document.getElementById('clipboard-items').innerHTML=" ..
-            jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
+        script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
     end
     script = script ..
         "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
-        "var active=" .. jsStringLiteral(kind) .. ";" ..
-        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',active==='none'?'true':(b.dataset.filter===active?'true':'false'))});" ..
+        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
+        "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
-    clipboard_webview:evaluateJavaScript(script, function(_, error)
-        if error then
-            -- logger.w("Clipboard panel update failed (" .. (append and "load more" or "filter/search") .. "): " .. tostring(error))
-        end
-    end)
+    clipboard_webview:evaluateJavaScript(script, function(_, error) end)
     clipboard_search = query
     clipboard_type_filter = kind
 end
@@ -1275,12 +1609,18 @@ function handleClipboardPanelMessage(message)
     if body.action == "close" then
         closeClipboardPanel()
     elseif body.action == "search" or body.action == "filter" then
-        updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
+        loadedHistoryCount = PAGE_SIZE
+        updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false, body.dateFilter or clipboard_date_filter or "all", 1)
     elseif body.action == "loadMore" then
-        updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", tonumber(body.index) or 0, true)
+        local query = body.query or clipboard_search or ""
+        local kind = body.kind or clipboard_type_filter or "all"
+        local dateFilter = body.dateFilter or clipboard_date_filter or "all"
+        local nextStart = tonumber(body.index) or (loadedHistoryCount + 1)
+        updateClipboardPanel(query, kind, 0, true, dateFilter, nextStart)
+        loadedHistoryCount = loadedHistoryCount + PAGE_SIZE
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = (clipboard_search ~= "" and searchResults and searchResults[index]) or (index and menuData[index])
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
@@ -1300,7 +1640,7 @@ function handleClipboardPanelMessage(message)
         end
     elseif body.action == "loadImagePreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = (clipboard_search ~= "" and searchResults and searchResults[index]) or (index and menuData[index])
         local historyEntry = entry and entry.historyEntry
         local image = historyEntry and decodeImage(historyEntry)
         if image and clipboard_webview then
@@ -1367,9 +1707,16 @@ closeClipboardPanel = function()
     clipboard_webview = nil
     clipboardPanelHTMLReady = false
     clipboard_usercontent = nil
-    if view then
-        view:delete()
-    end
+    menuData = {}
+    searchResults = nil
+    visibleIndices = {}
+    clipboard_search = ""
+    clipboard_type_filter = "all"
+    clipboard_date_filter = "all"
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
+    if view then view:delete() end
+    loadWindowFromDisk(1)
+    collectgarbage("collect")
 end
 
 local function configureClipboardWebview(view)
@@ -1383,6 +1730,13 @@ local function configureClipboardWebview(view)
                 clipboard_webview = nil
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
+                menuData = {}
+                searchResults = nil
+                visibleIndices = {}
+                clipboard_search = ""
+                clipboard_type_filter = "all"
+                loadWindowFromDisk(1)
+                collectgarbage("collect")
             end
         elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
             hs.timer.doAfter(0.1, function()
@@ -1413,7 +1767,8 @@ createClipboardWebview()
 -- The chooser is displayed newest-first, so walk the selected range backwards.
 local function finishPasteAll()
     restoreNewestClipContent()
-    menuData = {}
+    loadWindowFromDisk(1)
+    buildMenuDataFromActiveWindow()
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
     previousApplication = nil
@@ -1511,8 +1866,9 @@ function showClipboardHistory()
         end)
         return
     end
-    -- Run daily retention cleanup when the panel is first requested that day too.
+    -- Refresh lightweight disk metadata on open; hydrate only the newest page.
     runDailyCleanupIfNeeded()
+    scanPersistentHistoryMetadata()
     -- Initialize defensively in case the watcher was torn down during reload.
     if not pasteboard_watcher then
         pasteboard_watcher = pbwatcher.new(handleClipboardChange)
@@ -1532,73 +1888,13 @@ function showClipboardHistory()
     if not clipboard_webview then createClipboardWebview() end
 
     suppressFocusDismiss = true
-    menuData = {}
-
-    function insertToMenuData(v, type, unixTs)
-        -- print("unixTs " .. tostring(unixTs))
-        local dateTimeStr = "[" .. os.date("%Y-%m-%d %H:%M:%S", unixTs) .. "] "
-        if type == "text" then
-            table.insert(menuData, { 
-                menuItemIdx = #menuData + 1,
-                text = dateTimeStr .. string.sub(v, 0, display_max_text_length),
-                type = type,
-                rowTs = unixTs,
-                data = v
-            })
-        elseif (type == "image") then
-            -- Avoid decoding every full-size screenshot when constructing the list.
-            table.insert(menuData, {
-                menuItemIdx = #menuData + 1,
-                text = dateTimeStr .. "[IMG]",
-                type = type,
-                rowTs = unixTs,
-                historyEntry = {
-                    ts = v.ts,
-                    thumbnailData = v.thumbnailData,
-                    imageObject = v.imageObject,
-                    imagePath = v.imagePath
-                }
-            })
-        end
-    end
-
-    -- Merge newest-first snapshots defensively. Clipboard callbacks may trim
-    -- history while the panel is being assembled, so never index an absent entry.
-    local i = #text_clipboard_history
-    local j = #img_clipboard_history
-    while i >= 1 and j >= 1 do
-        local textEntry = text_clipboard_history[i]
-        local imageEntry = img_clipboard_history[j]
-        if not textEntry then
-            i = i - 1
-        elseif not imageEntry then
-            j = j - 1
-        elseif textEntry.ts > imageEntry.ts then
-            insertToMenuData(textEntry.content, "text", textEntry.ts)
-            i = i - 1
-        else
-            insertToMenuData(imageEntry, "image", imageEntry.ts)
-            j = j - 1
-        end
-    end
-
-    while i >= 1 do
-        local textEntry = text_clipboard_history[i]
-        if textEntry then
-            insertToMenuData(textEntry.content, "text", textEntry.ts)
-        end
-        i = i - 1
-    end
-
-    while j >= 1 do
-        local imageEntry = img_clipboard_history[j]
-        if imageEntry then
-            insertToMenuData(imageEntry, "image", imageEntry.ts)
-        end
-        j = j - 1
-    end
+    loadWindowFromDisk(1)
+    buildMenuDataFromActiveWindow()
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
+    clipboard_date_filter = "all"
 
     clipboard_search = ""
+    searchResults = nil
     clipboard_type_filter = "all"
     local view = clipboard_webview
     if not view then
@@ -1636,9 +1932,9 @@ function showClipboardHistory()
 
     -- The document is already loaded, so update only the visible batch.
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
-    local loadMoreHTML = renderedCount < matchingCount and
+    local loadMoreHTML = (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
     local updateScript = "var main=document.getElementById('clipboard-items');" ..
         "if(!main){throw new Error('clipboard panel DOM is not ready');}" ..
@@ -1666,6 +1962,8 @@ end
 -- available immediately after Hammerspoon/Sux-Mac starts.
 runDailyCleanupIfNeeded()
 restorePersistentHistory()
+-- Only current page items are materialized into the active cache; the disk index
+-- retains lightweight metadata for paging, not decoded image objects.
 -- Also clean on the first clipboard notification after startup, since expired
 -- folders may have been created manually after the startup scan completed.
 cleanupOnNextClipboardChange = true
