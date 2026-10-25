@@ -806,6 +806,7 @@ local function renderSearchMatches(matches)
     local cards = {}
     searchResults = matches
     for index, entry in ipairs(searchResults) do
+        entry.historyKey = entry.historyKey or (entry.metadata and entry.metadata.key)
         cards[#cards + 1] = historyItemHTML(entry, index)
     end
     visibleIndices = {}
