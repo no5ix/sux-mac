@@ -42,6 +42,7 @@ local CLIPBOARD_CACHE_SIZE = 30
 local clipboardDateFilter = nil
 local browseCursor = 0
 local browseMode = "all"
+local typeBrowseCursor = {text = nil, image = nil}
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -695,9 +696,10 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    local loadMoreHTML = renderedCount < matchingCount and
+    local hasMoreOnDisk = persistentHistoryCount() > renderedCount
+    local loadMoreHTML = hasMoreOnDisk and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+        renderedCount .. '">Load more</button></div>' or ''
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -772,11 +774,11 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .text-detail { width:min(560px, calc(100vw - 32px)); }
 .hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
 .hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
-.image-detail { padding:8px; width:min(680px, calc(100vw - 32px)); height:min(70vh, 640px); display:none; align-items:center; justify-content:center; }
+.image-detail { pointer-events:auto; padding:34px 12px 12px; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); display:none; align-items:center; justify-content:center; overflow:hidden; }
 .item.detail-open .image-detail, .item.pinned-preview .image-detail { display:flex; }
 .image-item.preview-loading .image-detail,
 .image-item.preview-loading.detail-open .image-detail { display:none; }
-.hover-image { display:block; max-width:100%; max-height:calc(70vh - 36px); object-fit:contain; border-radius:5px; visibility:hidden; }
+.hover-image { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; visibility:hidden; }
 .hover-image-placeholder { color:#9ca3af; padding:20px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid var(--selected-border); outline-offset:2px; }
@@ -1028,6 +1030,7 @@ window.setImagePreview = (index, src) => {
   preloader.onload = () => {
     if (!item.isConnected || pendingHoverItem !== item) return;
     img.src = src;
+    img.style.visibility = 'visible';
   };
   preloader.onerror = () => {
     if (item.isConnected) item.classList.remove('preview-loading');
@@ -1232,20 +1235,7 @@ local function pasteHistoryEntry(index)
     if choice.type == "text" then
         pasteboard.setContents(choice.data)
     else
-        local image = decodeImage(choice.historyEntry)
-        if not image and choice.historyEntry and choice.historyEntry.imagePath then
-            local file = io.open(choice.historyEntry.imagePath, "rb")
-            if file then
-                local bytes = file:read("*a")
-                file:close()
-                if bytes and #bytes > 0 then
-                    local ext = string.lower(choice.historyEntry.imagePath:match("%.([%w]+)$") or "png")
-                    local mime = ({png="image/png", jpg="image/jpeg", jpeg="image/jpeg", gif="image/gif", webp="image/webp", tiff="image/tiff", bmp="image/bmp"})[ext] or "image/png"
-                    local dataURL = "data:" .. mime .. ";base64," .. hs.base64.encode(bytes)
-                    image = hs.image.imageFromURL(dataURL)
-                end
-            end
-        end
+        local image = decodeImage(choice.historyEntry or choice)
         if not image then
             pasteboard_watcher:start()
             hs.alert.show("Unable to restore this clipboard image")
@@ -1276,23 +1266,29 @@ local function updateClipboardPanel(query,kind,offset,append)
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
     offset=math.max(0,tonumber(offset) or 0)
     if query~="" then
-        menuData=searchPersistentHistory(query,kind); browseMode="search"; clipboardDateFilter=nil; browseCursor=0
+        menuData=searchPersistentHistory(query,kind); browseMode="search"; clipboardDateFilter=nil; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
     elseif clipboardDateFilter then
         kind="all"
     elseif not append and kind=="all" then
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData; browseMode="all"
     elseif not append and (kind=="text" or kind=="image") then
         browseMode="type"
+        local loadedOfType=0
+        for _,entry in ipairs(menuData) do if entry.type==kind then loadedOfType=loadedOfType+1 end end
+        typeBrowseCursor[kind]=loadedOfType
     end
     if append and query=="" and not clipboardDateFilter then
         local more
         if browseMode=="type" and (kind=="text" or kind=="image") then
-            more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil,kind)
+            local cursor=typeBrowseCursor[kind] or 0
+            more=loadPersistentHistoryPage(cursor,CLIPBOARD_RENDER_BATCH_SIZE,nil,kind)
+            typeBrowseCursor[kind]=cursor+#more
+            browseCursor=typeBrowseCursor[kind]
         else
             more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
+            browseCursor=browseCursor+#more
         end
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
-        browseCursor=browseCursor+#more
     end
     local matches={}
     for i,entry in ipairs(menuData) do
@@ -1307,9 +1303,10 @@ local function updateClipboardPanel(query,kind,offset,append)
     local hasMore=not complete and kind~="none" and #matches>last
     if not clipboardDateFilter and query=="" then
         if browseMode=="all" then hasMore=persistentHistoryCount()>browseCursor
-        elseif browseMode=="type" and (kind=="text" or kind=="image") then hasMore=persistentHistoryCount(nil,kind)>#matches end
+        elseif browseMode=="type" and (kind=="text" or kind=="image") then hasMore=persistentHistoryCount(nil,kind)>(typeBrowseCursor[kind] or #matches) end
     end
-    local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
+    local loadCursor=browseMode=="type" and (typeBrowseCursor[kind] or 0) or browseCursor
+    local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..loadCursor..'">Load more</button></div>' or ""
     if html=="" then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
     html=html..loadMore
     local js
@@ -1412,7 +1409,7 @@ end
 closeClipboardPanel = function()
     local view=clipboard_webview
     clipboard_webview=nil; clipboardPanelHTMLReady=false; clipboard_usercontent=nil
-    clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; menuData={}
+    clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
     if view then view:delete() end
     collectgarbage("collect")
@@ -1585,6 +1582,7 @@ function showClipboardHistory()
     clipboardDateFilter = nil
     browseMode = "all"
     browseCursor = 0
+    typeBrowseCursor = {text = nil, image = nil}
     menuData = loadPersistentHistoryPage(0, CLIPBOARD_RENDER_BATCH_SIZE, nil)
     browseCursor = #menuData
 
