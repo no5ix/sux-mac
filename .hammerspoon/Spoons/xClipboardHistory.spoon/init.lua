@@ -38,7 +38,7 @@ local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 32
-local CLIPBOARD_CACHE_SIZE = 30
+local CLIPBOARD_CACHE_SIZE = 32
 local clipboardDateFilter = nil
 local browseCursor = 0
 local browseMode = "all"
@@ -256,7 +256,21 @@ local display_max_text_length = 200
 local function historyDateDirectories()
     local dates={}
     if not fs.attributes(HISTORY_ROOT) then return dates end
-    for name in fs.dir(HISTORY_ROOT) do if validDateKey(name) then dates[#dates+1]=name end end
+    for name in fs.dir(HISTORY_ROOT) do
+        if validDateKey(name) then
+            local records=readDayHistory(name)
+            local hasRecord=false
+            for _,record in ipairs(records) do
+                local ts=tonumber(record and record.ts)
+                if ts and ((record.type=="text" and type(record.content)=="string")
+                    or (record.type=="image" and type(record.imagePath)=="string" and fs.attributes(record.imagePath))) then
+                    hasRecord=true
+                    break
+                end
+            end
+            if hasRecord then dates[#dates+1]=name end
+        end
+    end
     table.sort(dates,function(a,b)return a>b end)
     return dates
 end
@@ -291,7 +305,7 @@ end
 
 local function restorePersistentHistory()
     text_clipboard_history,img_clipboard_history={},{}
-    -- Read daily files one at a time and retain only the newest 30 lightweight records.
+    -- Read daily files one at a time and retain only the newest 32 lightweight records.
     local dates=historyDateDirectories()
     for d=#dates,1,-1 do
         for _,record in ipairs(readDayHistory(dates[d])) do
@@ -587,11 +601,11 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
     return out
 end
 
-local function loadPersistentDateHistory(dateKey)
+local function loadPersistentDateHistory(dateKey,kind)
     local out={}
     for _,record in ipairs(readDayHistory(dateKey)) do
         local entry=metadataEntry(record,dateKey)
-        if entry then
+        if entry and (not kind or kind=="all" or entry.type==kind) then
             if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
             out[#out+1]=entry
         end
@@ -626,7 +640,7 @@ local function historyItemHTML(entry, index)
         local imageEntry=entry.historyEntry or entry
         local thumbnail=imageEntry.thumbnailData or ""
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="eager" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><button type="button" class="preview-pin" data-action="pin" aria-pressed="false">Pin preview</button><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
     local previewText = content
@@ -763,7 +777,6 @@ main:focus { outline:none; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#123f91; font-weight:700; }
-.preview-pin { position:absolute; top:12px; right:12px; z-index:2; pointer-events:auto; border:1px solid var(--button-border); border-radius:7px; padding:7px 10px; background:var(--header-bg); color:var(--accent); cursor:pointer; }
 .image-detail { pointer-events:auto; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:34px 12px 12px; }
 .hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
@@ -776,7 +789,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
 .hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
 .image-detail { pointer-events:auto; padding:34px 12px 12px; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); display:none; align-items:center; justify-content:center; overflow:hidden; }
-.item.detail-open .image-detail, .item.pinned-preview .image-detail { display:flex; }
+.item.detail-open .image-detail { display:flex; }
 .image-item.preview-loading .image-detail,
 .image-item.preview-loading.detail-open .image-detail { display:none; }
 .hover-image { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; visibility:hidden; }
@@ -805,6 +818,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
+<button class="action filter-button" data-action="filter" data-filter="all" aria-pressed="true">All</button>
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
 <button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
@@ -813,8 +827,10 @@ body.keyboard-mode #search { border-color:#7da6ff; }
         local dt=os.date("*t",os.time()-ago*86400)
         local noon=os.time({year=dt.year,month=dt.month,day=dt.day,hour=12})
         local key=os.date("%Y-%m-%d",noon)
-        local label=ago==0 and "Today" or (ago==1 and "Yesterday" or os.date("%m.%d",noon))
-        buttons[#buttons+1]='<button class="action filter-button date-filter" data-action="dateFilter" data-date-key="'..key..'" aria-pressed="false">'..label..'</button>'
+        if persistentHistoryCount(key)>0 then
+            local label=ago==0 and "Today" or (ago==1 and "Yesterday" or os.date("%m.%d",noon))
+            buttons[#buttons+1]='<button class="action filter-button date-filter" data-action="dateFilter" data-date-key="'..key..'" aria-pressed="false">'..label..'</button>'
+        end
     end
     return table.concat(buttons,"\n")
 end)() .. [[</div></header>
@@ -833,15 +849,8 @@ document.addEventListener('click', event => {
     const index = Number(button.dataset.index || 0);
     if (action === 'filter') { setActiveFilter(button); return; }
     if (action === 'dateFilter') {
-      activeTypeFilters.clear();
-      document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed','false'));
       document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed',b===button?'true':'false'));
       bridge('dateFilter',0,'','all',button.dataset.dateKey); return;
-    }
-    if (action === 'pin') {
-      const card=button.closest('.image-item');
-      if(card) { const pinned=card.classList.toggle('pinned-preview'); button.setAttribute('aria-pressed',pinned?'true':'false'); button.textContent=pinned?'Unpin preview':'Pin preview'; if(!pinned&&!card.matches(':hover'))hideHoverDetail(card); }
-      return;
     }
     if (action === 'loadMore') {
       bridge('loadMore', index, search.value, currentTypeFilter());
@@ -873,7 +882,7 @@ let pointerInsideResults = false;
 let suppressHoverUntilPointerMoves = false;
 let resumeHoverAfterScrollTimer = null;
 function hideHoverDetail(item) {
-  if (item && !item.classList.contains('pinned-preview')) {
+  if (item) {
     item.classList.remove('detail-open');
     item.classList.remove('preview-loading');
   }
@@ -1058,19 +1067,13 @@ function applyFilters() {
   bridge('search', 0, search.value, currentTypeFilter());
 }
 function setActiveFilter(button) {
-  document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
   const kind = button.dataset.filter;
-  // Text and Images are mutually exclusive. Clicking the active filter again
-  // clears it; clicking the other filter switches directly to that type.
-  if (activeTypeFilters.has(kind)) {
-    activeTypeFilters.clear();
-  } else {
-    activeTypeFilters.clear();
-    activeTypeFilters.add(kind);
-  }
+  activeTypeFilters.clear();
+  if (kind !== 'all') activeTypeFilters.add(kind);
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
-    other.setAttribute('aria-pressed', activeTypeFilters.has(other.dataset.filter) ? 'true' : 'false');
+    other.setAttribute('aria-pressed', other.dataset.filter === kind ? 'true' : 'false');
   });
+  // Keep the selected date filter active while applying this type filter.
   bridge('search', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
@@ -1266,18 +1269,22 @@ local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
     offset=math.max(0,tonumber(offset) or 0)
+
     if query~="" then
-        menuData=searchPersistentHistory(query,kind); browseMode="search"; clipboardDateFilter=nil; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
+        menuData=searchPersistentHistory(query,kind)
+        browseMode="search"; clipboardDateFilter=nil; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
     elseif clipboardDateFilter then
-        kind="all"
+        if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,kind) end
+        browseMode="date"
     elseif not append and kind=="all" then
-        menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData; browseMode="all"
+        menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
+        browseCursor=#menuData; browseMode="all"
     elseif not append and (kind=="text" or kind=="image") then
+        menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil,kind)
+        typeBrowseCursor[kind]=#menuData
         browseMode="type"
-        local loadedOfType=0
-        for _,entry in ipairs(menuData) do if entry.type==kind then loadedOfType=loadedOfType+1 end end
-        typeBrowseCursor[kind]=loadedOfType
     end
+
     if append and query=="" and not clipboardDateFilter then
         local more
         if browseMode=="type" and (kind=="text" or kind=="image") then
@@ -1291,9 +1298,13 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
     end
+
     local matches={}
     for i,entry in ipairs(menuData) do
-        if (kind=="all" or entry.type==kind) and (query=="" or clipboardEntryMatches(entry,query,kind)) then matches[#matches+1]=i end
+        if (kind=="all" or entry.type==kind)
+            and (query=="" or clipboardEntryMatches(entry,query,kind)) then
+            matches[#matches+1]=i
+        end
     end
     local complete=clipboardDateFilter~=nil or query~=""
     local first=complete and 1 or offset+1
@@ -1336,7 +1347,7 @@ function handleClipboardPanelMessage(message)
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
         clipboardDateFilter=dateKey; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
-        menuData=loadPersistentDateHistory(dateKey); updateClipboardPanel("","all",0,false)
+        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("","all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         if tostring(body.query or "")~="" then clipboardDateFilter=nil end
         updateClipboardPanel(body.query or "",body.kind or clipboard_type_filter or "all",0,false)
