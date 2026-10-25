@@ -491,6 +491,43 @@ end
 -- local last_change = pasteboard.changeCount() -- keeps track of how many times the pasteboard owner has changed // Indicates a new copy has been made
 
 -- Add the given string to the history
+local function appendPersistentEntry(dateKey, record)
+    local entries = readHistoryIndex(dateKey)
+    local nextIndex = 1
+    for _, entry in ipairs(entries) do
+        nextIndex = math.max(nextIndex, (tonumber(entry.recordIndex) or 0) + 1)
+    end
+
+    local path = historyEntryPath(dateKey, nextIndex)
+    local encodedOK, encoded = pcall(json.encode, record, true)
+    if not encodedOK or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history entry for " .. dateKey)
+        return nil
+    end
+    if not atomicWrite(path, encoded) then
+        logger.e("Unable to write clipboard history entry: " .. path)
+        return nil
+    end
+
+    local descriptor = {
+        type = record.type,
+        ts = tonumber(record.ts),
+        dateKey = dateKey,
+        recordIndex = nextIndex,
+        recordPath = path,
+        imagePath = record.type == "image" and record.imagePath or nil,
+        thumbnailPath = record.type == "image" and record.thumbnailPath or nil
+    }
+    descriptor.key = historyRecordKey(descriptor)
+    entries[#entries + 1] = descriptor
+    if not writeHistoryIndex(dateKey, entries) then
+        os.remove(path)
+        logger.e("Unable to update clipboard history index for " .. dateKey)
+        return nil
+    end
+    return descriptor
+end
+
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
     if item_type == "text" then
