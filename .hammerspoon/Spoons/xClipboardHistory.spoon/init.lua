@@ -1446,8 +1446,9 @@ function handleClipboardPanelMessage(message)
         menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("",kind,0,false)
     elseif body.action == "showLatest" then
         clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"
-        menuData=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
-        browseCursor=allHistoryCacheLoaded
+        local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
+        menuData=cached
+        browseCursor=loaded
         updateClipboardPanel("",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         if tostring(body.query or "")~="" then
