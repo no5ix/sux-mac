@@ -680,7 +680,7 @@ local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
     offset = math.max(0, tonumber(offset) or 0)
-    -- Use consistent 60-item pagination for text and image filters.
+    -- Render up to the configured 32-item batch from the currently loaded page.
     local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
     local last = math.min(#matches, offset + batchSize)
     for position = offset + 1, last do
@@ -1315,7 +1315,12 @@ local function updateClipboardPanel(query,kind,offset,append)
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
-    js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(#matches).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
+    local visibleCount=#matches
+    if query=="" and not clipboardDateFilter then
+        if browseMode=="all" then visibleCount=persistentHistoryCount()
+        elseif browseMode=="type" and (kind=="text" or kind=="image") then visibleCount=persistentHistoryCount(nil,kind) end
+    end
+    js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
