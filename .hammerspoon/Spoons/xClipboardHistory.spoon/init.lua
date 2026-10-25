@@ -442,7 +442,8 @@ local function insertHistoryMetadata(metadata)
                 break
             end
         end
-    elseif not panelVisible then
+    else
+        -- Also refresh an empty visible panel when its first item arrives.
         loadWindowFromDisk(1)
     end
 end
