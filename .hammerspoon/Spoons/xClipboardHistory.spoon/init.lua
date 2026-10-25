@@ -34,6 +34,8 @@ local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
+local clipboard_date_filter = "all" -- "all", "today", "yesterday", or "older"
+local loadedHistoryCount = PAGE_SIZE
 local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
@@ -814,8 +816,21 @@ local function renderSearchMatches(matches)
     return table.concat(cards, "\n"), #searchResults
 end
 
-local function clipboardEntryMatches(entry, query, kind)
+local function clipboardEntryMatches(entry, query, kind, dateFilter)
     if kind == "none" then return false end
+    dateFilter = dateFilter or clipboard_date_filter or "all"
+    if dateFilter ~= "all" then
+        local entryDate = localDateKey(entry.rowTs or os.time())
+        local today = localDateKey()
+        if dateFilter == "today" and entryDate ~= today then return false end
+        if dateFilter == "yesterday" then
+            local year, month, day = today:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+            local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
+            local yesterday = todayNoon and os.date("%Y-%m-%d", todayNoon - 24 * 60 * 60) or ""
+            if entryDate ~= yesterday then return false end
+        end
+        if dateFilter == "older" and entryDate >= today then return false end
+    end
     if kind ~= "all" and entry.type ~= kind then return false end
     query = string.lower(tostring(query or ""))
     -- Filter-only clicks normally have no search query; don't scan or lowercase
@@ -827,11 +842,11 @@ local function clipboardEntryMatches(entry, query, kind)
     return searchable:find(query, 1, true) ~= nil
 end
 
-local function getClipboardMatches(query, kind)
+local function getClipboardMatches(query, kind, dateFilter)
     local matches = {}
     for index, entry in ipairs(menuData or {}) do
         if (entry.type == "text" or entry.type == "image")
-            and clipboardEntryMatches(entry, query, kind) then
+            and clipboardEntryMatches(entry, query, kind, dateFilter) then
             matches[#matches + 1] = index
         end
     end
@@ -861,7 +876,7 @@ local function buildMenuDataFromActiveWindow()
 end
 
 local function renderClipboardBatch(query, kind, offset)
-    local matches = getClipboardMatches(query, kind)
+    local matches = getClipboardMatches(query, kind, clipboard_date_filter)
     local cards = {}
     for _, index in ipairs(matches) do
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
@@ -875,9 +890,11 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    local loadMoreHTML = (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata and
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
+    clipboard_date_filter = "all"
+    local loadMoreHTML = loadedHistoryCount < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
+        (loadedHistoryCount + 1) .. '">Load More</button></div>' or ''
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -941,6 +958,7 @@ main:focus { outline:none; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
 .action.danger { color:#ff9b9b; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+.load-more-wrap { grid-column:1 / -1; display:flex; justify-content:flex-start; padding:0 0 2px; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
@@ -980,12 +998,16 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
-<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button></div></header>
+<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="today" aria-pressed="false">Today</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="yesterday" aria-pressed="false">Yesterday</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="older" aria-pressed="false">Earlier Dates</button>
+<button class="action filter-button date-filter" data-action="dateFilter" data-filter="all" aria-pressed="true">All Dates</button></div></header>
 <main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
 <footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
-const bridge = (action, index, query, kind) => {
-  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind}); } catch (_) {}
+const bridge = (action, index, query, kind, dateFilter) => {
+  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind, dateFilter}); } catch (_) {}
 };
 document.addEventListener('click', event => {
   const contextItem = event.target.closest('#clipboard-context-menu');
@@ -996,6 +1018,10 @@ document.addEventListener('click', event => {
     const index = Number(button.dataset.index || 0);
     if (action === 'filter') {
       setActiveFilter(button);
+      return;
+    }
+    if (action === 'dateFilter') {
+      setActiveDateFilter(button);
       return;
     }
     if (action === 'loadMore') {
@@ -1220,13 +1246,14 @@ window.setTextPreview = (index, content) => {
 const search = document.getElementById('search');
 let searchTimer = null;
 const activeTypeFilters = new Set();
+let activeDateFilter = 'all';
 function currentTypeFilter() {
   if (activeTypeFilters.size === 0) return 'all';
   if (activeTypeFilters.size === 2) return 'none';
   return activeTypeFilters.has('text') ? 'text' : 'image';
 }
 function applyFilters() {
-  bridge('search', 0, search.value, currentTypeFilter());
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
 }
 function setActiveFilter(button) {
   const kind = button.dataset.filter;
@@ -1241,7 +1268,14 @@ function setActiveFilter(button) {
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
     other.setAttribute('aria-pressed', activeTypeFilters.has(other.dataset.filter) ? 'true' : 'false');
   });
-  bridge('search', 0, search.value, currentTypeFilter());
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
+}
+function setActiveDateFilter(button) {
+  activeDateFilter = button.dataset.filter || 'all';
+  document.querySelectorAll('[data-action="dateFilter"]').forEach(other => {
+    other.setAttribute('aria-pressed', other.dataset.filter === activeDateFilter ? 'true' : 'false');
+  });
+  bridge('search', 0, search.value, currentTypeFilter(), activeDateFilter);
 }
 search.addEventListener('input', () => {
   if (searchTimer) clearTimeout(searchTimer);
@@ -1445,30 +1479,86 @@ local function pasteHistoryEntry(index)
     end)
 end
 
-local function updateClipboardPanel(query, kind, offset, append)
+local function updateClipboardPanel(query, kind, offset, append, dateFilter, requestedStart)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
-    local cardsHTML, matchingCount, renderedCount
-    if query == "" then searchResults = nil end
-    if query ~= "" then
-        if kind == "image" or kind == "none" then
-            cardsHTML, matchingCount = "", 0
-        else
-            local allTextMatches = searchAllTextHistory(query)
-            cardsHTML, matchingCount = renderSearchMatches(allTextMatches)
+    if dateFilter ~= nil then
+        if dateFilter ~= "today" and dateFilter ~= "yesterday" and dateFilter ~= "older" then dateFilter = "all" end
+        clipboard_date_filter = dateFilter
+    end
+    local today = localDateKey()
+    local year, month, day = today:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    local todayNoon = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=12})
+    local yesterday = todayNoon and os.date("%Y-%m-%d", todayNoon - 24 * 60 * 60) or ""
+    local useFullHistory = query ~= "" or clipboard_date_filter ~= "all" or append
+
+    if useFullHistory then
+        local matchingEntries = {}
+        for _, metadata in ipairs(allHistoryMetadata) do
+            local dateMatches = clipboard_date_filter == "all"
+                or (clipboard_date_filter == "today" and metadata.dateKey == today)
+                or (clipboard_date_filter == "yesterday" and metadata.dateKey == yesterday)
+                or (clipboard_date_filter == "older" and metadata.dateKey < today)
+            if dateMatches and kind ~= "none" and (kind == "all" or metadata.type == kind) then
+                local record = readHistoryEntryRecord(metadata)
+                if record and record.type == metadata.type and tonumber(record.ts) == metadata.ts then
+                    local entry = {
+                        type = metadata.type, rowTs = metadata.ts, data = record.content,
+                        historyKey = metadata.key, metadata = metadata,
+                        historyEntry = metadata.type == "image" and {
+                            ts=metadata.ts, thumbnailData=loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath),
+                            thumbnailPath=record.thumbnailPath or metadata.thumbnailPath,
+                            imagePath=record.imagePath, key=metadata.key
+                        } or nil
+                    }
+                    local searchMatch = query == ""
+                        or (entry.type == "text" and string.lower(tostring(entry.data or "")):find(string.lower(query), 1, true))
+                        or (entry.type == "image" and string.lower("[image] " .. os.date("%Y-%m-%d %H:%M:%S", entry.rowTs)):find(string.lower(query), 1, true))
+                    if searchMatch then matchingEntries[#matchingEntries + 1] = entry end
+                end
+            end
         end
-        renderedCount = matchingCount
-    else
-        cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", kind, offset)
+        searchResults = {}
+        local first = tonumber(requestedStart) or 1
+        if first < 1 then first = 1 end
+        local last = math.min(#matchingEntries, first + PAGE_SIZE - 1)
+        for index = first, last do searchResults[#searchResults + 1] = matchingEntries[index] end
+        local cards = {}
+        for index, entry in ipairs(searchResults) do cards[#cards + 1] = historyItemHTML(entry, first + index - 1) end
+        local cardsHTML = table.concat(cards, "\n")
+        local hasMore = (first + #searchResults) <= #matchingEntries
+        local loadMoreHTML = hasMore and
+            '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
+            (first + #searchResults) .. '">Load More</button></div>' or ''
+        if cardsHTML == "" then cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>' end
+        local script
+        if append then
+            script = "var main=document.getElementById('clipboard-items');" ..
+                "if(!main)throw new Error('clipboard results container is unavailable');" ..
+                "var oldMore=main.querySelector('.load-more-wrap');if(oldMore)oldMore.remove();" ..
+                "var oldEmpty=main.querySelector('.empty');if(oldEmpty)oldEmpty.remove();" ..
+                "main.insertAdjacentHTML('beforeend'," .. jsStringLiteral(table.concat(cards, "\n") .. loadMoreHTML) .. ");"
+        else
+            script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
+        end
+        script = script ..
+            "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(#matchingEntries) .. " matching items") .. ";" ..
+            "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
+            "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
+            "if(window.resetClipboardSelection)window.resetClipboardSelection();"
+        clipboard_webview:evaluateJavaScript(script, function(_, error) end)
+        clipboard_search = query
+        clipboard_type_filter = kind
+        return
     end
-    local hasMore = query == "" and kind ~= "none" and
-        (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata
-    local loadMoreHTML = hasMore and
+
+    searchResults = nil
+    buildMenuDataFromActiveWindow()
+    local cardsHTML = renderClipboardBatch(query, kind, 0)
+    local loadMoreHTML = loadedHistoryCount < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
-    if cardsHTML == "" and not append then
-        cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>'
-    end
+        (loadedHistoryCount + 1) .. '">Load More</button></div>' or ''
+    if cardsHTML == "" then cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>' end
     local script
     if append then
         script = "var main=document.getElementById('clipboard-items');" ..
@@ -1477,19 +1567,14 @@ local function updateClipboardPanel(query, kind, offset, append)
             "var oldEmpty=main.querySelector('.empty');if(oldEmpty)oldEmpty.remove();" ..
             "main.insertAdjacentHTML('beforeend'," .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ");"
     else
-        script = "document.getElementById('clipboard-items').innerHTML=" ..
-            jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
+        script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
     end
     script = script ..
-        "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
-        "var active=" .. jsStringLiteral(kind) .. ";" ..
-        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',active==='none'?'true':(b.dataset.filter===active?'true':'false'))});" ..
+        "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(#allHistoryMetadata) .. " matching items") .. ";" ..
+        "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
+        "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
-    clipboard_webview:evaluateJavaScript(script, function(_, error)
-        if error then
-            -- logger.w("Clipboard panel update failed (" .. (append and "load more" or "filter/search") .. "): " .. tostring(error))
-        end
-    end)
+    clipboard_webview:evaluateJavaScript(script, function(_, error) end)
     clipboard_search = query
     clipboard_type_filter = kind
 end
@@ -1502,12 +1587,15 @@ function handleClipboardPanelMessage(message)
     if body.action == "close" then
         closeClipboardPanel()
     elseif body.action == "search" or body.action == "filter" then
-        updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
+        loadedHistoryCount = PAGE_SIZE
+        updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false, body.dateFilter or clipboard_date_filter or "all", 1)
     elseif body.action == "loadMore" then
-        local nextStart = math.max(activeWindowStart + PAGE_SIZE, tonumber(body.index) or 1)
-        loadWindowFromDisk(nextStart)
-        buildMenuDataFromActiveWindow()
-        updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", 0, false)
+        local query = body.query or clipboard_search or ""
+        local kind = body.kind or clipboard_type_filter or "all"
+        local dateFilter = body.dateFilter or clipboard_date_filter or "all"
+        local nextStart = tonumber(body.index) or (loadedHistoryCount + 1)
+        updateClipboardPanel(query, kind, 0, true, dateFilter, nextStart)
+        loadedHistoryCount = loadedHistoryCount + PAGE_SIZE
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
         local entry = (clipboard_search ~= "" and searchResults and searchResults[index]) or (index and menuData[index])
@@ -1602,6 +1690,8 @@ closeClipboardPanel = function()
     visibleIndices = {}
     clipboard_search = ""
     clipboard_type_filter = "all"
+    clipboard_date_filter = "all"
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
     if view then view:delete() end
     loadWindowFromDisk(1)
     collectgarbage("collect")
@@ -1778,6 +1868,8 @@ function showClipboardHistory()
     suppressFocusDismiss = true
     loadWindowFromDisk(1)
     buildMenuDataFromActiveWindow()
+    loadedHistoryCount = math.min(PAGE_SIZE, #allHistoryMetadata)
+    clipboard_date_filter = "all"
 
     clipboard_search = ""
     searchResults = nil
