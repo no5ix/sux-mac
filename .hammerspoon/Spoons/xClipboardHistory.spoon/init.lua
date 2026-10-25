@@ -867,8 +867,9 @@ main:focus { outline:none; }
 .action.danger { color:#123f91; font-weight:700; }
 .image-detail { pointer-events:auto; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:34px 12px 12px; }
 .hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
-main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
-.load-more-wrap { grid-column:1 / -1; width:100%; display:flex; justify-content:flex-start; order:9999; }
+main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
+#clipboard-items.item-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+.load-more-wrap { flex:0 0 auto; width:100%; display:flex; justify-content:flex-start; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
@@ -930,7 +931,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
     end
     return table.concat(buttons,"\n")
 end)() .. [[</div></header>
-<main id="clipboard-items">]] .. initialCardsHTML .. loadMoreHTML .. [[</main>
+<main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
 <footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query, kind, dateKey) => {
@@ -1426,9 +1427,9 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local js
     if append then
-        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");var last=m.querySelector('.load-more-wrap');if(last){last.style.gridColumn='1 / -1';last.style.width='100%';last.style.justifySelf='stretch';last.style.display='flex';last.style.justifyContent='flex-start';}"
+        js="var m=document.getElementById('clipboard-items');var main=document.querySelector('main');var b=main.querySelector(':scope > .load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");var last=m.querySelector('.load-more-wrap');if(last)last.remove();if(last)main.appendChild(last);"
     else
-        js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
+        js="var m=document.getElementById('clipboard-items');var main=document.querySelector('main');var b=main.querySelector(':scope > .load-more-wrap');if(b)b.remove();m.innerHTML="..jsStringLiteral(html)..";var last=m.querySelector('.load-more-wrap');if(last)last.remove();if(last)main.appendChild(last);"
     end
 
     local visibleCount=#matches
