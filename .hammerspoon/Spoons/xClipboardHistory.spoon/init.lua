@@ -197,7 +197,42 @@ local function loadThumbnailData(path)
     return "data:image/png;base64," .. hs.base64.encode(bytes)
 end
 
-local function persistClipboardEntry(itemType, content, timestamp)
+local local function appendPersistentEntry(dateKey, record)
+    local entries = readHistoryIndex(dateKey)
+    local nextIndex = 1
+    for _, entry in ipairs(entries) do
+        nextIndex = math.max(nextIndex, (tonumber(entry.recordIndex) or 0) + 1)
+    end
+    local path = historyEntryPath(dateKey, nextIndex)
+    local encodedOK, encoded = pcall(json.encode, record, true)
+    if not encodedOK or type(encoded) ~= "string" then
+        logger.e("Unable to encode clipboard history entry for " .. dateKey)
+        return nil
+    end
+    if not atomicWrite(path, encoded) then
+        logger.e("Unable to write clipboard history entry: " .. path)
+        return nil
+    end
+    local descriptor = {
+        type = record.type,
+        ts = tonumber(record.ts),
+        dateKey = dateKey,
+        recordIndex = nextIndex,
+        recordPath = path,
+        imagePath = record.type == "image" and record.imagePath or nil,
+        thumbnailPath = record.type == "image" and record.thumbnailPath or nil
+    }
+    descriptor.key = historyRecordKey(descriptor)
+    entries[#entries + 1] = descriptor
+    if not writeHistoryIndex(dateKey, entries) then
+        os.remove(path)
+        logger.e("Unable to update clipboard history index for " .. dateKey)
+        return nil
+    end
+    return descriptor
+end
+
+function persistClipboardEntry(itemType, content, timestamp)
     timestamp = timestamp or os.time()
     local dateKey = localDateKey(timestamp)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
@@ -431,30 +466,22 @@ local function loadWindowFromDisk(startIndex)
     img_clipboard_history = {}
     menuData = {}
 
-    -- Temporarily read only the day files needed for this page. Full text and
-    -- thumbnail data never remain in the all-history metadata index.
-    local dayCache = {}
     local last = math.min(#allHistoryMetadata, startIndex + PAGE_SIZE - 1)
     for index = startIndex, last do
         local metadata = allHistoryMetadata[index]
-        local records = dayCache[metadata.dateKey]
-        if not records then
-            records = readDayHistory(metadata.dateKey)
-            dayCache[metadata.dateKey] = records
-        end
-        local record = records[metadata.recordIndex]
+        local record = readHistoryEntryRecord(metadata)
         if record and tonumber(record.ts) == metadata.ts and record.type == metadata.type then
             if metadata.type == "text" and type(record.content) == "string" then
                 text_clipboard_history[#text_clipboard_history + 1] = {
                     ts = metadata.ts, content = record.content, key = metadata.key
                 }
             elseif metadata.type == "image" and type(record.imagePath) == "string" then
-                local thumbnailPath = type(record.thumbnailPath) == "string" and record.thumbnailPath or nil
+                local thumbnailPath = type(record.thumbnailPath) == "string" and record.thumbnailPath or metadata.thumbnailPath
                 local thumbnailData = ""
                 if thumbnailPath then
                     thumbnailData = loadThumbnailData(thumbnailPath)
                 elseif type(record.thumbnailData) == "string" then
-                    -- Older history entries stored thumbnail data in JSON.
+                    -- Legacy migrated entry: only this visible entry's thumbnail is loaded.
                     thumbnailData = record.thumbnailData
                 end
                 img_clipboard_history[#img_clipboard_history + 1] = {
@@ -465,7 +492,6 @@ local function loadWindowFromDisk(startIndex)
             end
         end
     end
-    dayCache = nil
     collectgarbage("collect")
 end
 
@@ -582,13 +608,9 @@ end
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
     if item_type == "text" then
-        local ok, _, recordIndex = persistClipboardEntry("text", item, cur_ts)
-        if not ok then return end
-        local metadata = {
-            type = "text", ts = cur_ts, dateKey = localDateKey(cur_ts),
-            recordIndex = recordIndex
-        }
-        metadata.key = historyRecordKey(metadata)
+        local dateKey = localDateKey(cur_ts)
+        local metadata = appendPersistentEntry(dateKey, {type = "text", ts = cur_ts, content = item})
+        if not metadata then return end
         insertHistoryMetadata(metadata)
         return
     end
@@ -603,23 +625,16 @@ function pasteboardToClipboard(item_type, item)
         end
 
         local thumbnailPath = saveThumbnailFile(dateKey, item, cur_ts)
-        local records = readDayHistory(dateKey)
-        records[#records + 1] = {
+        local metadata = appendPersistentEntry(dateKey, {
             type = "image", ts = cur_ts, imagePath = imagePath,
             thumbnailPath = thumbnailPath
-        }
-        local recordIndex = #records
-        if not writeDayHistory(dateKey, records) then
-            logger.e("Clipboard screenshot was saved but its history record could not be written")
+        })
+        if not metadata then
+            os.remove(imagePath)
+            if thumbnailPath then os.remove(thumbnailPath) end
+            logger.e("Clipboard screenshot could not be indexed after saving")
             return
         end
-
-        local metadata = {
-            type = "image", ts = cur_ts, dateKey = dateKey,
-            recordIndex = recordIndex, imagePath = imagePath,
-            thumbnailPath = thumbnailPath
-        }
-        metadata.key = historyRecordKey(metadata)
         insertHistoryMetadata(metadata)
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
