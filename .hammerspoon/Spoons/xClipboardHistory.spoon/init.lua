@@ -868,6 +868,7 @@ main:focus { outline:none; }
 .image-detail { pointer-events:auto; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:34px 12px 12px; }
 .hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+.load-more-wrap { grid-column:1 / -1; width:100%; display:flex; justify-content:flex-start; order:9999; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
@@ -904,7 +905,7 @@ footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--f
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
-<input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
+<input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
 <button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
@@ -915,7 +916,14 @@ body.keyboard-mode #search { border-color:#7da6ff; }
         local dt=os.date("*t",os.time()-ago*86400)
         local noon=os.time({year=dt.year,month=dt.month,day=dt.day,hour=12})
         local key=os.date("%Y-%m-%d",noon)
-        if persistentHistoryCount(key)>0 then
+        local hasEntries
+        local cached=dateHistoryCache[key]
+        if cached then
+            hasEntries=#cached>0
+        else
+            hasEntries=persistentHistoryCount(key)>0
+        end
+        if hasEntries then
             local label=ago==0 and "Today" or (ago==1 and "Yesterday" or os.date("%m.%d",noon))
             buttons[#buttons+1]='<button class="action filter-button date-filter" data-action="dateFilter" data-date-key="'..key..'" aria-pressed="false">'..label..'</button>'
         end
@@ -939,16 +947,17 @@ document.addEventListener('click', event => {
     if (action === 'dateScope' || action === 'dateFilter') {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
       const selectedKind = currentTypeFilter();
+      const query = committedSearchQuery;
       if (action === 'dateScope' || wasSelected) {
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = true;
         button.setAttribute('aria-pressed','true');
-        bridge('showLatest',0,'',selectedKind);
+        bridge('showLatest',0,query,selectedKind);
       } else {
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = false;
         button.setAttribute('aria-pressed','true');
-        bridge('dateFilter',0,'',selectedKind,button.dataset.dateKey);
+        bridge('dateFilter',0,query,selectedKind,button.dataset.dateKey);
       }
       return;
     }
@@ -1156,15 +1165,16 @@ window.setTextPreview = (index, content) => {
   item.classList.add('detail-open');
 };
 const search = document.getElementById('search');
-let searchTimer = null;
 const activeTypeFilters = new Set();
+let committedSearchQuery = '';
 function currentTypeFilter() {
   if (activeTypeFilters.size === 0) return 'all';
   if (activeTypeFilters.size === 2) return 'none';
   return activeTypeFilters.has('text') ? 'text' : 'image';
 }
 function applyFilters() {
-  bridge('search', 0, search.value, currentTypeFilter());
+  committedSearchQuery = search.value.trim();
+  bridge('search', 0, committedSearchQuery, currentTypeFilter());
 }
 function setActiveFilter(button) {
   const kind = button.dataset.filter;
@@ -1175,16 +1185,16 @@ function setActiveFilter(button) {
   document.querySelectorAll('.type-filter').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
-  // Type-only filtering never changes the selected date scope.
-  bridge('filter', 0, search.value, currentTypeFilter());
+  bridge('filter', 0, committedSearchQuery, currentTypeFilter());
 }
 search.addEventListener('input', () => {
-  if (search.value !== '') {
-    document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-    document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
+  // Typing is local only. Searching happens only after Enter.
+});
+search.addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    applyFilters();
   }
-  if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(applyFilters, 160);
 });
 const resultsPanel = document.getElementById('clipboard-items');
 resultsPanel.tabIndex = 0;
@@ -1416,7 +1426,7 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local js
     if append then
-        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");"
+        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");var last=m.querySelector('.load-more-wrap');if(last){last.style.gridColumn='1 / -1';last.style.order='9999';}"
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
@@ -1442,24 +1452,23 @@ function handleClipboardPanelMessage(message)
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
-        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter=kind
-        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("",kind,0,false)
+        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=body.query or ""; clipboard_type_filter=kind
+        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"
+        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=body.query or ""; clipboard_type_filter=body.kind or "all"; browseMode="all"
         local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
         menuData=cached
         browseCursor=loaded
-        updateClipboardPanel("",body.kind or "all",0,false)
+        updateClipboardPanel(body.query or "",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
-        if tostring(body.query or "")~="" then
+        local query=tostring(body.query or "")
+        if body.action=="search" and query~=clipboard_search then
             clipboardDateFilter=nil
             allDatesFilterSelected=false
         end
         local kind=body.kind or clipboard_type_filter or "all"
-        if clipboardDateFilter and tostring(body.query or "")=="" then
-            menuData=loadPersistentDateHistory(clipboardDateFilter,"all")
-        end
-        updateClipboardPanel(body.query or "",kind,0,false)
+        if clipboardDateFilter then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
+        updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
     elseif body.action == "loadTextPreview" then
