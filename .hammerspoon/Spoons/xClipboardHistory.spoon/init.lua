@@ -1193,7 +1193,11 @@ search.addEventListener('input', () => {
 });
 search.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
+    // Enter submits the search only; prevent it from reaching the global
+    // result-selection handler, which uses Enter to paste the selected card.
     event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
     applyFilters();
   }
 });
@@ -1336,6 +1340,8 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (event.key === 'Enter') {
+    // Do not let Enter submit a search fall through to paste a selected result.
+    if (event.target === search) return;
     event.preventDefault();
     const item = items[selectedIndex];
     if (item) bridge('paste', Number(item.dataset.index || 0), '');
