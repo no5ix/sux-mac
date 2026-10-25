@@ -850,6 +850,9 @@ document.addEventListener('click', event => {
     if (action === 'filter') { setActiveFilter(button); return; }
     if (action === 'dateFilter') {
       document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed',b===button?'true':'false'));
+      // A newly selected date starts from All; subsequent type changes preserve it.
+      activeTypeFilters.clear();
+      document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.filter==='all'?'true':'false'));
       bridge('dateFilter',0,'','all',button.dataset.dateKey); return;
     }
     if (action === 'loadMore') {
