@@ -433,17 +433,15 @@ function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
     if item_type == "text" then
         local ok, _, recordIndex = persistClipboardEntry("text", item, cur_ts)
-        if ok then
-            local metadata = {
-                type = "text", ts = cur_ts, dateKey = localDateKey(cur_ts),
-                recordIndex = recordIndex
-            }
-            metadata.key = historyRecordKey(metadata)
-            table.insert(allHistoryMetadata, 1, metadata)
-            historyMetadataByKey[metadata.key] = metadata
-            -- New copies always return the active cache to the latest window.
-            loadWindowFromDisk(1)
-        end
+        if not ok then return end
+        local metadata = {
+            type = "text", ts = cur_ts, dateKey = localDateKey(cur_ts),
+            recordIndex = recordIndex
+        }
+        metadata.key = historyRecordKey(metadata)
+        table.insert(allHistoryMetadata, 1, metadata)
+        historyMetadataByKey[metadata.key] = metadata
+        loadWindowFromDisk(1)
         return
     end
 
@@ -456,22 +454,22 @@ function pasteboardToClipboard(item_type, item)
             return
         end
 
-        local thumbnailPath = nil
-        local thumbnail = nil
-        local thumbnailOK, thumbnailData = pcall(function()
+        local thumbnailData = ""
+        local thumbnailOK, generated = pcall(function()
             local size = item:size()
             local width = tonumber(size and size.w) or 0
             local height = tonumber(size and size.h) or 0
             if width <= 0 or height <= 0 then return "" end
             local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-            thumbnail = item:bitmapRepresentation({
+            local thumbnail = item:bitmapRepresentation({
                 w = math.max(1, math.floor(width * scale + 0.5)),
                 h = math.max(1, math.floor(height * scale + 0.5))
             })
-            return thumbnail and thumbnail:encodeAsURLString() or ""
+            local encoded = thumbnail and thumbnail:encodeAsURLString() or ""
+            thumbnail = nil
+            return encoded
         end)
-        thumbnailData = thumbnailOK and thumbnailData or ""
-        if thumbnail then thumbnail = nil end
+        thumbnailData = thumbnailOK and generated or ""
 
         local records = readDayHistory(dateKey)
         records[#records + 1] = {
@@ -491,27 +489,10 @@ function pasteboardToClipboard(item_type, item)
         metadata.key = historyRecordKey(metadata)
         table.insert(allHistoryMetadata, 1, metadata)
         historyMetadataByKey[metadata.key] = metadata
-        -- New copies always return the active cache to the latest window.
         loadWindowFromDisk(1)
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
-end
-
-local function trimActiveCache()
-    local combined = {}
-    for _, entry in ipairs(text_clipboard_history) do combined[#combined + 1] = {type="text", ts=entry.ts, ref=entry} end
-    for _, entry in ipairs(img_clipboard_history) do combined[#combined + 1] = {type="image", ts=entry.ts, ref=entry} end
-    table.sort(combined, function(a, b) return a.ts > b.ts end)
-    local keep = {}
-    for index = 1, math.min(PAGE_SIZE, #combined) do keep[combined[index].ref] = true end
-    local function trim(history)
-        for index = #history, 1, -1 do
-            if not keep[history[index]] then table.remove(history, index) end
-        end
-    end
-    trim(text_clipboard_history)
-    trim(img_clipboard_history)
 end
 
 -- Add this function to handle clipboard changes
@@ -562,7 +543,7 @@ function handleClipboardChange(content)
             -- local sss = content:encodeAsURLString()
             -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
             pasteboardToClipboard("image", pasteboardImg)
-            trimActiveCache()
+            -- Cache was rebuilt from the latest 30 disk-backed records by pasteboardToClipboard().
             -- print("[handleClipboardChange] img.size.h = " .. content:size()["h"] .. ", img.size.w = " .. content:size()["w"])
             -- print("[handleClipboardChange] img")
         elseif content ~= nil then
@@ -580,11 +561,7 @@ function handleClipboardChange(content)
             local newestImage = img_clipboard_history[1]
             if newestText and newestText.content == content and (not newestImage or newestText.ts >= newestImage.ts) then return end
             pasteboardToClipboard("text", content)
-            trimActiveCache()
-            -- Trim history if it gets too long
-            if #text_clipboard_history > max_history_size_for_text then
-                table.remove(text_clipboard_history, 1)
-            end
+            -- Cache was rebuilt from the latest 30 disk-backed records by pasteboardToClipboard().
             -- print("[handleClipboardChange] text")
         end
     -- end
@@ -765,7 +742,7 @@ function clipboardPanelHTML()
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
     local loadMoreHTML = (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        (activeWindowStart + PAGE_SIZE - 1) .. '">Load More</button></div>' or ''
+        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
