@@ -391,6 +391,25 @@ local function loadWindowFromDisk(startIndex)
     collectgarbage("collect")
 end
 
+local function insertHistoryMetadata(metadata)
+    local panelVisible = clipboard_webview and clipboard_webview:isVisible()
+    local currentWindowKey = panelVisible and allHistoryMetadata[activeWindowStart]
+        and allHistoryMetadata[activeWindowStart].key or nil
+    table.insert(allHistoryMetadata, 1, metadata)
+
+    if panelVisible and currentWindowKey then
+        -- Preserve the visible page after newer entries shift global offsets.
+        for index, record in ipairs(allHistoryMetadata) do
+            if record.key == currentWindowKey then
+                activeWindowStart = index
+                break
+            end
+        end
+    elseif not panelVisible then
+        loadWindowFromDisk(1)
+    end
+end
+
 local function restorePersistentHistory()
     scanPersistentHistoryMetadata()
     loadWindowFromDisk(1)
@@ -492,8 +511,7 @@ function pasteboardToClipboard(item_type, item)
             recordIndex = recordIndex
         }
         metadata.key = historyRecordKey(metadata)
-        table.insert(allHistoryMetadata, 1, metadata)
-        if not (clipboard_webview and clipboard_webview:isVisible()) then loadWindowFromDisk(1) end
+        insertHistoryMetadata(metadata)
         return
     end
 
@@ -524,8 +542,7 @@ function pasteboardToClipboard(item_type, item)
             thumbnailPath = thumbnailPath
         }
         metadata.key = historyRecordKey(metadata)
-        table.insert(allHistoryMetadata, 1, metadata)
-        if not (clipboard_webview and clipboard_webview:isVisible()) then loadWindowFromDisk(1) end
+        insertHistoryMetadata(metadata)
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
