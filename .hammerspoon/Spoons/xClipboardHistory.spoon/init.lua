@@ -1554,7 +1554,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
 
     searchResults = nil
     buildMenuDataFromActiveWindow()
-    local cardsHTML = renderClipboardBatch(query, kind, 0)
+    local cardsHTML, matchingCount = renderClipboardBatch(query, kind, 0)
     local loadMoreHTML = loadedHistoryCount < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         (loadedHistoryCount + 1) .. '">Load More</button></div>' or ''
@@ -1570,7 +1570,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
         script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
     end
     script = script ..
-        "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(#allHistoryMetadata) .. " matching items") .. ";" ..
+        "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(matchingCount) .. " matching items") .. ";" ..
         "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
         "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
         "if(window.resetClipboardSelection)window.resetClipboardSelection();"
