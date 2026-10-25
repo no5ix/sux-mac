@@ -799,21 +799,18 @@ local function searchAllTextHistory(query)
     return matches
 end
 
-local function renderSearchMatches(matches, query, kind)
+local function renderSearchMatches(matches)
     local cards = {}
-    local visible = {}
+    menuData = {}
     for _, entry in ipairs(matches) do
-        if (kind == "all" or kind == "text") and clipboardEntryMatches(entry, query, kind) then
-            visible[#visible + 1] = entry
-        end
+        menuData[#menuData + 1] = entry
     end
-
-    for index, entry in ipairs(visible) do
+    for index, entry in ipairs(menuData) do
         cards[#cards + 1] = historyItemHTML(entry, index)
     end
     visibleIndices = {}
-    for index = 1, #visible do visibleIndices[index] = index end
-    return table.concat(cards, "\\n"), #visible
+    for index = 1, #menuData do visibleIndices[index] = index end
+    return table.concat(cards, "\n"), #menuData
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -1452,8 +1449,12 @@ local function updateClipboardPanel(query, kind, offset, append)
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount
     if query ~= "" then
-        local allTextMatches = searchAllTextHistory(query)
-        cardsHTML, matchingCount = renderSearchMatches(allTextMatches, query, kind)
+        if kind == "image" or kind == "none" then
+            cardsHTML, matchingCount = "", 0
+        else
+            local allTextMatches = searchAllTextHistory(query)
+            cardsHTML, matchingCount = renderSearchMatches(allTextMatches)
+        end
         renderedCount = matchingCount
     else
         cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", kind, offset)
