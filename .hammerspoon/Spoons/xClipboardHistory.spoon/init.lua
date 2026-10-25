@@ -869,7 +869,7 @@ document.addEventListener('click', event => {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
       const selectedKind = currentTypeFilter();
       document.querySelectorAll('[data-action="dateScope"],.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-      if (wasSelected) {
+      if (action === 'dateScope' || wasSelected) {
         allDatesFilterSelected = true;
         document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
         bridge('showLatest',0,'',selectedKind);
@@ -1103,7 +1103,7 @@ function setActiveFilter(button) {
   document.querySelectorAll('.type-filter').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
-  // Text/Images are toggles within the selected date scope.
+  // Keep the date-scope highlight unchanged while toggling type.
   bridge('search', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
@@ -1366,8 +1366,12 @@ function handleClipboardPanelMessage(message)
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
         updateClipboardPanel("",kind,0,false)
     elseif body.action == "search" or body.action == "filter" then
-        if tostring(body.query or "")~="" then clipboardDateFilter=nil end
-        updateClipboardPanel(body.query or "",body.kind or clipboard_type_filter or "all",0,false)
+        if tostring(body.query or "")~="" then
+            clipboardDateFilter=nil
+            allDatesFilterSelected=false
+        end
+        local kind=body.kind or clipboard_type_filter or "all"
+        updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
     elseif body.action == "loadTextPreview" then
