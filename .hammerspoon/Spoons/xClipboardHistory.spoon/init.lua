@@ -797,9 +797,9 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    -- Opening the panel must not scan every daily file just to calculate a count.
-    matchingCount = math.max(matchingCount, #menuData)
-    local hasMoreOnDisk = allHistoryTotalCount == nil or allHistoryTotalCount > renderedCount
+    -- Do not count every daily record just to show this initial page.
+    matchingCount = #menuData
+    local hasMoreOnDisk = true
     local loadMoreHTML = hasMoreOnDisk and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         renderedCount .. '">Load more</button></div>' or ''
