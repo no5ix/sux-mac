@@ -937,9 +937,26 @@ let pointerInsideResults = false;
 let suppressHoverUntilPointerMoves = false;
 let resumeHoverAfterScrollTimer = null;
 function hideHoverDetail(item) {
-  if (item) {
-    item.classList.remove('detail-open');
-    item.classList.remove('preview-loading');
+  if (!item) return;
+  item.classList.remove('detail-open');
+  item.classList.remove('preview-loading');
+
+  // Keep only one full-size hover preview alive at a time.
+  const image = item.querySelector('.hover-image');
+  if (image) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute('src');
+    delete image.dataset.requested;
+    image.style.visibility = 'hidden';
+  }
+
+  // Full text is fetched on hover; don't retain duplicate long-text payloads
+  // in hidden DOM cards after the pointer leaves them.
+  const fullText = item.querySelector('.hover-full-text');
+  if (fullText) {
+    fullText.textContent = 'Loading preview…';
+    fullText.dataset.loaded = 'false';
   }
 }
 function cancelPendingHoverDetail() {
