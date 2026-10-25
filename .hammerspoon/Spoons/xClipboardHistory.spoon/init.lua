@@ -1168,13 +1168,27 @@ window.setTextPreview = (index, content) => {
 const search = document.getElementById('search');
 const activeTypeFilters = new Set();
 let committedSearchQuery = '';
+let previousSearchQuery = '';
 function currentTypeFilter() {
   if (activeTypeFilters.size === 0) return 'all';
   if (activeTypeFilters.size === 2) return 'none';
   return activeTypeFilters.has('text') ? 'text' : 'image';
 }
 function applyFilters() {
-  committedSearchQuery = search.value.trim();
+  const nextQuery = search.value.trim();
+  if (nextQuery === '') {
+    committedSearchQuery = '';
+    // Empty Enter restores the current date/type scope without a query.
+    bridge('search', 0, '', currentTypeFilter());
+    return;
+  }
+  previousSearchQuery = committedSearchQuery;
+  committedSearchQuery = nextQuery;
+  // Query searches operate across all dates so the result set can determine the
+  // correct date highlight instead of accidentally retaining (for example) Today.
+  document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  const allDates = document.querySelector('[data-action="dateScope"]');
+  if (allDates) allDates.setAttribute('aria-pressed', 'true');
   bridge('search', 0, committedSearchQuery, currentTypeFilter());
 }
 function setActiveFilter(button) {
@@ -1189,7 +1203,7 @@ function setActiveFilter(button) {
   bridge('filter', 0, committedSearchQuery, currentTypeFilter());
 }
 search.addEventListener('input', () => {
-  // Typing changes only the input value. Results and date scope change on Enter.
+  // Typing/erasing is local only. Press Enter to apply or clear the search.
 });
 search.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
@@ -1394,19 +1408,11 @@ local function updateClipboardPanel(query,kind,offset,append)
     local previousMenuDataCount=append and #menuData or 0
 
     if query~="" then
-        -- Apply the submitted query inside the active date scope when one is selected.
-        if clipboardDateFilter then
-            local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
-            menuData={}
-            for _,entry in ipairs(dayEntries) do
-                if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
-            end
-            table.sort(menuData,function(a,b)return a.ts>b.ts end)
-            browseMode="date"
-        else
-            menuData=searchPersistentHistory(query,kind)
-            browseMode="search"
-        end
+        -- Search all dates first, letting the date chips narrow matching entries.
+        -- Do not let a stale selected date silently constrain a new query.
+        if browseMode~="search" then clipboardDateFilter=nil end
+        menuData=searchPersistentHistory(query,kind)
+        browseMode="search"
         browseCursor=0
     elseif clipboardDateFilter then
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
@@ -1472,7 +1478,8 @@ function handleClipboardPanelMessage(message)
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
         clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=body.query or ""; clipboard_type_filter=kind
-        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel(body.query or "",kind,0,false)
+        menuData=loadPersistentDateHistory(dateKey,"all")
+        updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
         clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=body.query or ""; clipboard_type_filter=body.kind or "all"; browseMode="all"
         local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
@@ -1481,13 +1488,13 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or "",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         local query=tostring(body.query or "")
-        if body.action=="search" and query~=clipboard_search and query~="" then
-            -- A newly submitted query starts from All Dates; date buttons later
-            -- pass this committed query through the dateFilter action.
-            clipboardDateFilter=nil
-            allDatesFilterSelected=false
-        end
         local kind=body.kind or clipboard_type_filter or "all"
+        if body.action=="search" and query~=clipboard_search then
+            -- Every new submission starts from All Dates. Date chips can then
+            -- narrow these results without carrying over a stale date scope.
+            clipboardDateFilter=nil
+            allDatesFilterSelected=true
+        end
         updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
