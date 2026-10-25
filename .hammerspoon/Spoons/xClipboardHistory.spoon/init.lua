@@ -1529,7 +1529,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
         local hasMore = (first + #searchResults) <= #matchingEntries
         local loadMoreHTML = hasMore and
             '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-            (first + #searchResults + (append and 0 or 0)) .. '">Load More</button></div>' or ''
+            (first + #searchResults) .. '">Load More</button></div>' or ''
         if cardsHTML == "" then cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>' end
         local script
         if append then
