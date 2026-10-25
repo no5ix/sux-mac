@@ -714,32 +714,6 @@ local function getClipboardMatches(query, kind)
     return matches
 end
 
-local function loadWindowFromDisk(startIndex)
-    startIndex = math.max(1, tonumber(startIndex) or 1)
-    activeWindowStart = startIndex
-    activeWindowCount = PAGE_SIZE
-    text_clipboard_history = {}
-    img_clipboard_history = {}
-    menuData = {}
-
-    local last = math.min(#allHistoryMetadata, startIndex + PAGE_SIZE - 1)
-    for index = startIndex, last do
-        local record = allHistoryMetadata[index]
-        if record.type == "text" then
-            text_clipboard_history[#text_clipboard_history + 1] = {
-                ts = record.ts, content = record.content, key = record.key
-            }
-        else
-            img_clipboard_history[#img_clipboard_history + 1] = {
-                ts = record.ts, imagePath = record.imagePath,
-                thumbnailPath = record.thumbnailPath,
-                thumbnailData = record.thumbnailData or "", key = record.key
-            }
-        end
-    end
-    collectgarbage("collect")
-end
-
 local function buildMenuDataFromActiveWindow()
     menuData = {}
     for _, entry in ipairs(text_clipboard_history) do
