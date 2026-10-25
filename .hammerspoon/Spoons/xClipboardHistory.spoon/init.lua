@@ -1643,17 +1643,59 @@ end
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
+    -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
-    clipboard_webview=nil; clipboardPanelHTMLReady=false; clipboard_usercontent=nil
-    clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
+    clipboard_webview=nil
+    clipboardPanelHTMLReady=false
+    clipboard_usercontent=nil
+
+    -- Clear every Lua-owned reference to the expanded browse session.
+    clipboard_search=""
+    clipboard_type_filter="all"
+    clipboardDateFilter=nil
+    lastSearchRestoreDateKey=nil
+    browseMode="all"
+    browseCursor=0
+    typeBrowseCursor={text=nil,image=nil}
     menuData={}
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
     clipboardSessionOpen=false
+    panelCacheKey=nil
+    panelCacheHTML=nil
+    visibleIndices={}
+    selectedVisibleIndex=1
+
+    -- Drop large transient payloads from the retained base cache too; the
+    -- entries are lightweight metadata/path records, but older watcher paths
+    -- may have attached full image objects or data URLs.
+    for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
+        for _,entry in ipairs(list) do
+            if entry.type=="image" then
+                entry.imageObject=nil
+                entry.imageData=nil
+                entry.dataURL=nil
+                entry.thumbnailData=entry.thumbnailData or ""
+            end
+        end
+    end
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
-    if view then view:delete() end
+    if view then
+        pcall(function()
+            view:evaluateJavaScript([[
+                if (window.resetClipboardSelection) window.resetClipboardSelection();
+                if (window.cancelPendingHoverDetail) window.cancelPendingHoverDetail();
+                document.querySelectorAll('img').forEach(function(img) {
+                    img.onload=null; img.onerror=null; img.removeAttribute('src');
+                });
+                document.querySelectorAll('.hover-detail').forEach(function(node) { node.remove(); });
+                document.getElementById('clipboard-items')?.replaceChildren();
+            ]])
+        end)
+        pcall(function() view:delete() end)
+    end
     collectgarbage("collect")
 end
 
@@ -1668,9 +1710,11 @@ local function configureClipboardWebview(view)
                 clipboard_webview = nil
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
-                clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; menuData={}
+                clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
                 dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; clipboardSessionOpen=false
-                trimHistoryCache(CLIPBOARD_CACHE_SIZE); collectgarbage("collect")
+                panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
+                trimHistoryCache(CLIPBOARD_CACHE_SIZE)
+                collectgarbage("collect")
             end
         elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
             hs.timer.doAfter(0.1, function()
