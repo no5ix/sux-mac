@@ -673,9 +673,11 @@ function handleClipboardChange(content)
             -- logger.i("Clipboard history captured text: " .. string.format("%q", content))
 
             -- Skip only an exact duplicate of the newest cached entry.
-            local newestText = text_clipboard_history[1]
-            local newestImage = img_clipboard_history[1]
-            if newestText and newestText.content == content and (not newestImage or newestText.ts >= newestImage.ts) then return end
+            local newestMetadata = allHistoryMetadata[1]
+            if newestMetadata and newestMetadata.type == "text" then
+                local newestRecord = readHistoryEntryRecord(newestMetadata)
+                if newestRecord and newestRecord.content == content then return end
+            end
             pasteboardToClipboard("text", content)
             -- Cache was rebuilt from the latest 30 disk-backed records by pasteboardToClipboard().
             -- print("[handleClipboardChange] text")
@@ -1447,7 +1449,7 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "search" or body.action == "filter" then
         updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadMore" then
-        local nextStart = math.max(1, tonumber(body.index) or (activeWindowStart + PAGE_SIZE))
+        local nextStart = math.max(activeWindowStart + PAGE_SIZE, tonumber(body.index) or 1)
         loadWindowFromDisk(nextStart)
         buildMenuDataFromActiveWindow()
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", 0, false)
@@ -1596,7 +1598,8 @@ createClipboardWebview()
 -- The chooser is displayed newest-first, so walk the selected range backwards.
 local function finishPasteAll()
     restoreNewestClipContent()
-    menuData = {}
+    loadWindowFromDisk(1)
+    buildMenuDataFromActiveWindow()
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
     previousApplication = nil
