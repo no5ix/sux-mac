@@ -308,6 +308,11 @@ local function insertCacheEntry(entry)
     target[#target+1]=entry
     table.sort(target,function(a,b)return a.ts<b.ts end)
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
+    allHistoryTotalCount=nil
+    if clipboardSessionOpen and allHistoryCacheLoaded>0 then
+        table.insert(allHistoryCache,1,entry)
+        allHistoryCacheLoaded=#allHistoryCache
+    end
 end
 
 local function restorePersistentHistory()
@@ -591,15 +596,14 @@ local TEXT_CARD_PREVIEW_MAX_CHARS = 350
 local TEXT_HOVER_MAX_LINES = 30
 
 local function persistentHistoryCount(dateFilter,kind)
-    if not dateFilter and allHistoryCacheLoaded>0 then
-        if not kind or kind=="all" then
-            return allHistoryTotalCount or allHistoryCacheLoaded
-        end
+    if not dateFilter and allHistoryTotalCount then
+        if not kind or kind=="all" then return allHistoryTotalCount end
         local count=0
         for _,entry in ipairs(allHistoryCache) do
             if entry.type==kind then count=count+1 end
         end
-        if allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then return count end
+        -- A type-specific total is exact only after every record is loaded.
+        if allHistoryCacheLoaded>=allHistoryTotalCount then return count end
     end
     local count=0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
@@ -615,7 +619,7 @@ local function persistentHistoryCount(dateFilter,kind)
             end
         end
     end
-    if not dateFilter and (not kind or kind=="all") then allHistoryTotalCount=count end
+    if not dateFilter then allHistoryTotalCount=count end
     return count
 end
 
@@ -623,13 +627,23 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
     offset=math.max(0,tonumber(offset) or 0); count=math.max(1,tonumber(count) or CLIPBOARD_RENDER_BATCH_SIZE)
     local out,skipped={},0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
-        local records=readDayHistory(dateKey)
-        table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
-        for _,record in ipairs(records) do
-            local entry=metadataEntry(record,dateKey)
-            if entry and (not kind or kind=="all" or entry.type==kind) then
-                if skipped<offset then skipped=skipped+1 else
+        local cached=dateHistoryCache[dateKey]
+        local dayEntries=cached
+        if not dayEntries then
+            dayEntries={}
+            for _,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey)
+                if entry then
                     if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
+                    dayEntries[#dayEntries+1]=entry
+                end
+            end
+            table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
+            if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
+        end
+        for _,entry in ipairs(dayEntries) do
+            if not kind or kind=="all" or entry.type==kind then
+                if skipped<offset then skipped=skipped+1 else
                     out[#out+1]=entry
                     if #out>=count then return out end
                 end
@@ -1367,11 +1381,11 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     else
-        -- The session-wide All Dates cache avoids rescanning directories when
-        -- switching back from Today/Yesterday/date filters or toggling Text/Images.
+        -- Reuse the session-wide mixed cache. Only Load More extends it by another
+        -- 32 mixed records; switching back to All Dates or toggling Text/Images is in-memory.
         local required=append and (allHistoryCacheLoaded+CLIPBOARD_RENDER_BATCH_SIZE)
             or math.max(CLIPBOARD_RENDER_BATCH_SIZE,allHistoryCacheLoaded)
-        local cached,loaded,total=ensureAllHistoryCache(required)
+        local cached,loaded=ensureAllHistoryCache(required)
         menuData=cached
         browseCursor=loaded
         browseMode="all"
