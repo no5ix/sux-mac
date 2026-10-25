@@ -696,7 +696,8 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    local hasMoreOnDisk = persistentHistoryCount() > renderedCount
+    matchingCount = persistentHistoryCount()
+    local hasMoreOnDisk = matchingCount > renderedCount
     local loadMoreHTML = hasMoreOnDisk and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         renderedCount .. '">Load more</button></div>' or ''
