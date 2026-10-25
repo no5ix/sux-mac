@@ -1581,6 +1581,13 @@ function showClipboardHistory()
     -- Keep the existing native window/WebView alive for fast repeat opens.
     -- If the user closed it with the red button, recreate it before rendering.
     if not clipboard_webview then createClipboardWebview() end
+    -- Use a local reference for this invocation and all async callbacks.
+    local view = clipboard_webview
+    if not view then
+        logger.e("Unable to create Clipboard History WebView")
+        suppressFocusDismiss = false
+        return
+    end
 
     suppressFocusDismiss = true
     clipboard_search = ""
