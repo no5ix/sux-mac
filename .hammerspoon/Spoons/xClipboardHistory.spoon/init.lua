@@ -1204,11 +1204,12 @@ function applyFilters() {
       document.querySelectorAll('.date-filter').forEach(b => {
         if (b.dataset.dateKey === restoreDate) b.setAttribute('aria-pressed', 'true');
       });
+      bridge('dateFilter', 0, '', currentTypeFilter(), restoreDate);
     } else {
       const allDates = document.querySelector('[data-action="dateScope"]');
       if (allDates) allDates.setAttribute('aria-pressed', 'true');
+      bridge('showLatest', 0, '', currentTypeFilter());
     }
-    bridge('search', 0, '', currentTypeFilter());
     return;
   }
   if (committedSearchQuery === '') {
