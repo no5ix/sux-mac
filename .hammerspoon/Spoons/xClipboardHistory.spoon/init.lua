@@ -865,7 +865,13 @@ main:focus { outline:none; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
-.action.danger { color:#123f91; font-weight:700; }
+.action.danger { color:#991b1b; font-weight:700; }
+@media (prefers-color-scheme: dark) {
+  .action.danger { color:#fb923c; }
+}
+@media (prefers-color-scheme: light) {
+  .action.danger { color:#991b1b; }
+}
 .image-detail { pointer-events:auto; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:34px 12px 12px; }
 .hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
