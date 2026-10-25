@@ -353,6 +353,8 @@ local function loadWindowFromDisk(startIndex)
     img_clipboard_history = {}
     menuData = {}
 
+    -- Temporarily read only the day files needed for this page. Full text and
+    -- thumbnail data never remain in the all-history metadata index.
     local dayCache = {}
     local last = math.min(#allHistoryMetadata, startIndex + PAGE_SIZE - 1)
     for index = startIndex, last do
@@ -374,13 +376,12 @@ local function loadWindowFromDisk(startIndex)
                 if thumbnailPath then
                     thumbnailData = loadThumbnailData(thumbnailPath)
                 elseif type(record.thumbnailData) == "string" then
-                    -- Backward compatibility with older daily JSON records.
+                    -- Older history entries stored thumbnail data in JSON.
                     thumbnailData = record.thumbnailData
                 end
                 img_clipboard_history[#img_clipboard_history + 1] = {
                     ts = metadata.ts, imagePath = record.imagePath,
-                    thumbnailPath = thumbnailPath,
-                    thumbnailData = thumbnailData,
+                    thumbnailPath = thumbnailPath, thumbnailData = thumbnailData,
                     key = metadata.key
                 }
             end
@@ -1474,10 +1475,8 @@ closeClipboardPanel = function()
     visibleIndices = {}
     clipboard_search = ""
     clipboard_type_filter = "all"
+    if view then view:delete() end
     loadWindowFromDisk(1)
-    if view then
-        view:delete()
-    end
     collectgarbage("collect")
 end
 
@@ -1492,6 +1491,12 @@ local function configureClipboardWebview(view)
                 clipboard_webview = nil
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
+                menuData = {}
+                visibleIndices = {}
+                clipboard_search = ""
+                clipboard_type_filter = "all"
+                loadWindowFromDisk(1)
+                collectgarbage("collect")
             end
         elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
             hs.timer.doAfter(0.1, function()
@@ -1685,7 +1690,7 @@ function showClipboardHistory()
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
     local loadMoreHTML = (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        (activeWindowStart + PAGE_SIZE - 1) .. '">Load More</button></div>' or ''
+        (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
     local updateScript = "var main=document.getElementById('clipboard-items');" ..
         "if(!main){throw new Error('clipboard panel DOM is not ready');}" ..
