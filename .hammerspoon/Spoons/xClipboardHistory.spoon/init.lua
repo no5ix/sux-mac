@@ -580,9 +580,16 @@ local TEXT_HOVER_MAX_LINES = 30
 local function persistentHistoryCount(dateFilter,kind)
     local count=0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
-            if entry and (not kind or kind=="all" or entry.type==kind) then count=count+1 end
+        local cached=dateHistoryCache[dateKey]
+        if cached then
+            for _,entry in ipairs(cached) do
+                if not kind or kind=="all" or entry.type==kind then count=count+1 end
+            end
+        else
+            for _,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey)
+                if entry and (not kind or kind=="all" or entry.type==kind) then count=count+1 end
+            end
         end
     end
     return count
@@ -835,7 +842,6 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
-<button class="action filter-button type-filter" data-action="filter" data-filter="all" aria-pressed="true">All types</button>
 <button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
 <button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
@@ -1104,10 +1110,14 @@ function setActiveFilter(button) {
   document.querySelectorAll('.type-filter').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
-  // Keep the selected date highlighted while applying the new type.
-  bridge(clipboardDateFilter ? 'filter' : 'search', 0, search.value, currentTypeFilter());
+  // Type-only filtering never changes the selected date scope.
+  bridge('filter', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
+  if (search.value !== '') {
+    document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
+    document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
+  }
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(applyFilters, 160);
 });
@@ -1300,23 +1310,24 @@ local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
     offset=math.max(0,tonumber(offset) or 0)
+    local previousMenuDataCount=append and #menuData or 0
 
     if query~="" then
         menuData=searchPersistentHistory(query,kind)
         browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
     elseif clipboardDateFilter then
-        -- Date-specific history is session-cached, and the selected type is applied below.
+        -- Keep the full date result set cached in memory for this panel session.
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
-    elseif not append then
-        -- All Dates always uses one mixed chronological cursor, regardless of the type filter.
+    elseif not append and (browseMode~="all" or #menuData==0) then
+        -- Reset to the first mixed page only when entering All Dates browsing.
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=#menuData
         browseMode="all"
     end
 
     if append and query=="" and not clipboardDateFilter then
-        -- Page by 32 mixed records, not 32 records of just one type.
+        -- Advance by the next 32 mixed records, rather than 32 of one type.
         local more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=browseCursor+#more
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
@@ -1329,16 +1340,24 @@ local function updateClipboardPanel(query,kind,offset,append)
             matches[#matches+1]=i
         end
     end
+
     local cards={}
-    for p=1,#matches do cards[#cards+1]=historyItemHTML(menuData[matches[p]],matches[p]) end
+    for _,matchedIndex in ipairs(matches) do
+        if not append or matchedIndex>previousMenuDataCount then
+            cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
+        end
+    end
     local html=table.concat(cards,"\n")
     local hasMore=query=="" and not clipboardDateFilter and persistentHistoryCount()>browseCursor
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
-    if html=="" then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
+    if #matches==0 then
+        html='<div id="no-matches" class="empty">No matching clipboard items</div>'
+    end
     html=html..loadMore
+
     local js
     if append then
-        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");"
+        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e&&"..tostring(#matches>0)..")e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");"
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
