@@ -1524,6 +1524,7 @@ function handleClipboardPanelMessage(message)
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
+        if tostring(body.query or "")=="" then lastSearchRestoreDateKey=nil end
         clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=body.query or ""; clipboard_type_filter=kind
         menuData=loadPersistentDateHistory(dateKey,"all")
         updateClipboardPanel(body.query or "",kind,0,false)
@@ -1538,11 +1539,9 @@ function handleClipboardPanelMessage(message)
         local kind=body.kind or clipboard_type_filter or "all"
         if body.action=="search" and query~=clipboard_search then
             if query=="" then
-                -- Empty query restores the scope saved before search.
                 clipboardDateFilter=lastSearchRestoreDateKey
                 allDatesFilterSelected=clipboardDateFilter==nil
             else
-                -- Save the date selected before entering global search mode.
                 if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 clipboardDateFilter=nil
                 allDatesFilterSelected=true
