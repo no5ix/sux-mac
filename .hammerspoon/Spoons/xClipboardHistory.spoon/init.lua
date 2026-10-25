@@ -1373,10 +1373,9 @@ function handleClipboardPanelMessage(message)
         clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
         menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("","all",0,false)
     elseif body.action == "showLatest" then
-        local kind=body.kind or "all"
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=kind; browseMode="all"; browseCursor=0
+        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"; browseCursor=0
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
-        updateClipboardPanel("",kind,0,false)
+        updateClipboardPanel("",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         if tostring(body.query or "")~="" then
             clipboardDateFilter=nil
@@ -1641,10 +1640,8 @@ function showClipboardHistory()
     end
 
     suppressFocusDismiss = true
+    if not clipboardSessionOpen then dateHistoryCache = {} end
     clipboardSessionOpen = true
-    dateHistoryCache = {}
-    clipboardSessionOpen = true
-    dateHistoryCache = {}
     clipboard_search = ""
     clipboard_type_filter = "all"
     clipboardDateFilter = nil
