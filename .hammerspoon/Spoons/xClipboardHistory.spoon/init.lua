@@ -949,16 +949,33 @@ document.addEventListener('click', event => {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
       const selectedKind = currentTypeFilter();
       const query = committedSearchQuery;
-      if (action === 'dateScope' || wasSelected) {
+      if (query !== '') {
+        // While a search is active, date chips filter its matches; do not
+        // permanently replace the pre-search scope used when search is cleared.
+        if (action === 'dateScope' || wasSelected) {
+          document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
+          allDatesFilterSelected = true;
+          button.setAttribute('aria-pressed','true');
+          bridge('showLatest',0,query,selectedKind);
+        } else {
+          document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
+          button.setAttribute('aria-pressed','true');
+          bridge('dateFilter',0,query,selectedKind,button.dataset.dateKey);
+        }
+      } else if (action === 'dateScope' || wasSelected) {
+        lastNonSearchDateKey = null;
+        lastNonSearchWasAllDates = true;
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = true;
         button.setAttribute('aria-pressed','true');
-        bridge('showLatest',0,query,selectedKind);
+        bridge('showLatest',0,'',selectedKind);
       } else {
+        lastNonSearchDateKey = button.dataset.dateKey;
+        lastNonSearchWasAllDates = false;
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
         allDatesFilterSelected = false;
         button.setAttribute('aria-pressed','true');
-        bridge('dateFilter',0,query,selectedKind,button.dataset.dateKey);
+        bridge('dateFilter',0,'',selectedKind,button.dataset.dateKey);
       }
       return;
     }
@@ -1169,6 +1186,8 @@ const search = document.getElementById('search');
 const activeTypeFilters = new Set();
 let committedSearchQuery = '';
 let previousSearchQuery = '';
+let lastNonSearchDateKey = null;
+let lastNonSearchWasAllDates = true;
 function currentTypeFilter() {
   if (activeTypeFilters.size === 0) return 'all';
   if (activeTypeFilters.size === 2) return 'none';
@@ -1178,14 +1197,21 @@ function applyFilters() {
   const nextQuery = search.value.trim();
   if (nextQuery === '') {
     committedSearchQuery = '';
-    // Empty Enter restores the current date/type scope without a query.
-    bridge('search', 0, '', currentTypeFilter());
+    // Restore the last view that was active before entering search mode.
+    if (lastNonSearchDateKey) {
+      document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', b.dataset.dateKey === lastNonSearchDateKey ? 'true' : 'false'));
+      bridge('dateFilter', 0, '', currentTypeFilter(), lastNonSearchDateKey);
+    } else {
+      document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
+      const allDates = document.querySelector('[data-action="dateScope"]');
+      if (allDates) allDates.setAttribute('aria-pressed', 'true');
+      bridge('showLatest', 0, '', currentTypeFilter());
+    }
     return;
   }
   previousSearchQuery = committedSearchQuery;
   committedSearchQuery = nextQuery;
-  // Query searches operate across all dates so the result set can determine the
-  // correct date highlight instead of accidentally retaining (for example) Today.
+  // A submitted search is global; date chips below narrow the result set.
   document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
   const allDates = document.querySelector('[data-action="dateScope"]');
   if (allDates) allDates.setAttribute('aria-pressed', 'true');
@@ -1408,11 +1434,19 @@ local function updateClipboardPanel(query,kind,offset,append)
     local previousMenuDataCount=append and #menuData or 0
 
     if query~="" then
-        -- Search all dates first, letting the date chips narrow matching entries.
-        -- Do not let a stale selected date silently constrain a new query.
-        if browseMode~="search" then clipboardDateFilter=nil end
-        menuData=searchPersistentHistory(query,kind)
-        browseMode="search"
+        if clipboardDateFilter then
+            -- The date chip is an explicit scope: search only within that date.
+            local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
+            menuData={}
+            for _,entry in ipairs(dayEntries) do
+                if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+            end
+            table.sort(menuData,function(a,b)return a.ts>b.ts end)
+            browseMode="date"
+        else
+            menuData=searchPersistentHistory(query,kind)
+            browseMode="search"
+        end
         browseCursor=0
     elseif clipboardDateFilter then
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
@@ -1490,8 +1524,11 @@ function handleClipboardPanelMessage(message)
         local query=tostring(body.query or "")
         local kind=body.kind or clipboard_type_filter or "all"
         if body.action=="search" and query~=clipboard_search then
-            -- Every new submission starts from All Dates. Date chips can then
-            -- narrow these results without carrying over a stale date scope.
+            -- Remember the previous scope before a global search. New searches
+            -- always start in All Dates; result dates are not inferred as a filter.
+            if clipboardDateFilter then
+                -- Keep the last explicit date scope available when clearing the query.
+            end
             clipboardDateFilter=nil
             allDatesFilterSelected=true
         end
