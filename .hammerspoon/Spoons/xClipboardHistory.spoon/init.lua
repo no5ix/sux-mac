@@ -1198,21 +1198,15 @@ function applyFilters() {
   const nextQuery = search.value.trim();
   if (nextQuery === '') {
     committedSearchQuery = '';
-    // Restore the last view that was active before entering search mode.
-    if (lastNonSearchDateKey) {
-      document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', b.dataset.dateKey === lastNonSearchDateKey ? 'true' : 'false'));
-      bridge('dateFilter', 0, '', currentTypeFilter(), lastNonSearchDateKey);
-    } else {
-      document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
-      const allDates = document.querySelector('[data-action="dateScope"]');
-      if (allDates) allDates.setAttribute('aria-pressed', 'true');
-      bridge('showLatest', 0, '', currentTypeFilter());
-    }
+    // Clear the query without inventing a date selection. The backend restores
+    // the exact prior scope and the UI is synchronized to that scope.
+    bridge('search', 0, '', currentTypeFilter());
     return;
   }
   previousSearchQuery = committedSearchQuery;
   committedSearchQuery = nextQuery;
-  // A submitted search is global; date chips below narrow the result set.
+  // A submitted search is global. It clears the currently highlighted date,
+  // so a result from yesterday cannot remain highlighted as Today.
   document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
   const allDates = document.querySelector('[data-action="dateScope"]');
   if (allDates) allDates.setAttribute('aria-pressed', 'true');
@@ -1231,6 +1225,14 @@ function setActiveFilter(button) {
 }
 search.addEventListener('input', () => {
   // Typing/erasing is local only. Press Enter to apply or clear the search.
+});
+search.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && search.value !== '') {
+    event.preventDefault();
+    event.stopPropagation();
+    search.value = '';
+    applyFilters();
+  }
 });
 search.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
@@ -1526,10 +1528,11 @@ function handleClipboardPanelMessage(message)
         local kind=body.kind or clipboard_type_filter or "all"
         if body.action=="search" and query~=clipboard_search then
             if query=="" then
-                -- Clear-query requests should restore the previous chosen date scope.
-                if lastSearchRestoreDateKey then clipboardDateFilter=lastSearchRestoreDateKey
-                else clipboardDateFilter=nil end
+                -- Restore the last non-search date scope, if one was selected.
+                clipboardDateFilter=lastSearchRestoreDateKey
+                allDatesFilterSelected=clipboardDateFilter==nil
             else
+                -- Save the selected date before a global query clears date scope.
                 if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 clipboardDateFilter=nil
                 allDatesFilterSelected=true
