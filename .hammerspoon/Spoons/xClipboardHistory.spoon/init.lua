@@ -127,6 +127,53 @@ local function saveImageFile(dateKey, item, timestamp)
     end
     return path
 end
+
+local function saveThumbnailFile(dateKey, item, timestamp)
+    local directory = historyImageDirectory(dateKey)
+    if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
+        return nil
+    end
+    local baseName = os.date("%Y%m%d%H%M%S", timestamp) .. "-thumb"
+    local path = directory .. "/" .. baseName .. ".png"
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-thumb-" .. string.format("%03d", counter) .. ".png"
+    end
+
+    local ok, saved = pcall(function()
+        local size = item:size()
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
+        if width <= 0 or height <= 0 then return false end
+        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+        local thumbnail = item:bitmapRepresentation({
+            w = math.max(1, math.floor(width * scale + 0.5)),
+            h = math.max(1, math.floor(height * scale + 0.5))
+        })
+        if not thumbnail then return false end
+        local result = thumbnail:saveToFile(path, false, "PNG")
+        thumbnail = nil
+        return result == true
+    end)
+    if not ok or not saved then
+        os.remove(path)
+        logger.w("Unable to save clipboard thumbnail: " .. tostring(saved))
+        return nil
+    end
+    return path
+end
+
+local function loadThumbnailData(path)
+    if type(path) ~= "string" then return "" end
+    local file = io.open(path, "rb")
+    if not file then return "" end
+    local bytes = file:read("*a")
+    file:close()
+    if not bytes or #bytes == 0 then return "" end
+    return "data:image/png;base64," .. hs.base64.encode(bytes)
+end
+
 local function readDayHistory(dateKey)
     local path = historyJSONPath(dateKey)
     local file = io.open(path, "rb")
