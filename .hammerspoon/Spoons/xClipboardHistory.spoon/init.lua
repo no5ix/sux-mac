@@ -1188,7 +1188,7 @@ function setActiveFilter(button) {
   bridge('filter', 0, committedSearchQuery, currentTypeFilter());
 }
 search.addEventListener('input', () => {
-  // Typing is local only. Searching happens only after Enter.
+  // Typing changes only the input value. Results and date scope change on Enter.
 });
 search.addEventListener('keydown', event => {
   if (event.key === 'Enter') {
@@ -1426,7 +1426,7 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local js
     if append then
-        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");var last=m.querySelector('.load-more-wrap');if(last){last.style.gridColumn='1 / -1';last.style.width='100%';}"
+        js="var m=document.getElementById('clipboard-items');var b=m.querySelector('.load-more-wrap');if(b)b.remove();var e=m.querySelector('.empty');if(e)e.remove();m.insertAdjacentHTML('beforeend',"..jsStringLiteral(html)..");var last=m.querySelector('.load-more-wrap');if(last){last.style.gridColumn='1 / -1';last.style.width='100%';last.style.justifySelf='stretch';last.style.display='flex';last.style.justifyContent='flex-start';}"
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
