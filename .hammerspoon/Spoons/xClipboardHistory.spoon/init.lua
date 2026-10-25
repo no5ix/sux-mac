@@ -1507,9 +1507,14 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
                         historyKey = metadata.key, metadata = metadata,
                         historyEntry = metadata.type == "image" and {
                             ts=metadata.ts,
-                            thumbnailData=(record.thumbnailPath or metadata.thumbnailPath)
-                                and loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath)
-                                or (type(record.thumbnailData) == "string" and record.thumbnailData or ""),
+                            thumbnailData=(function()
+                                local thumbnailPath = record.thumbnailPath or metadata.thumbnailPath
+                                if thumbnailPath then
+                                    local thumbnailData = loadThumbnailData(thumbnailPath)
+                                    if thumbnailData ~= "" then return thumbnailData end
+                                end
+                                return type(record.thumbnailData) == "string" and record.thumbnailData or ""
+                            end)(),
                             thumbnailPath=record.thumbnailPath or metadata.thumbnailPath,
                             imagePath=record.imagePath, key=metadata.key
                         } or nil
@@ -1533,6 +1538,15 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
         local cards = {}
         for index, entry in ipairs(searchResults) do cards[#cards + 1] = historyItemHTML(entry, first + index - 1) end
         local cardsHTML = table.concat(cards, "\n")
+        local thumbnailUpdates = {}
+        for index, entry in ipairs(searchResults) do
+            if entry.type == "image" and entry.historyEntry and entry.historyEntry.thumbnailData
+                and entry.historyEntry.thumbnailData ~= "" then
+                thumbnailUpdates[#thumbnailUpdates + 1] = "window.setImageThumbnail && window.setImageThumbnail(" ..
+                    tostring(first + index - 1) .. "," .. jsStringLiteral(entry.historyEntry.thumbnailData) .. ");"
+            end
+        end
+        local thumbnailScript = table.concat(thumbnailUpdates, "")
         local hasMore = clipboard_date_filter == "all" and (first + #searchResults) <= #matchingEntries
             and query ~= ""
         local loadMoreHTML = hasMore and
@@ -1549,7 +1563,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
         else
             script = "document.getElementById('clipboard-items').innerHTML=" .. jsStringLiteral(cardsHTML .. loadMoreHTML) .. ";"
         end
-        script = script ..
+        script = script .. thumbnailScript ..
             "document.querySelector('.count').textContent=" .. jsStringLiteral(tostring(#matchingEntries) .. " matching items") .. ";" ..
             "document.querySelectorAll('[data-action=filter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(kind) .. "?'true':'false')});" ..
             "document.querySelectorAll('[data-action=dateFilter]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.filter===" .. jsStringLiteral(clipboard_date_filter) .. "?'true':'false')});" ..
