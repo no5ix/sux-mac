@@ -1235,7 +1235,22 @@ function setActiveFilter(button) {
   bridge('filter', 0, committedSearchQuery, currentTypeFilter());
 }
 search.addEventListener('input', () => {
-  // Typing/erasing is local only. Press Enter to apply or clear the search.
+  // Keep normal typing local so searches still run only on Enter. Erasing an
+  // active query is the exception: immediately restore the unsearched scope.
+  if (search.value.trim() === '' && committedSearchQuery !== '') {
+    committedSearchQuery = '';
+    document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    if (lastNonSearchDateKey) {
+      document.querySelectorAll('.date-filter').forEach(b => {
+        if (b.dataset.dateKey === lastNonSearchDateKey) b.setAttribute('aria-pressed', 'true');
+      });
+      bridge('dateFilter', 0, '', currentTypeFilter(), lastNonSearchDateKey);
+    } else {
+      const allDates = document.querySelector('[data-action="dateScope"]');
+      if (allDates) allDates.setAttribute('aria-pressed', 'true');
+      bridge('showLatest', 0, '', currentTypeFilter());
+    }
+  }
 });
 search.addEventListener('keydown', event => {
   if (event.key === 'Escape' && search.value !== '') {
