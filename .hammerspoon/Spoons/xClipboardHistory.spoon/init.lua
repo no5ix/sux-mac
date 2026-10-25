@@ -1498,7 +1498,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
             local dateMatches = clipboard_date_filter == "all"
                 or (clipboard_date_filter == "today" and metadata.dateKey == today)
                 or (clipboard_date_filter == "yesterday" and metadata.dateKey == yesterday)
-                or (clipboard_date_filter == "older" and metadata.dateKey < today)
+                or (clipboard_date_filter == "older" and metadata.dateKey < yesterday)
             if dateMatches and kind ~= "none" and (kind == "all" or metadata.type == kind) then
                 local record = readHistoryEntryRecord(metadata)
                 if record and record.type == metadata.type and tonumber(record.ts) == metadata.ts then
@@ -1507,7 +1507,9 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
                         historyKey = metadata.key, metadata = metadata,
                         historyEntry = metadata.type == "image" and {
                             ts=metadata.ts,
-                            thumbnailData=loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath),
+                            thumbnailData=(record.thumbnailPath or metadata.thumbnailPath)
+                                and loadThumbnailData(record.thumbnailPath or metadata.thumbnailPath)
+                                or (type(record.thumbnailData) == "string" and record.thumbnailData or ""),
                             thumbnailPath=record.thumbnailPath or metadata.thumbnailPath,
                             imagePath=record.imagePath, key=metadata.key
                         } or nil
