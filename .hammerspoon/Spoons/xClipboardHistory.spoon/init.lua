@@ -835,8 +835,9 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
-<button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
-<button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
+<button class="action filter-button type-filter" data-action="filter" data-filter="all" aria-pressed="true">All types</button>
+<button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
+<button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
     local buttons={}
     for ago=0,6 do
@@ -866,19 +867,16 @@ document.addEventListener('click', event => {
     if (action === 'filter') { setActiveFilter(button); return; }
     if (action === 'dateScope' || action === 'dateFilter') {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
+      const selectedKind = currentTypeFilter();
       document.querySelectorAll('[data-action="dateScope"],.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-      if (wasSelected || action === 'dateScope') {
+      if (wasSelected) {
         allDatesFilterSelected = true;
-        activeTypeFilters.clear();
         document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
-        document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed','false'));
-        bridge('showLatest',0,'','all');
+        bridge('showLatest',0,'',selectedKind);
       } else {
         allDatesFilterSelected = false;
         button.setAttribute('aria-pressed','true');
-        activeTypeFilters.clear();
-        document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed','false'));
-        bridge('dateFilter',0,'','all',button.dataset.dateKey);
+        bridge('dateFilter',0,'',selectedKind,button.dataset.dateKey);
       }
       return;
     }
@@ -1102,7 +1100,7 @@ function setActiveFilter(button) {
   const nextKind = wasSelected ? 'all' : kind;
   activeTypeFilters.clear();
   if (nextKind !== 'all') activeTypeFilters.add(nextKind);
-  document.querySelectorAll('[data-action="filter"]').forEach(other => {
+  document.querySelectorAll('.type-filter').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
   // Text/Images are toggles within the selected date scope.
@@ -1309,7 +1307,7 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,kind) end
         browseMode="date"
     elseif not append then
-        -- All Dates always uses one mixed chronological cursor.
+        -- All Dates always uses one mixed chronological cursor regardless of type.
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=#menuData
         browseMode="all"
@@ -1330,10 +1328,8 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
     local complete=clipboardDateFilter~=nil or query~=""
-    local first=1
-    local last=#matches
     local cards={}
-    for p=first,last do cards[#cards+1]=historyItemHTML(menuData[matches[p]],matches[p]) end
+    for p=1,#matches do cards[#cards+1]=historyItemHTML(menuData[matches[p]],matches[p]) end
     local html=table.concat(cards,"\n")
     local hasMore=query=="" and not clipboardDateFilter and persistentHistoryCount()>browseCursor
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
@@ -1346,7 +1342,7 @@ local function updateClipboardPanel(query,kind,offset,append)
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
     local visibleCount=#matches
-    if query=="" and not clipboardDateFilter then visibleCount=persistentHistoryCount() end
+    if query=="" and not clipboardDateFilter then visibleCount=persistentHistoryCount(nil,kind) end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
@@ -1361,12 +1357,14 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "dateFilter" then
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
-        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
-        menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("","all",0,false)
+        local kind=body.kind or "all"
+        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter=kind
+        menuData=loadPersistentDateHistory(dateKey,kind); updateClipboardPanel("",kind,0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter="all"; browseMode="all"; browseCursor=0
+        local kind=body.kind or "all"
+        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=kind; browseMode="all"; browseCursor=0
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
-        updateClipboardPanel("","all",0,false)
+        updateClipboardPanel("",kind,0,false)
     elseif body.action == "search" or body.action == "filter" then
         if tostring(body.query or "")~="" then clipboardDateFilter=nil end
         updateClipboardPanel(body.query or "",body.kind or clipboard_type_filter or "all",0,false)
