@@ -47,6 +47,9 @@ local allDatesFilterSelected = true
 -- Disk-backed records remain cached only for the lifetime of an open panel.
 local clipboardSessionOpen = false
 local dateHistoryCache = {}
+local allHistoryCache = {}
+local allHistoryCacheLoaded = 0
+local allHistoryTotalCount = nil
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -588,6 +591,16 @@ local TEXT_CARD_PREVIEW_MAX_CHARS = 350
 local TEXT_HOVER_MAX_LINES = 30
 
 local function persistentHistoryCount(dateFilter,kind)
+    if not dateFilter and allHistoryCacheLoaded>0 then
+        if not kind or kind=="all" then
+            return allHistoryTotalCount or allHistoryCacheLoaded
+        end
+        local count=0
+        for _,entry in ipairs(allHistoryCache) do
+            if entry.type==kind then count=count+1 end
+        end
+        if allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then return count end
+    end
     local count=0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
         local cached=dateHistoryCache[dateKey]
@@ -602,6 +615,7 @@ local function persistentHistoryCount(dateFilter,kind)
             end
         end
     end
+    if not dateFilter and (not kind or kind=="all") then allHistoryTotalCount=count end
     return count
 end
 
@@ -623,6 +637,30 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
         end
     end
     return out
+end
+
+local function ensureAllHistoryCache(requiredCount)
+    requiredCount=math.max(0,tonumber(requiredCount) or CLIPBOARD_RENDER_BATCH_SIZE)
+    if allHistoryCacheLoaded==0 then
+        allHistoryCache={}
+        for _,entry in ipairs(text_clipboard_history) do allHistoryCache[#allHistoryCache+1]=entry end
+        for _,entry in ipairs(img_clipboard_history) do allHistoryCache[#allHistoryCache+1]=entry end
+        table.sort(allHistoryCache,function(a,b)return a.ts>b.ts end)
+        allHistoryCacheLoaded=#allHistoryCache
+    end
+    while allHistoryCacheLoaded<requiredCount and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount) do
+        local nextPage=loadPersistentHistoryPage(allHistoryCacheLoaded,CLIPBOARD_RENDER_BATCH_SIZE,nil)
+        if #nextPage==0 then
+            allHistoryTotalCount=allHistoryCacheLoaded
+            break
+        end
+        for _,entry in ipairs(nextPage) do allHistoryCache[#allHistoryCache+1]=entry end
+        allHistoryCacheLoaded=#allHistoryCache
+        if #nextPage<CLIPBOARD_RENDER_BATCH_SIZE then
+            allHistoryTotalCount=allHistoryCacheLoaded
+        end
+    end
+    return allHistoryCache,allHistoryCacheLoaded,allHistoryTotalCount
 end
 
 local function loadPersistentDateHistory(dateKey,kind)
@@ -1325,24 +1363,17 @@ local function updateClipboardPanel(query,kind,offset,append)
         menuData=searchPersistentHistory(query,kind)
         browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
     elseif clipboardDateFilter then
-        -- Keep the full selected day cached throughout the open panel session.
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
-    elseif not append and (browseMode~="all" or #menuData==0) then
-        -- Return to All Dates from the retained newest-32 mixed cache, never by rereading disk.
-        menuData={}
-        for _,entry in ipairs(text_clipboard_history) do menuData[#menuData+1]=entry end
-        for _,entry in ipairs(img_clipboard_history) do menuData[#menuData+1]=entry end
-        table.sort(menuData,function(a,b)return a.ts>b.ts end)
-        browseCursor=#menuData
+    else
+        -- The session-wide All Dates cache avoids rescanning directories when
+        -- switching back from Today/Yesterday/date filters or toggling Text/Images.
+        local required=append and (allHistoryCacheLoaded+CLIPBOARD_RENDER_BATCH_SIZE)
+            or math.max(CLIPBOARD_RENDER_BATCH_SIZE,allHistoryCacheLoaded)
+        local cached,loaded,total=ensureAllHistoryCache(required)
+        menuData=cached
+        browseCursor=loaded
         browseMode="all"
-    end
-
-    if append and query=="" and not clipboardDateFilter then
-        -- Load only on demand, advancing by the next 32 mixed records.
-        local more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
-        browseCursor=browseCursor+#more
-        for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
     end
 
     local matches={}
@@ -1360,7 +1391,8 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
     local html=table.concat(cards,"\n")
-    local hasMore=query=="" and not clipboardDateFilter and persistentHistoryCount()>browseCursor
+    local hasMore=query=="" and not clipboardDateFilter
+        and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount)
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
     if #matches==0 then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
     html=html..loadMore
@@ -1371,10 +1403,16 @@ local function updateClipboardPanel(query,kind,offset,append)
     else
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
+
     local visibleCount=#matches
     if query=="" then
-        if clipboardDateFilter then visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
-        else visibleCount=persistentHistoryCount(nil,kind) end
+        if clipboardDateFilter then
+            visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
+        elseif allHistoryTotalCount then
+            visibleCount=kind=="all" and allHistoryTotalCount or #matches
+        else
+            visibleCount=#matches
+        end
     end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
@@ -1394,8 +1432,9 @@ function handleClipboardPanelMessage(message)
         clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter=kind
         menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("",kind,0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"; browseCursor=0
-        menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
+        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter=body.kind or "all"; browseMode="all"
+        menuData=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
+        browseCursor=allHistoryCacheLoaded
         updateClipboardPanel("",body.kind or "all",0,false)
     elseif body.action == "search" or body.action == "filter" then
         if tostring(body.query or "")~="" then
@@ -1485,6 +1524,9 @@ closeClipboardPanel = function()
     clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
     menuData={}
     dateHistoryCache={}
+    allHistoryCache={}
+    allHistoryCacheLoaded=0
+    allHistoryTotalCount=nil
     clipboardSessionOpen=false
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
     if view then view:delete() end
@@ -1503,7 +1545,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; browseMode="all"; browseCursor=0; menuData={}
-                dateHistoryCache={}; clipboardSessionOpen=false
+                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; clipboardSessionOpen=false
                 trimHistoryCache(CLIPBOARD_CACHE_SIZE); collectgarbage("collect")
             end
         elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
@@ -1670,11 +1712,11 @@ function showClipboardHistory()
     browseMode = "all"
     browseCursor = 0
     typeBrowseCursor = {text = nil, image = nil}
-    menuData = {}
-    for _,entry in ipairs(text_clipboard_history) do menuData[#menuData+1]=entry end
-    for _,entry in ipairs(img_clipboard_history) do menuData[#menuData+1]=entry end
-    table.sort(menuData,function(a,b)return a.ts>b.ts end)
-    browseCursor = #menuData
+    allHistoryCache={}
+    allHistoryCacheLoaded=0
+    allHistoryTotalCount=nil
+    menuData=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
+    browseCursor=allHistoryCacheLoaded
 
     local function showAfterHTMLLoaded()
         if clipboard_webview ~= view then return end
