@@ -326,7 +326,7 @@ local function scanPersistentHistoryMetadata()
                             dateKey = name,
                             recordIndex = recordIndex,
                             imagePath = record.type == "image" and record.imagePath or nil,
-                            thumbnailPath = record.thumbnailPath
+                            thumbnailPath = record.type == "image" and record.thumbnailPath or nil
                         }
                         metadata.key = historyRecordKey(metadata)
                         allHistoryMetadata[#allHistoryMetadata + 1] = metadata
