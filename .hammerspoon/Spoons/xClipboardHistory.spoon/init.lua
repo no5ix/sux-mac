@@ -1025,7 +1025,7 @@ document.addEventListener('click', event => {
       return;
     }
     if (action === 'loadMore') {
-      bridge('loadMore', index, search.value, currentTypeFilter());
+      bridge('loadMore', index, search.value, currentTypeFilter(), activeDateFilter);
       return;
     }
     if (action === 'clearAll') {
