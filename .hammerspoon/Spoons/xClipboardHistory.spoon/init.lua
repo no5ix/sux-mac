@@ -21,13 +21,13 @@ local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
 local imageProcessingCount = 0
-local PAGE_SIZE = 30
+local PAGE_SIZE = 32
 local activeWindowStart = 1
 local activeWindowCount = PAGE_SIZE
 local allHistoryMetadata = {}
 
-local text_clipboard_history = {}  -- Bounded active cache: text entries in the current 30-item window
-local img_clipboard_history = {}  -- Bounded active cache: image metadata in the current 30-item window
+local text_clipboard_history = {}  -- Bounded active cache: text entries in the current 32-item window
+local img_clipboard_history = {}  -- Bounded active cache: image metadata in the current 32-item window
 local menuData = {}  -- Only the current window, plus a temporary Load More window while browsing
 local clipboard_webview = nil
 local clipboard_usercontent = nil
@@ -774,6 +774,48 @@ local function historyItemHTML(entry, index)
         '<div class="hover-full-text" data-loaded="false">Loading preview…</div></div></button>'
 end
 
+local function searchAllTextHistory(query)
+    query = string.lower(tostring(query or ""))
+    if query == "" then return {} end
+
+    local matches = {}
+    for _, metadata in ipairs(allHistoryMetadata) do
+        if metadata.type == "text" then
+            local record = readHistoryEntryRecord(metadata)
+            local content = record and type(record.content) == "string" and record.content or nil
+            if content and string.lower(content):find(query, 1, true) then
+                matches[#matches + 1] = {
+                    text = "[" .. os.date("%Y-%m-%d %H:%M:%S", metadata.ts) .. "] " ..
+                        string.sub(content, 1, display_max_text_length),
+                    type = "text",
+                    rowTs = metadata.ts,
+                    data = content,
+                    historyKey = metadata.key,
+                    metadata = metadata
+                }
+            end
+        end
+    end
+    return matches
+end
+
+local function renderSearchMatches(matches, query, kind)
+    local cards = {}
+    local visible = {}
+    for _, entry in ipairs(matches) do
+        if (kind == "all" or kind == "text") and clipboardEntryMatches(entry, query, kind) then
+            visible[#visible + 1] = entry
+        end
+    end
+
+    for index, entry in ipairs(visible) do
+        cards[#cards + 1] = historyItemHTML(entry, index)
+    end
+    visibleIndices = {}
+    for index = 1, #visible do visibleIndices[index] = index end
+    return table.concat(cards, "\\n"), #visible
+end
+
 local function clipboardEntryMatches(entry, query, kind)
     if kind == "none" then return false end
     if kind ~= "all" and entry.type ~= kind then return false end
@@ -1408,8 +1450,16 @@ end
 local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
-    local cardsHTML, matchingCount, renderedCount = renderClipboardBatch(query, kind, offset)
-    local hasMore = kind ~= "none" and (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata
+    local cardsHTML, matchingCount, renderedCount
+    if query ~= "" then
+        local allTextMatches = searchAllTextHistory(query)
+        cardsHTML, matchingCount = renderSearchMatches(allTextMatches, query, kind)
+        renderedCount = matchingCount
+    else
+        cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", kind, offset)
+    end
+    local hasMore = query == "" and kind ~= "none" and
+        (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata
     local loadMoreHTML = hasMore and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         (activeWindowStart + PAGE_SIZE) .. '">Load More</button></div>' or ''
