@@ -1311,17 +1311,18 @@ local function updateClipboardPanel(query,kind,offset,append)
         menuData=searchPersistentHistory(query,kind)
         browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
     elseif clipboardDateFilter then
-        if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,kind) end
+        -- Date-specific history is session-cached, and the selected type is applied below.
+        if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     elseif not append then
-        -- All Dates always uses one mixed chronological cursor regardless of type.
+        -- All Dates always uses one mixed chronological cursor, regardless of the type filter.
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=#menuData
         browseMode="all"
     end
 
     if append and query=="" and not clipboardDateFilter then
-        -- Always append the next 32 mixed records, then apply the type filter.
+        -- Page by 32 mixed records, not 32 records of just one type.
         local more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=browseCursor+#more
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
@@ -1334,7 +1335,6 @@ local function updateClipboardPanel(query,kind,offset,append)
             matches[#matches+1]=i
         end
     end
-    local complete=clipboardDateFilter~=nil or query~=""
     local cards={}
     for p=1,#matches do cards[#cards+1]=historyItemHTML(menuData[matches[p]],matches[p]) end
     local html=table.concat(cards,"\n")
@@ -1349,7 +1349,13 @@ local function updateClipboardPanel(query,kind,offset,append)
         js="document.getElementById('clipboard-items').innerHTML="..jsStringLiteral(html)..";"
     end
     local visibleCount=#matches
-    if query=="" and not clipboardDateFilter then visibleCount=persistentHistoryCount(nil,kind) end
+    if query=="" then
+        if clipboardDateFilter then
+            visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
+        else
+            visibleCount=persistentHistoryCount(nil,kind)
+        end
+    end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
