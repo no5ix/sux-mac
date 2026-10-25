@@ -43,6 +43,10 @@ local clipboardDateFilter = nil
 local browseCursor = 0
 local browseMode = "all"
 local typeBrowseCursor = {text = nil, image = nil}
+local allDatesFilterSelected = true
+-- Disk-backed records remain cached only for the lifetime of an open panel.
+local clipboardSessionOpen = false
+local dateHistoryCache = {}
 -- Disk-backed records remain cached only for the lifetime of an open panel.
 local clipboardSessionOpen = false
 local dateHistoryCache = {}
@@ -830,7 +834,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history…" value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
-<button class="action filter-button" data-action="filter" data-filter="all" aria-pressed="true">All types</button>
+<button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
 <button class="action filter-button" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
 <button class="action filter-button" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
@@ -860,15 +864,20 @@ document.addEventListener('click', event => {
     const action = button.dataset.action;
     const index = Number(button.dataset.index || 0);
     if (action === 'filter') { setActiveFilter(button); return; }
-    if (action === 'dateFilter') {
+    if (action === 'dateScope' || action === 'dateFilter') {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
-      document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-      activeTypeFilters.clear();
-      document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.filter==='all'?'true':'false'));
-      if (wasSelected) {
+      document.querySelectorAll('[data-action="dateScope"],.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
+      if (wasSelected || action === 'dateScope') {
+        allDatesFilterSelected = true;
+        activeTypeFilters.clear();
+        document.querySelector('[data-action="dateScope"]').setAttribute('aria-pressed','true');
+        document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed','false'));
         bridge('showLatest',0,'','all');
       } else {
-        document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed',b===button?'true':'false'));
+        allDatesFilterSelected = false;
+        button.setAttribute('aria-pressed','true');
+        activeTypeFilters.clear();
+        document.querySelectorAll('[data-action="filter"]').forEach(b=>b.setAttribute('aria-pressed','false'));
         bridge('dateFilter',0,'','all',button.dataset.dateKey);
       }
       return;
@@ -1096,7 +1105,7 @@ function setActiveFilter(button) {
   document.querySelectorAll('[data-action="filter"]').forEach(other => {
     other.setAttribute('aria-pressed', other.dataset.filter === nextKind ? 'true' : 'false');
   });
-  // Clicking a selected type again clears it, without clearing the date filter.
+  // Text/Images are toggles within the selected date scope.
   bridge('search', 0, search.value, currentTypeFilter());
 }
 search.addEventListener('input', () => {
@@ -1295,18 +1304,19 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     if query~="" then
         menuData=searchPersistentHistory(query,kind)
-        browseMode="search"; clipboardDateFilter=nil; browseCursor=0; typeBrowseCursor={text=nil,image=nil}
+        browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
     elseif clipboardDateFilter then
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,kind) end
         browseMode="date"
     elseif not append then
-        -- All Dates always pages through the same mixed chronological stream.
+        -- All Dates always uses one mixed chronological cursor.
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=#menuData
         browseMode="all"
     end
 
     if append and query=="" and not clipboardDateFilter then
+        -- Always append the next 32 mixed records, then apply the type filter.
         local more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=browseCursor+#more
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
@@ -1320,8 +1330,8 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
     local complete=clipboardDateFilter~=nil or query~=""
-    local first=complete and 1 or offset+1
-    local last=complete and #matches or math.min(#matches,offset+CLIPBOARD_RENDER_BATCH_SIZE)
+    local first=1
+    local last=#matches
     local cards={}
     for p=first,last do cards[#cards+1]=historyItemHTML(menuData[matches[p]],matches[p]) end
     local html=table.concat(cards,"\n")
@@ -1351,10 +1361,10 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "dateFilter" then
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
-        clipboardDateFilter=dateKey; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
+        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=""; clipboard_type_filter="all"
         menuData=loadPersistentDateHistory(dateKey,"all"); updateClipboardPanel("","all",0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; clipboard_search=""; clipboard_type_filter="all"; browseMode="all"; browseCursor=0
+        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=""; clipboard_type_filter="all"; browseMode="all"; browseCursor=0
         menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil); browseCursor=#menuData
         updateClipboardPanel("","all",0,false)
     elseif body.action == "search" or body.action == "filter" then
@@ -1616,9 +1626,12 @@ function showClipboardHistory()
     suppressFocusDismiss = true
     clipboardSessionOpen = true
     dateHistoryCache = {}
+    clipboardSessionOpen = true
+    dateHistoryCache = {}
     clipboard_search = ""
     clipboard_type_filter = "all"
     clipboardDateFilter = nil
+    allDatesFilterSelected = true
     browseMode = "all"
     browseCursor = 0
     typeBrowseCursor = {text = nil, image = nil}
