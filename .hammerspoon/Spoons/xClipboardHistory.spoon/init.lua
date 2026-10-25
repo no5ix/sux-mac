@@ -47,9 +47,6 @@ local allDatesFilterSelected = true
 -- Disk-backed records remain cached only for the lifetime of an open panel.
 local clipboardSessionOpen = false
 local dateHistoryCache = {}
--- Disk-backed records remain cached only for the lifetime of an open panel.
-local clipboardSessionOpen = false
-local dateHistoryCache = {}
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -312,12 +309,25 @@ end
 
 local function restorePersistentHistory()
     text_clipboard_history,img_clipboard_history={},{}
-    -- Read daily files one at a time and retain only the newest 32 lightweight records.
+    -- Restore the newest 32 mixed records, scanning newest day first and stopping early.
     local dates=historyDateDirectories()
-    for d=#dates,1,-1 do
-        for _,record in ipairs(readDayHistory(dates[d])) do
-            local entry=metadataEntry(record,dates[d])
-            if entry then insertCacheEntry(entry) end
+    local restored=0
+    for _,dateKey in ipairs(dates) do
+        local records=readDayHistory(dateKey)
+        table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
+        for _,record in ipairs(records) do
+            local entry=metadataEntry(record,dateKey)
+            if entry then
+                local target=entry.type=="text" and text_clipboard_history or img_clipboard_history
+                target[#target+1]=entry
+                restored=restored+1
+                if restored>=CLIPBOARD_CACHE_SIZE then
+                    table.sort(text_clipboard_history,function(a,b)return a.ts<b.ts end)
+                    table.sort(img_clipboard_history,function(a,b)return a.ts<b.ts end)
+                    trimHistoryCache(CLIPBOARD_CACHE_SIZE)
+                    return
+                end
+            end
         end
     end
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
@@ -1309,25 +1319,27 @@ end
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
-    offset=math.max(0,tonumber(offset) or 0)
     local previousMenuDataCount=append and #menuData or 0
 
     if query~="" then
         menuData=searchPersistentHistory(query,kind)
         browseMode="search"; clipboardDateFilter=nil; allDatesFilterSelected=false; browseCursor=0
     elseif clipboardDateFilter then
-        -- Keep the full date result set cached in memory for this panel session.
+        -- Keep the full selected day cached throughout the open panel session.
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     elseif not append and (browseMode~="all" or #menuData==0) then
-        -- Reset to the first mixed page only when entering All Dates browsing.
-        menuData=loadPersistentHistoryPage(0,CLIPBOARD_RENDER_BATCH_SIZE,nil)
+        -- Return to All Dates from the retained newest-32 mixed cache, never by rereading disk.
+        menuData={}
+        for _,entry in ipairs(text_clipboard_history) do menuData[#menuData+1]=entry end
+        for _,entry in ipairs(img_clipboard_history) do menuData[#menuData+1]=entry end
+        table.sort(menuData,function(a,b)return a.ts>b.ts end)
         browseCursor=#menuData
         browseMode="all"
     end
 
     if append and query=="" and not clipboardDateFilter then
-        -- Advance by the next 32 mixed records, rather than 32 of one type.
+        -- Load only on demand, advancing by the next 32 mixed records.
         local more=loadPersistentHistoryPage(browseCursor,CLIPBOARD_RENDER_BATCH_SIZE,nil)
         browseCursor=browseCursor+#more
         for _,entry in ipairs(more) do menuData[#menuData+1]=entry end
@@ -1350,9 +1362,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     local html=table.concat(cards,"\n")
     local hasMore=query=="" and not clipboardDateFilter and persistentHistoryCount()>browseCursor
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
-    if #matches==0 then
-        html='<div id="no-matches" class="empty">No matching clipboard items</div>'
-    end
+    if #matches==0 then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
     html=html..loadMore
 
     local js
@@ -1363,11 +1373,8 @@ local function updateClipboardPanel(query,kind,offset,append)
     end
     local visibleCount=#matches
     if query=="" then
-        if clipboardDateFilter then
-            visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
-        else
-            visibleCount=persistentHistoryCount(nil,kind)
-        end
+        if clipboardDateFilter then visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
+        else visibleCount=persistentHistoryCount(nil,kind) end
     end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
@@ -1663,7 +1670,10 @@ function showClipboardHistory()
     browseMode = "all"
     browseCursor = 0
     typeBrowseCursor = {text = nil, image = nil}
-    menuData = loadPersistentHistoryPage(0, CLIPBOARD_RENDER_BATCH_SIZE, nil)
+    menuData = {}
+    for _,entry in ipairs(text_clipboard_history) do menuData[#menuData+1]=entry end
+    for _,entry in ipairs(img_clipboard_history) do menuData[#menuData+1]=entry end
+    table.sort(menuData,function(a,b)return a.ts>b.ts end)
     browseCursor = #menuData
 
     local function showAfterHTMLLoaded()
