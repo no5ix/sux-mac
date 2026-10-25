@@ -1198,15 +1198,25 @@ function applyFilters() {
   const nextQuery = search.value.trim();
   if (nextQuery === '') {
     committedSearchQuery = '';
-    // Clear the query without inventing a date selection. The backend restores
-    // the exact prior scope and the UI is synchronized to that scope.
+    const restoreDate = lastNonSearchDateKey;
+    document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    if (restoreDate) {
+      document.querySelectorAll('.date-filter').forEach(b => {
+        if (b.dataset.dateKey === restoreDate) b.setAttribute('aria-pressed', 'true');
+      });
+    } else {
+      const allDates = document.querySelector('[data-action="dateScope"]');
+      if (allDates) allDates.setAttribute('aria-pressed', 'true');
+    }
     bridge('search', 0, '', currentTypeFilter());
     return;
   }
+  if (committedSearchQuery === '') {
+    const selectedDate = document.querySelector('.date-filter[aria-pressed="true"][data-date-key]');
+    lastNonSearchDateKey = selectedDate ? selectedDate.dataset.dateKey : null;
+  }
   previousSearchQuery = committedSearchQuery;
   committedSearchQuery = nextQuery;
-  // A submitted search is global. It clears the currently highlighted date,
-  // so a result from yesterday cannot remain highlighted as Today.
   document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
   const allDates = document.querySelector('[data-action="dateScope"]');
   if (allDates) allDates.setAttribute('aria-pressed', 'true');
@@ -1528,11 +1538,11 @@ function handleClipboardPanelMessage(message)
         local kind=body.kind or clipboard_type_filter or "all"
         if body.action=="search" and query~=clipboard_search then
             if query=="" then
-                -- Restore the last non-search date scope, if one was selected.
+                -- Empty query restores the scope saved before search.
                 clipboardDateFilter=lastSearchRestoreDateKey
                 allDatesFilterSelected=clipboardDateFilter==nil
             else
-                -- Save the selected date before a global query clears date scope.
+                -- Save the date selected before entering global search mode.
                 if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 clipboardDateFilter=nil
                 allDatesFilterSelected=true
