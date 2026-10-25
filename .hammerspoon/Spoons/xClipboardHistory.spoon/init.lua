@@ -25,6 +25,7 @@ local PAGE_SIZE = 32
 local activeWindowStart = 1
 local activeWindowCount = PAGE_SIZE
 local allHistoryMetadata = {}
+local searchResults = nil
 
 local text_clipboard_history = {}  -- Bounded active cache: text entries in the current 32-item window
 local img_clipboard_history = {}  -- Bounded active cache: image metadata in the current 32-item window
@@ -801,16 +802,13 @@ end
 
 local function renderSearchMatches(matches)
     local cards = {}
-    menuData = {}
-    for _, entry in ipairs(matches) do
-        menuData[#menuData + 1] = entry
-    end
-    for index, entry in ipairs(menuData) do
+    searchResults = matches
+    for index, entry in ipairs(searchResults) do
         cards[#cards + 1] = historyItemHTML(entry, index)
     end
     visibleIndices = {}
-    for index = 1, #menuData do visibleIndices[index] = index end
-    return table.concat(cards, "\n"), #menuData
+    for index = 1, #searchResults do visibleIndices[index] = index end
+    return table.concat(cards, "\n"), #searchResults
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -1444,10 +1442,32 @@ local function pasteHistoryEntry(index)
     end)
 end
 
+local function pasteHistoryEntryFromRecord(choice)
+    if not choice or choice.type ~= "text" then return end
+    pasteboard_watcher:stop()
+    pasteboard.setContents(choice.data)
+    if clipboard_webview then clipboard_webview:hide() end
+    hs.timer.doAfter(0.15, function()
+        if previousApplication and previousApplication:isRunning() then
+            previousApplication:activate(true)
+        end
+        hs.timer.doAfter(0.35, function()
+            hs.eventtap.keyStroke({"cmd"}, "v", 0)
+            hs.timer.doAfter(0.6, function()
+                restoreNewestClipContent()
+                pasteboard_watcher:start()
+                searchResults = nil
+                previousApplication = nil
+            end)
+        end)
+    end)
+end
+
 local function updateClipboardPanel(query, kind, offset, append)
     query = tostring(query or "")
     if kind ~= "text" and kind ~= "image" and kind ~= "none" then kind = "all" end
     local cardsHTML, matchingCount, renderedCount
+    if query == "" then searchResults = nil end
     if query ~= "" then
         if kind == "image" or kind == "none" then
             cardsHTML, matchingCount = "", 0
@@ -1508,7 +1528,7 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = clipboard_search ~= "" and searchResults and searchResults[index] or (index and menuData[index])
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
@@ -1551,7 +1571,12 @@ function handleClipboardPanelMessage(message)
             )
         end
     elseif body.action == "paste" then
-        pasteHistoryEntry(tonumber(body.index))
+        local index = tonumber(body.index)
+        if clipboard_search ~= "" and searchResults and searchResults[index] then
+            pasteHistoryEntryFromRecord(searchResults[index])
+        else
+            pasteHistoryEntry(index)
+        end
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "clearAll" then
@@ -1596,6 +1621,7 @@ closeClipboardPanel = function()
     clipboardPanelHTMLReady = false
     clipboard_usercontent = nil
     menuData = {}
+    searchResults = nil
     visibleIndices = {}
     clipboard_search = ""
     clipboard_type_filter = "all"
@@ -1616,6 +1642,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 menuData = {}
+                searchResults = nil
                 visibleIndices = {}
                 clipboard_search = ""
                 clipboard_type_filter = "all"
@@ -1776,6 +1803,7 @@ function showClipboardHistory()
     buildMenuDataFromActiveWindow()
 
     clipboard_search = ""
+    searchResults = nil
     clipboard_type_filter = "all"
     local view = clipboard_webview
     if not view then
