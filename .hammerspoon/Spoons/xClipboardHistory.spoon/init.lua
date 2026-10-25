@@ -174,7 +174,7 @@ local function persistClipboardEntry(itemType, content, timestamp)
         if record.imagePath then os.remove(record.imagePath) end
         return false
     end
-    return true, record.imagePath
+    return true, record.imagePath, #records
 end
 
 local function removeExpiredHistoryDirectories(todayKey)
@@ -255,7 +255,7 @@ local display_max_text_length = 200
 
 local function historyRecordKey(record)
     return tostring(record.type) .. ":" .. tostring(record.ts) .. ":" ..
-        tostring(record.type == "image" and record.imagePath or record.content)
+        tostring(record.dateKey or "") .. ":" .. tostring(record.recordIndex or record.imagePath or "")
 end
 
 local function scanPersistentHistoryMetadata()
@@ -269,24 +269,26 @@ local function scanPersistentHistoryMetadata()
     local ok, err = pcall(function()
         for name in fs.dir(HISTORY_ROOT) do
             if validDateKey(name) then
-                for _, record in ipairs(readDayHistory(name)) do
+                local records = readDayHistory(name)
+                for recordIndex, record in ipairs(records) do
                     local timestamp = tonumber(record.ts)
                     if timestamp and
                         ((record.type == "text" and type(record.content) == "string") or
                          (record.type == "image" and type(record.imagePath) == "string")) then
-                        local normalized = {
+                        local metadata = {
                             type = record.type,
                             ts = timestamp,
-                            content = record.type == "text" and record.content or nil,
+                            dateKey = name,
+                            recordIndex = recordIndex,
                             imagePath = record.type == "image" and record.imagePath or nil,
-                            thumbnailPath = record.thumbnailPath,
-                            thumbnailData = type(record.thumbnailData) == "string" and record.thumbnailData or nil
+                            thumbnailPath = record.thumbnailPath
                         }
-                        normalized.key = historyRecordKey(normalized)
-                        allHistoryMetadata[#allHistoryMetadata + 1] = normalized
-                        historyMetadataByKey[normalized.key] = normalized
+                        metadata.key = historyRecordKey(metadata)
+                        allHistoryMetadata[#allHistoryMetadata + 1] = metadata
+                        historyMetadataByKey[metadata.key] = metadata
                     end
                 end
+                records = nil
             end
         end
     end)
@@ -298,40 +300,46 @@ local function scanPersistentHistoryMetadata()
     end)
 end
 
-local function loadHistoryWindow(startIndex, count)
+local function loadWindowFromDisk(startIndex)
     startIndex = math.max(1, tonumber(startIndex) or 1)
-    count = math.min(PAGE_SIZE, math.max(0, tonumber(count) or PAGE_SIZE))
+    activeWindowStart = startIndex
+    activeWindowCount = PAGE_SIZE
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
-    activeWindowStart = startIndex
-    activeWindowCount = count
 
-    local last = math.min(#allHistoryMetadata, startIndex + count - 1)
+    local dayCache = {}
+    local last = math.min(#allHistoryMetadata, startIndex + PAGE_SIZE - 1)
     for index = startIndex, last do
-        local record = allHistoryMetadata[index]
-        if record.type == "text" then
-            text_clipboard_history[#text_clipboard_history + 1] = {
-                ts = record.ts,
-                content = record.content,
-                key = record.key
-            }
-        elseif record.type == "image" then
-            img_clipboard_history[#img_clipboard_history + 1] = {
-                ts = record.ts,
-                imagePath = record.imagePath,
-                thumbnailPath = record.thumbnailPath,
-                thumbnailData = record.thumbnailData or "",
-                key = record.key
-            }
+        local metadata = allHistoryMetadata[index]
+        local records = dayCache[metadata.dateKey]
+        if not records then
+            records = readDayHistory(metadata.dateKey)
+            dayCache[metadata.dateKey] = records
+        end
+        local record = records[metadata.recordIndex]
+        if record and tonumber(record.ts) == metadata.ts and record.type == metadata.type then
+            if metadata.type == "text" and type(record.content) == "string" then
+                text_clipboard_history[#text_clipboard_history + 1] = {
+                    ts = metadata.ts, content = record.content, key = metadata.key
+                }
+            elseif metadata.type == "image" and type(record.imagePath) == "string" then
+                img_clipboard_history[#img_clipboard_history + 1] = {
+                    ts = metadata.ts, imagePath = record.imagePath,
+                    thumbnailPath = metadata.thumbnailPath,
+                    thumbnailData = type(record.thumbnailData) == "string" and record.thumbnailData or "",
+                    key = metadata.key
+                }
+            end
         end
     end
+    dayCache = nil
     collectgarbage("collect")
 end
 
 local function restorePersistentHistory()
     scanPersistentHistoryMetadata()
-    loadHistoryWindow(1, PAGE_SIZE)
+    loadWindowFromDisk(1)
 end
 -- Store images as compressed data URLs in history. Decode them only when the
 -- user selects an image to paste, not for every row in the chooser.
@@ -422,19 +430,17 @@ end
 function pasteboardToClipboard(item_type, item)
     local cur_ts = os.time()
     if item_type == "text" then
-        local entry = {type="text", ts=cur_ts, content=item}
-        table.insert(text_clipboard_history, 1, {ts=cur_ts, content=item})
-        local ok = persistClipboardEntry("text", item, cur_ts)
+        local ok, _, recordIndex = persistClipboardEntry("text", item, cur_ts)
         if ok then
-            entry.key = historyRecordKey(entry)
-            table.insert(allHistoryMetadata, 1, entry)
-            historyMetadataByKey[entry.key] = entry
-        end
-        while #text_clipboard_history > PAGE_SIZE do table.remove(text_clipboard_history) end
-        while #allHistoryMetadata > 0 and #text_clipboard_history + #img_clipboard_history > PAGE_SIZE do
-            local tail = allHistoryMetadata[#allHistoryMetadata]
-            if not tail then break end
-            table.remove(allHistoryMetadata)
+            local metadata = {
+                type = "text", ts = cur_ts, dateKey = localDateKey(cur_ts),
+                recordIndex = recordIndex
+            }
+            metadata.key = historyRecordKey(metadata)
+            table.insert(allHistoryMetadata, 1, metadata)
+            historyMetadataByKey[metadata.key] = metadata
+            table.insert(text_clipboard_history, 1, {ts = cur_ts, content = item, key = metadata.key})
+            trimActiveCache()
         end
         return
     end
@@ -465,33 +471,29 @@ function pasteboardToClipboard(item_type, item)
         thumbnailData = thumbnailOK and thumbnailData or ""
         if thumbnail then thumbnail = nil end
 
-        local record = {
-            type = "image",
-            ts = cur_ts,
-            imagePath = imagePath,
-            thumbnailData = thumbnailData ~= "" and thumbnailData or nil
-        }
-        record.key = historyRecordKey(record)
         local records = readDayHistory(dateKey)
         records[#records + 1] = {
             type = "image", ts = cur_ts, imagePath = imagePath,
-            thumbnailData = record.thumbnailData
+            thumbnailData = thumbnailData ~= "" and thumbnailData or nil
         }
+        local recordIndex = #records
         if not writeDayHistory(dateKey, records) then
             logger.e("Clipboard screenshot was saved but its history record could not be written")
             return
         end
 
-        table.insert(allHistoryMetadata, 1, record)
-        historyMetadataByKey[record.key] = record
+        local metadata = {
+            type = "image", ts = cur_ts, dateKey = dateKey,
+            recordIndex = recordIndex, imagePath = imagePath
+        }
+        metadata.key = historyRecordKey(metadata)
+        table.insert(allHistoryMetadata, 1, metadata)
+        historyMetadataByKey[metadata.key] = metadata
         table.insert(img_clipboard_history, 1, {
             ts = cur_ts, imagePath = imagePath,
-            thumbnailData = record.thumbnailData or "", key = record.key
+            thumbnailData = thumbnailData or "", key = metadata.key
         })
-        while #img_clipboard_history > PAGE_SIZE do table.remove(img_clipboard_history) end
-        while #allHistoryMetadata > 0 and #text_clipboard_history + #img_clipboard_history > PAGE_SIZE do
-            table.remove(allHistoryMetadata)
-        end
+        trimActiveCache()
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
