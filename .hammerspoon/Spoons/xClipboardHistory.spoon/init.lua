@@ -1532,6 +1532,7 @@ local function updateClipboardPanel(query, kind, offset, append, dateFilter, req
         for index, entry in ipairs(searchResults) do cards[#cards + 1] = historyItemHTML(entry, first + index - 1) end
         local cardsHTML = table.concat(cards, "\n")
         local hasMore = clipboard_date_filter == "all" and (first + #searchResults) <= #matchingEntries
+            and query ~= ""
         local loadMoreHTML = hasMore and
             '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
             (first + #searchResults) .. '">Load More</button></div>' or ''
