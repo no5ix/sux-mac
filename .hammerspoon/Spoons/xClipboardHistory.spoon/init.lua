@@ -439,8 +439,8 @@ function pasteboardToClipboard(item_type, item)
             metadata.key = historyRecordKey(metadata)
             table.insert(allHistoryMetadata, 1, metadata)
             historyMetadataByKey[metadata.key] = metadata
-            table.insert(text_clipboard_history, 1, {ts = cur_ts, content = item, key = metadata.key})
-            trimActiveCache()
+            -- New copies always return the active cache to the latest window.
+            loadWindowFromDisk(1)
         end
         return
     end
@@ -489,11 +489,8 @@ function pasteboardToClipboard(item_type, item)
         metadata.key = historyRecordKey(metadata)
         table.insert(allHistoryMetadata, 1, metadata)
         historyMetadataByKey[metadata.key] = metadata
-        table.insert(img_clipboard_history, 1, {
-            ts = cur_ts, imagePath = imagePath,
-            thumbnailData = thumbnailData or "", key = metadata.key
-        })
-        trimActiveCache()
+        -- New copies always return the active cache to the latest window.
+        loadWindowFromDisk(1)
     end)
     imageProcessingCount = math.max(0, imageProcessingCount - 1)
     if not ok then logger.e("Clipboard screenshot processing failed: " .. tostring(err)) end
@@ -593,14 +590,14 @@ end
 
 -- restore the newest clipboard content
 function restoreNewestClipContent()
-    local newestText = text_clipboard_history[1]
-    local newestImage = img_clipboard_history[1]
-    if not newestText and not newestImage then return end
-    if newestImage and (not newestText or newestImage.ts > newestText.ts) then
-        local image = decodeImage(newestImage)
+    local newest = allHistoryMetadata[1]
+    if not newest then return end
+    if newest.type == "image" then
+        local image = decodeImage(newest)
         if image then pasteboard.writeObjects(image) end
-    elseif newestText then
-        pasteboard.setContents(newestText.content)
+    else
+        local loaded = text_clipboard_history[1]
+        if loaded and loaded.key == newest.key then pasteboard.setContents(loaded.content) end
     end
 end
 
@@ -753,8 +750,8 @@ local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
     offset = math.max(0, tonumber(offset) or 0)
-    -- Use consistent 60-item pagination for text and image filters.
-    local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
+    -- Render the loaded 30-item window. Filtering never fetches additional records.
+    local batchSize = PAGE_SIZE
     local last = math.min(#matches, offset + batchSize)
     for position = offset + 1, last do
         local index = matches[position]
@@ -769,7 +766,7 @@ function clipboardPanelHTML()
     clipboard_search = ""
     clipboard_type_filter = "all"
     local initialCardsHTML = cardsHTML ~= "" and cardsHTML or '<div id="no-matches" class="empty">No clipboard items</div>'
-    local loadMoreHTML = renderedCount < matchingCount and
+    local loadMoreHTML = (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
         (activeWindowStart + PAGE_SIZE - 1) .. '">Load More</button></div>' or ''
     local html = [[
@@ -1329,7 +1326,7 @@ local function updateClipboardPanel(query, kind, offset, append)
     local hasMore = kind ~= "none" and (activeWindowStart + PAGE_SIZE - 1) < #allHistoryMetadata
     local loadMoreHTML = hasMore and
         '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="' ..
-        renderedCount .. '">Load more (' .. (matchingCount - renderedCount) .. ' remaining)</button></div>' or ''
+        (activeWindowStart + PAGE_SIZE - 1) .. '">Load More</button></div>' or ''
     if cardsHTML == "" and not append then
         cardsHTML = '<div id="no-matches" class="empty">No matching clipboard items</div>'
     end
@@ -1368,8 +1365,8 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "search" or body.action == "filter" then
         updateClipboardPanel(body.query or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadMore" then
-        local pageOffset = math.max(0, tonumber(body.index) or 0)
-        loadWindowFromDisk(pageOffset + 1)
+        local nextStart = math.max(1, tonumber(body.index) or (activeWindowStart + PAGE_SIZE))
+        loadWindowFromDisk(nextStart)
         buildMenuDataFromActiveWindow()
         updateClipboardPanel(body.query or clipboard_search or "", body.kind or clipboard_type_filter or "all", 0, false)
     elseif body.action == "loadTextPreview" then
