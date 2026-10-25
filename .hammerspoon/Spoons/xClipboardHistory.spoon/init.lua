@@ -492,6 +492,8 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    searchResults = nil
+    clipboard_search = ""
     allHistoryMetadata = {}
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
@@ -1397,7 +1399,7 @@ search.focus();
 end
 
 local function pasteHistoryEntry(index)
-    local choice = menuData and menuData[index]
+    local choice = (clipboard_search ~= "" and searchResults and searchResults[index]) or (menuData and menuData[index])
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
     if choice.type == "text" then
@@ -1436,27 +1438,6 @@ local function pasteHistoryEntry(index)
                 restoreNewestClipContent()
                 pasteboard_watcher:start()
                 menuData = {}
-                previousApplication = nil
-            end)
-        end)
-    end)
-end
-
-local function pasteHistoryEntryFromRecord(choice)
-    if not choice or choice.type ~= "text" then return end
-    pasteboard_watcher:stop()
-    pasteboard.setContents(choice.data)
-    if clipboard_webview then clipboard_webview:hide() end
-    hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
-        hs.timer.doAfter(0.35, function()
-            hs.eventtap.keyStroke({"cmd"}, "v", 0)
-            hs.timer.doAfter(0.6, function()
-                restoreNewestClipContent()
-                pasteboard_watcher:start()
-                searchResults = nil
                 previousApplication = nil
             end)
         end)
@@ -1571,12 +1552,7 @@ function handleClipboardPanelMessage(message)
             )
         end
     elseif body.action == "paste" then
-        local index = tonumber(body.index)
-        if clipboard_search ~= "" and searchResults and searchResults[index] then
-            pasteHistoryEntryFromRecord(searchResults[index])
-        else
-            pasteHistoryEntry(index)
-        end
+        pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "clearAll" then
