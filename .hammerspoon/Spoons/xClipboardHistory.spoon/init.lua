@@ -620,6 +620,7 @@ function handleClipboardChange(content)
     if cleanupOnNextClipboardChange then
         cleanupOnNextClipboardChange = false
         runDailyCleanupIfNeeded(true)
+        scanPersistentHistoryMetadata()
     else
         runDailyCleanupIfNeeded()
     end
