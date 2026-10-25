@@ -1713,6 +1713,13 @@ local function configureClipboardWebview(view)
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
                 dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; clipboardSessionOpen=false
                 panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
+                for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
+                    for _,entry in ipairs(list) do
+                        if entry.type=="image" then
+                            entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil
+                        end
+                    end
+                end
                 trimHistoryCache(CLIPBOARD_CACHE_SIZE)
                 collectgarbage("collect")
             end
@@ -1749,6 +1756,7 @@ local function finishPasteAll()
     if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
     pasteboard_watcher:start()
     previousApplication = nil
+    collectgarbage("collect")
     hs.alert.show("The Paste task has finished.")
 end
 
