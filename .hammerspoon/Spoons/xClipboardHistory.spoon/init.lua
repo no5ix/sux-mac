@@ -1829,10 +1829,9 @@ local function configureClipboardWebview(view)
                 trimHistoryCache(CLIPBOARD_CACHE_SIZE)
                 collectgarbage("collect")
             end
-        -- Do not dismiss on focus loss alone. A browser may briefly change
-        -- keyboard focus while the user is pasting into login/API-key fields.
-        -- Outside mouse clicks are handled by the dedicated mouse monitor below.
         end
+        -- Deliberately ignore focusChange. Outside mouse clicks are handled
+        -- by the dedicated monitor below.
     end)
 end
 
