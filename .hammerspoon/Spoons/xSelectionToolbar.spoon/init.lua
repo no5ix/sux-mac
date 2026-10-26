@@ -27,27 +27,41 @@ local CHATGPT_PROMPT = [[Please proofread the following text. Make minimal chang
 
 local CUSTOM_AI_BUTTONS = {
     {
-        id = "translation",
-        label = "Translation",
-        icon = "🌏",
-        prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
-    },
-    {
+        id = "Chinese",
+        label = "Chinese",
+        icon = "🀄️",
+        prompt = [[
+            Translate the input text into highly colloquial, natural-sounding Chinese, as if a native Chinese speaker were chatting casually with a friend.
+
+            - Use everyday spoken Chinese rather than formal, written, or textbook-style language
+            - Adapt expressions freely when necessary to make the translation sound natural in Chinese, while preserving the original meaning, tone, and intent
+            - Appropriately incorporate common Chinese conversational expressions, slang, interjections, and even mild profanity when they fit the context. For example, use expressions like “那差别可太他妈大了” when they naturally convey the intended meaning
+            - Match the emotional intensity and personality of the original text. Don't force slang, profanity, or catchphrases into every sentence
+            - Prefer concise, fluent expressions that people actually use in everyday conversations
+            - Do not add explanations, notes, quotation marks, or any content that is not part of the translation
+            - **Never use periods (。 or .) at the end of sentences or paragraphs**. Use commas, question marks, exclamation marks, or other appropriate punctuation when needed
+            - Output only the final Chinese translation.
+
+            **Text to Process:**
+
+            {{text}}
+        ]],
+    },{
         id = "Polishing",
         label = "Polishing",
         icon = "👞",
         prompt = [[
-            Organize the speech-to-text content, and only output the final text, without adding other content.  
-            - Be faithful to the original meaning, not adding or altering the original text's meaning.  
-            - Delete tone words, repeated content, and extra colloquial vocabulary.  
+            **Organize the speech-to-text content rules:**
+
+            - Proofread the original text and fix grammar, spelling, punctuation, and missing words with minimal changes. Strictly preserve the original meaning, word choices, and sentence structure. Do not rewrite, paraphrase, or improve the writing style. Only make changes necessary for grammatical correctness and natural readability. 
+            - Delete tone words, repeated content, and extra colloquial vocabulary. Remove all “um” and “uh” fillers and unnecessary pauses, and merge sentence fragments into complete, natural sentences where necessary.   
             - Clarify the sentence order, ensuring logical flow.  
-            - Identify punctuation marks in the input text and modify them to the corresponding symbols, for example, "bar" → "-", "etc." → "……".  
+            - Identify punctuation marks in the input text and modify them to the corresponding symbols, for example, "bar" → "-", "etc." → "……".   
             - Consider the context and determine the scene, identify possible errors in the speech recognition due to similar sounds, and restore them to the correct words or proper nouns, for example, "scale" → "Skill", "Cloud" → "Claude".  
             - Identify numbers in the input text and convert them to Arabic numerals.  
-
-            When the input text is long, additional content formatting is needed.  
-            - Consider whether the input text has a logical relationship, use paragraphs, line breaks, ordered lists ("-", "1. ", "2. "), and present it in a structured format.  
-            - If the input text does not have a clear hierarchical relationship or is short, no structural formatting adjustments are made.  
+            - When the input text is long, additional content formatting is needed. Consider whether the input text has a logical relationship, use paragraphs, line breaks, ordered lists ("-", "1. ", "2. "), and present it in a structured format. 
+            - When the input text contains sequential or transitional markers such as "First," "Second," "Third," "Finally," or similar expressions, convert the relevant content into a numbered list (e.g., "1. ", "2. ", "3. "). Preserve the original meaning and wording as much as possible, ensuring that each list item represents a distinct point or step. Remove the original transitional markers when they become redundant after formatting.
+            - only output the final text, without adding other content.  
 
             **Text to Process:**
 
