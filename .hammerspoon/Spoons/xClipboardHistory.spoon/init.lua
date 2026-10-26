@@ -1862,7 +1862,9 @@ closeClipboardPanel = function()
                 entry.imageObject=nil
                 entry.imageData=nil
                 entry.dataURL=nil
-                entry.thumbnailData=entry.thumbnailData or ""
+                -- Keep the lightweight thumbnail file on disk, but release its
+                -- base64 data URL from RAM. It will be loaded on the next visit.
+                entry.thumbnailData=""
             end
         end
     end
