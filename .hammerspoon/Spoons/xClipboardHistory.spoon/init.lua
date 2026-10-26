@@ -1747,10 +1747,7 @@ end
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
     -- Stop global monitoring before destroying the panel.
-    if outsideClickMonitor then
-        outsideClickMonitor:stop()
-        outsideClickMonitor = nil
-    end
+    stopOutsideClickMonitor()
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1840,17 +1837,10 @@ end
 
 local clipboardPanelHTMLReady = false
 
--- Close the clipboard history only when the user clicks outside its native
--- window, not whenever it loses keyboard focus. This prevents browser input
--- fields (including password/API-key fields) from dismissing the panel merely
--- because WebKit/macOS changes focus during a paste workflow.
+-- Close the panel after an outside click, while ignoring focus changes alone.
+-- This keeps clicks in browser inputs from being treated as an automatic dismiss.
 local outsideClickMonitor = nil
-local function stopOutsideClickMonitor()
-    if outsideClickMonitor then
-        outsideClickMonitor:stop()
-        outsideClickMonitor = nil
-    end
-end
+local closeOutsideClickPending = false
 
 local function pointIsInsideClipboardPanel(point)
     local view = clipboard_webview
@@ -1859,6 +1849,13 @@ local function pointIsInsideClipboardPanel(point)
     if not frame then return false end
     return point.x >= frame.x and point.x <= frame.x + frame.w
         and point.y >= frame.y and point.y <= frame.y + frame.h
+end
+
+local function stopOutsideClickMonitor()
+    if outsideClickMonitor then
+        outsideClickMonitor:stop()
+        outsideClickMonitor = nil
+    end
 end
 
 local function startOutsideClickMonitor()
@@ -1872,13 +1869,18 @@ local function startOutsideClickMonitor()
 
         local point = hs.mouse.absolutePosition()
         if not pointIsInsideClipboardPanel(point) then
-            -- Defer destruction until after the click has been delivered to the
-            -- target app, so the click itself retains its normal behavior.
-            hs.timer.doAfter(0, function()
-                if clipboard_webview == view and view:isVisible() then
-                    closeClipboardPanel()
-                end
-            end)
+            -- Only schedule one dismissal for a single outside click. The
+            -- click is not swallowed, so it still reaches the target app.
+            if not closeOutsideClickPending then
+                closeOutsideClickPending = true
+                hs.timer.doAfter(0, function()
+                    closeOutsideClickPending = false
+                    if clipboard_webview == view and view:isVisible()
+                        and not pointIsInsideClipboardPanel(hs.mouse.absolutePosition()) then
+                        closeClipboardPanel()
+                    end
+                end)
+            end
         end
         return false
     end)
