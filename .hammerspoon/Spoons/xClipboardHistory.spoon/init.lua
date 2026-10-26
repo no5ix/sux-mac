@@ -1414,9 +1414,15 @@ window.resetClipboardSelection = () => {
 };
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu';
-contextMenu.innerHTML = '<button type="button">Paste All the rows above this row in the order from early to late, including this row</button>';
+contextMenu.innerHTML =
+  '<button type="button" data-context-action="pasteAll">Paste All the rows above this row in the order from early to late, including this row</button>' +
+  '<button type="button" data-context-action="copy">Copy</button>';
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
-contextMenu.querySelector('button').style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+contextMenu.querySelectorAll('button').forEach(button => {
+  button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+  button.addEventListener('mouseenter', () => { button.style.background = '#3a4250'; });
+  button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
+});
 document.body.appendChild(contextMenu);
 let contextRowIndex = 0;
 document.addEventListener('contextmenu', event => {
@@ -1431,18 +1437,19 @@ document.addEventListener('contextmenu', event => {
   contextMenu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)) + 'px';
   contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)) + 'px';
 });
-contextMenu.querySelector('button').addEventListener('mouseenter', () => {
-  contextMenu.querySelector('button').style.background = '#3a4250';
-});
-contextMenu.querySelector('button').addEventListener('mouseleave', () => {
-  contextMenu.querySelector('button').style.background = 'transparent';
-});
-contextMenu.querySelector('button').addEventListener('click', event => {
+contextMenu.addEventListener('click', event => {
+  const button = event.target.closest('button[data-context-action]');
+  if (!button) return;
   event.preventDefault();
   event.stopPropagation();
   const rowIndex = contextRowIndex;
+  const action = button.dataset.contextAction;
   contextMenu.style.display = 'none';
-  bridge('pasteAllFrom', rowIndex, '');
+  if (action === 'pasteAll') {
+    bridge('pasteAllFrom', rowIndex, '');
+  } else if (action === 'copy') {
+    bridge('copyHistoryEntry', rowIndex, '');
+  }
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
@@ -1722,6 +1729,32 @@ function handleClipboardPanelMessage(message)
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
+    elseif body.action == "copyHistoryEntry" then
+        local index = tonumber(body.index)
+        local choice = index and menuData[index]
+        if not choice or (choice.type ~= "text" and choice.type ~= "image") then
+            hs.alert.show("Unable to copy this clipboard item")
+            return
+        end
+
+        pasteboard_watcher:stop()
+        local copyOK = false
+        if choice.type == "text" then
+            copyOK = pasteboard.setContents(tostring(choice.data or choice.content or "")) ~= false
+        else
+            local image = decodeImage(choice.historyEntry or choice)
+            if image then
+                copyOK = pasteboard.writeObjects(image) ~= false
+            end
+            image = nil
+            collectgarbage("collect")
+        end
+        pasteboard_watcher:start()
+        if copyOK then
+            hs.alert.show("Copied to clipboard — press Cmd+V to paste")
+        else
+            hs.alert.show("Unable to copy this clipboard item")
+        end
     elseif body.action == "clearAll" then
         clearClipboardHistory()
         if clipboard_webview then
