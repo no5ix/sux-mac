@@ -690,10 +690,7 @@ local function loadPersistentDateHistory(dateKey,kind)
         allEntries={}
         for _,record in ipairs(readDayHistory(dateKey)) do
             local entry=metadataEntry(record,dateKey)
-            if entry then
-                if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                allEntries[#allEntries+1]=entry
-            end
+            if entry then allEntries[#allEntries+1]=entry end
         end
         table.sort(allEntries,function(a,b)return a.ts>b.ts end)
         if clipboardSessionOpen then dateHistoryCache[dateKey]=allEntries end
@@ -710,15 +707,22 @@ local function searchPersistentHistory(query,kind)
     local out={}; local needle=string.lower(tostring(query or ""))
     if needle=="" then return out end
     for _,dateKey in ipairs(historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
-            if entry and (not kind or kind=="all" or entry.type==kind) then
+        local cached=dateHistoryCache[dateKey]
+        local dayEntries=cached
+        if not dayEntries then
+            dayEntries={}
+            for _,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey)
+                if entry then dayEntries[#dayEntries+1]=entry end
+            end
+            table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
+            if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
+        end
+        for _,entry in ipairs(dayEntries) do
+            if not kind or kind=="all" or entry.type==kind then
                 local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
-                if string.lower(value.." "..stamp):find(needle,1,true) then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                    out[#out+1]=entry
-                end
+                if string.lower(value.." "..stamp):find(needle,1,true) then out[#out+1]=entry end
             end
         end
     end
@@ -731,6 +735,10 @@ local function historyItemHTML(entry, index)
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=imageEntry.thumbnailData or ""
+        if thumbnail=="" and imageEntry.imagePath then
+            thumbnail=makeThumbnailAtPath(imageEntry.imagePath)
+            imageEntry.thumbnailData=thumbnail
+        end
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="eager" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
