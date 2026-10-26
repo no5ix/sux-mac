@@ -77,6 +77,10 @@ local function historyImageDirectory(dateKey)
     return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-images"
 end
 
+local function historyThumbnailDirectory(dateKey)
+    return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-thumbnails"
+end
+
 local function ensureDirectory(path)
     if fs.attributes(path) then return true end
     local parent = path:match("^(.*)/[^/]+$")
@@ -140,6 +144,34 @@ local function saveImageFile(dateKey, item, timestamp)
     end
     return path
 end
+local function saveThumbnailFile(dateKey, originalPath, thumbnailImage, timestamp)
+    local directory = historyThumbnailDirectory(dateKey)
+    if not ensureDirectory(HISTORY_ROOT)
+        or not ensureDirectory(historyDayDirectory(dateKey))
+        or not ensureDirectory(directory) then
+        return nil
+    end
+
+    local originalName = originalPath:match("([^/]+)$") or os.date("%Y%m%d%H%M%S", timestamp)
+    local baseName = originalName:gsub("%.[^.]+$", "")
+    local path = directory .. "/" .. baseName .. ".jpg"
+    local counter = 1
+    while fs.attributes(path) do
+        counter = counter + 1
+        path = directory .. "/" .. baseName .. "-" .. string.format("%03d", counter) .. ".jpg"
+    end
+
+    local ok, saved = pcall(function()
+        return thumbnailImage:saveToFile(path, false, "JPEG")
+    end)
+    if not ok or saved ~= true then
+        os.remove(path)
+        logger.w("Unable to save clipboard thumbnail: " .. tostring(saved))
+        return nil
+    end
+    return path
+end
+
 local function readDayHistory(dateKey)
     local path = historyJSONPath(dateKey)
     local file = io.open(path, "rb")
@@ -301,9 +333,14 @@ local function metadataEntry(record,dateKey)
     if record.type=="text" and type(record.content)=="string" then
         return {type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
     end
-    if record.type=="image" and type(record.imagePath)=="string" and fs.attributes(record.imagePath) then
-        return {type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=record.imagePath,
-            thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""}
+    if record.type=="image" and type(record.imagePath)=="string" then
+        -- Keep ordinary history loading independent of image-file I/O and decoding.
+        return {
+            type="image", ts=ts, rowTs=ts, dateKey=dateKey, imagePath=record.imagePath,
+            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil,
+            -- Older records remain readable without a disruptive migration.
+            thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+        }
     end
     return nil
 end
@@ -360,17 +397,45 @@ local function readImageAtPath(path)
     logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
 end
 
-local function makeThumbnailAtPath(path)
-    local original=readImageAtPath(path); if not original then return "" end
-    local ok,result=pcall(function()
-        local size=original:size(); local w,h=tonumber(size and size.w) or 0,tonumber(size and size.h) or 0
-        if w<=0 or h<=0 then return "" end
-        local scale=math.min(1,THUMBNAIL_MAX_DIMENSION/w,THUMBNAIL_MAX_DIMENSION/h)
-        local thumb=original:bitmapRepresentation({w=math.max(1,math.floor(w*scale+0.5)),h=math.max(1,math.floor(h*scale+0.5))})
-        return thumb and thumb:encodeAsURLString() or ""
+local function makeThumbnailImage(original)
+    if not original then return nil end
+    local ok, result = pcall(function()
+        local size = original:size()
+        local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
+        if width <= 0 or height <= 0 then return nil end
+        local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
+        return original:bitmapRepresentation({
+            w = math.max(1, math.floor(width * scale + 0.5)),
+            h = math.max(1, math.floor(height * scale + 0.5))
+        })
     end)
-    original=nil; collectgarbage("collect")
-    return ok and result or ""
+    if not ok then
+        logger.w("Unable to generate clipboard thumbnail: " .. tostring(result))
+        return nil
+    end
+    return result
+end
+
+local function thumbnailDataURLAtPath(path)
+    if type(path) ~= "string" or path == "" then return "" end
+    local file = io.open(path, "rb")
+    if not file then return "" end
+    local bytes = file:read("*a")
+    file:close()
+    if not bytes or #bytes == 0 then return "" end
+    local extension = string.lower(path:match("%.([%w]+)$") or "jpg")
+    local mime = extension == "png" and "image/png" or "image/jpeg"
+    return "data:" .. mime .. ";base64," .. hs.base64.encode(bytes)
+end
+
+local function thumbnailForEntry(entry)
+    if not entry then return "" end
+    if type(entry.thumbnailPath) == "string" and entry.thumbnailPath ~= "" then
+        local thumbnailData = thumbnailDataURLAtPath(entry.thumbnailPath)
+        if thumbnailData ~= "" then return thumbnailData end
+    end
+    -- Legacy embedded thumbnails remain available; never regenerate on a browse path.
+    return type(entry.thumbnailData) == "string" and entry.thumbnailData or ""
 end
 
 local function decodeImage(entry)
@@ -455,19 +520,24 @@ function pasteboardToClipboard(item_type,item)
         local dateKey=localDateKey(ts)
         local imagePath=saveImageFile(dateKey,item,ts)
         if not imagePath then logger.e("Clipboard image could not be saved"); return end
-        local thumbnailData=""
-        local thumbOK,thumb=pcall(function()
-            local size=item:size(); local w,h=tonumber(size and size.w) or 0,tonumber(size and size.h) or 0
-            if w<=0 or h<=0 then return "" end
-            local scale=math.min(1,THUMBNAIL_MAX_DIMENSION/w,THUMBNAIL_MAX_DIMENSION/h)
-            local thumb=item:bitmapRepresentation({w=math.max(1,math.floor(w*scale+0.5)),h=math.max(1,math.floor(h*scale+0.5))})
-            return thumb and thumb:encodeAsURLString() or ""
-        end)
-        if thumbOK then thumbnailData=thumb or "" end
+        -- Generate the thumbnail immediately when the copy is captured, then
+        -- persist it separately so later panel openings can reuse the file.
+        local thumbnailImage = makeThumbnailImage(item)
+        local thumbnailPath = thumbnailImage and saveThumbnailFile(dateKey, imagePath, thumbnailImage, ts) or nil
+        thumbnailImage = nil
+
         local records=readDayHistory(dateKey)
-        records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailData=thumbnailData}
-        if not writeDayHistory(dateKey,records) then logger.e("Clipboard image record could not be persisted"); return end
-        insertCacheEntry({type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,thumbnailData=thumbnailData})
+        records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailPath=thumbnailPath}
+        if not writeDayHistory(dateKey,records) then
+            if thumbnailPath then os.remove(thumbnailPath) end
+            os.remove(imagePath)
+            logger.e("Clipboard image record could not be persisted")
+            return
+        end
+        insertCacheEntry({
+            type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,
+            thumbnailPath=thumbnailPath,thumbnailData=""
+        })
     end)
     imageProcessingCount=math.max(0,imageProcessingCount-1)
     item=nil; collectgarbage("collect")
@@ -639,7 +709,6 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
             for _,record in ipairs(readDayHistory(dateKey)) do
                 local entry=metadataEntry(record,dateKey)
                 if entry then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
                     dayEntries[#dayEntries+1]=entry
                 end
             end
@@ -685,19 +754,21 @@ local function ensureAllHistoryCache(requiredCount)
 end
 
 local function loadPersistentDateHistory(dateKey,kind)
+    local startedAt = hs.timer.secondsSinceEpoch()
     local allEntries=dateHistoryCache[dateKey]
     if not allEntries then
         allEntries={}
         for _,record in ipairs(readDayHistory(dateKey)) do
             local entry=metadataEntry(record,dateKey)
             if entry then
-                if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
                 allEntries[#allEntries+1]=entry
             end
         end
         table.sort(allEntries,function(a,b)return a.ts>b.ts end)
         if clipboardSessionOpen then dateHistoryCache[dateKey]=allEntries end
     end
+    logger.i(string.format("Clipboard metadata date load %s: %d records in %.3f ms",
+        tostring(dateKey), #allEntries, (hs.timer.secondsSinceEpoch() - startedAt) * 1000))
     if not kind or kind=="all" then return allEntries end
     local filtered={}
     for _,entry in ipairs(allEntries) do
@@ -716,7 +787,6 @@ local function searchPersistentHistory(query,kind)
                 local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
                 if string.lower(value.." "..stamp):find(needle,1,true) then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
                     out[#out+1]=entry
                 end
             end
@@ -730,8 +800,8 @@ local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
-        local thumbnail=imageEntry.thumbnailData or ""
-        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="eager" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
+        local thumbnail=thumbnailForEntry(imageEntry)
+        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
@@ -1568,7 +1638,7 @@ function handleClipboardPanelMessage(message)
         browseMode="date"
         clipboard_search=body.query or ""
         clipboard_type_filter=kind
-        menuData=loadPersistentDateHistory(dateKey,"all")
+        -- updateClipboardPanel performs a single metadata-only date cache lookup.
         updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
         -- If a query is active, return to its cached cross-date result set.
