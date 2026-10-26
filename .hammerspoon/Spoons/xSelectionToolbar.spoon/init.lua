@@ -844,9 +844,9 @@ function obj:start()
     local pendingCapture = false
     local eventTapHealthTimer = nil
 
-    -- Keep the selection toolbar available for normal reading and pointer
-    -- travel; this timeout is only a long safety net for stale selections.
-    local TOOLBAR_VISIBLE_TIMEOUT = 30
+    -- Hide the selection toolbar three seconds after showing it. Duplicate
+    -- selection detections must not keep extending the toolbar's lifetime.
+    local TOOLBAR_VISIBLE_TIMEOUT = 3
 
     local function scheduleToolbarExpiry()
         if toolbarExpiryTimer then
@@ -938,8 +938,8 @@ function obj:start()
         -- Suppress duplicate detections from the same gesture, but don't suppress
         -- later selections just because the selected text matches the previous one.
         if toolbar and toolbar:isVisible() and selectedText == value then
-            lastShownAt = now
-            scheduleToolbarExpiry()
+            -- Treat this as a duplicate event from the same selection gesture,
+            -- not a new show request: do not reset the three-second countdown.
             return true
         end
         -- A hidden toolbar must never suppress a genuine new selection, even if
