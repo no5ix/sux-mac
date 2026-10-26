@@ -2056,9 +2056,9 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- Bring the panel above normal windows, then use a harmless click on
-        -- its title bar to request actual AppKit activation. Raising a window
-        -- alone doesn't make its app receive mouse/keyboard events.
+        -- Show the panel above normal windows and focus it directly. Avoid
+        -- synthetic mouse clicks and repeated activation attempts: they can
+        -- move the pointer and make hover behavior feel delayed.
         local nativeWindow = view:hswindow()
         if not nativeWindow then
             logger.w("Clipboard History window unavailable after show")
@@ -2068,37 +2068,7 @@ function showClipboardHistory()
             view:orderAbove()
             nativeWindow:raise()
             nativeWindow:focus()
-
-            -- A title-bar click activates the visible window without selecting a
-            -- clipboard item or disturbing the destination input field.
-            local originalMousePosition = hs.mouse.absolutePosition()
-            local windowFrame = nativeWindow:frame()
-            if windowFrame then
-                local activationPoint = {
-                    x = windowFrame.x + math.min(180, windowFrame.w / 2),
-                    y = windowFrame.y + math.max(12, math.min(16, windowFrame.h / 2))
-                }
-                hs.timer.doAfter(0.05, function()
-                    if clipboard_webview ~= view or not view:isVisible() then return end
-                    hs.eventtap.leftClick(activationPoint, 50000)
-                    hs.timer.doAfter(0.05, function()
-                        hs.mouse.absolutePosition(originalMousePosition)
-                        if clipboard_webview ~= view or not view:isVisible() then return end
-                        local focusedWindow = hs.window.focusedWindow()
-                        local currentNativeWindow = view:hswindow()
-                        local ownsFocus = focusedWindow and currentNativeWindow
-                            and focusedWindow:id() == currentNativeWindow:id()
-                        local frontmost = application.frontmostApplication()
-                        if not ownsFocus then
-                            logger.w("Clipboard History title-bar activation failed; frontmost app="
-                                .. tostring(frontmost and frontmost:bundleID())
-                                .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
-                        end
-                    end)
-                end)
-            else
-                logger.w("Clipboard History native window has no frame for activation")
-            end
+            view:focus()
         end
         startOutsideClickMonitor()
     end
