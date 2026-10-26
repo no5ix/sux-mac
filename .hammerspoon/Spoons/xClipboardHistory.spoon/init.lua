@@ -320,6 +320,37 @@ local function insertCacheEntry(entry)
     end
 end
 
+local function thumbnailPathForImage(path)
+    if type(path)~="string" or path=="" then return nil end
+    local parent=path:match("^(.*)/[^/]+$")
+    if not parent then return nil end
+    return parent.."/thumbnails/"..(path:match("([^/]+)$") or "image")..".jpg"
+end
+
+local function readCachedThumbnail(path)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath then return "" end
+    local file=io.open(thumbPath,"rb")
+    if not file then return "" end
+    local bytes=file:read("*a")
+    file:close()
+    if not bytes or #bytes==0 then return "" end
+    return "data:image/jpeg;base64,"..hs.base64.encode(bytes)
+end
+
+local function writeCachedThumbnail(path, data)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath or type(data)~="string" or data=="" then return false end
+    local directory=thumbPath:match("^(.*)/[^/]+$")
+    if not directory or not ensureDirectory(directory) then return false end
+    local base64=data:match("^data:image/[%w%+%.%-]+;base64,(.+)$")
+    if not base64 then return false end
+    local bytes=hs.base64.decode(base64)
+    if type(bytes)~="string" or bytes=="" then return false end
+    return atomicWrite(thumbPath,bytes)
+end
+
+
 local function restorePersistentHistory()
     text_clipboard_history,img_clipboard_history={},{}
     -- Restore the newest 32 mixed records, scanning newest day first and stopping early.
@@ -360,35 +391,6 @@ local function readImageAtPath(path)
     logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
 end
 
-local function thumbnailPathForImage(path)
-    if type(path)~="string" or path=="" then return nil end
-    local parent=path:match("^(.*)/[^/]+$")
-    if not parent then return nil end
-    return parent.."/thumbnails/"..(path:match("([^/]+)$") or "image")..".jpg"
-end
-
-local function readCachedThumbnail(path)
-    local thumbPath=thumbnailPathForImage(path)
-    if not thumbPath then return "" end
-    local file=io.open(thumbPath,"rb")
-    if not file then return "" end
-    local bytes=file:read("*a")
-    file:close()
-    if not bytes or #bytes==0 then return "" end
-    return "data:image/jpeg;base64,"..hs.base64.encode(bytes)
-end
-
-local function writeCachedThumbnail(path, data)
-    local thumbPath=thumbnailPathForImage(path)
-    if not thumbPath or type(data)~="string" or data=="" then return false end
-    local directory=thumbPath:match("^(.*)/[^/]+$")
-    if not directory or not ensureDirectory(directory) then return false end
-    local base64=data:match("^data:image/[%w%+%.%-]+;base64,(.+)$")
-    if not base64 then return false end
-    local bytes=hs.base64.decode(base64)
-    if type(bytes)~="string" or bytes=="" then return false end
-    return atomicWrite(thumbPath,bytes)
-end
 
 local function makeThumbnailAtPath(path)
     local cached=readCachedThumbnail(path)
@@ -1506,6 +1508,8 @@ end
 local thumbnailQueue = {}
 local thumbnailQueueTimer = nil
 local thumbnailQueueGeneration = 0
+
+
 
 local function hasThumbnailCached(imagePath)
     if not imagePath then return false end
