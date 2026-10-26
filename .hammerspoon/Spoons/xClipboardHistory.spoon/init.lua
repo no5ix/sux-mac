@@ -1926,7 +1926,15 @@ local function activateClipboardPanel(view)
         attempts = attempts + 1
         local nativeWindow = view:hswindow()
         if not nativeWindow then
-            logger.w("Clipboard History activation failed: native window unavailable")
+            logger.w("Clipboard History activation attempt " .. attempts
+                .. ": native window unavailable")
+            if attempts < maxAttempts then
+                panelActivationTimer = hs.timer.doAfter(0.08, attempt)
+            else
+                panelActivationTimer = nil
+                logger.e("Clipboard History window remained unavailable after "
+                    .. maxAttempts .. " attempts")
+            end
             return
         end
 
