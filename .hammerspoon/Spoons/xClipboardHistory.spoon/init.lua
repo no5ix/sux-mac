@@ -2059,6 +2059,7 @@ function showClipboardHistory()
             else
                 logger.w("Clipboard History window unavailable after show")
             end
+            startOutsideClickMonitor()
         end)
     end
 
