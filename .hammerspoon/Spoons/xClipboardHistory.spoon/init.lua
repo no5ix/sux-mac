@@ -2055,7 +2055,11 @@ function showClipboardHistory()
             if clipboard_webview ~= view then return end
             local nativeWindow = view:hswindow()
             if nativeWindow then
+                -- Explicitly raise and focus the panel. WebView focus alone
+                -- isn't sufficient when another app is already frontmost.
+                nativeWindow:raise()
                 nativeWindow:focus()
+                view:bringToFront(true)
             else
                 logger.w("Clipboard History window unavailable after show")
             end
