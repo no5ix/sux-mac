@@ -1947,6 +1947,11 @@ local function activateClipboardPanel(view)
                 .. ": native window has no owning application yet")
         end
         if app then
+            -- Focus the specific history window, not merely the application:
+            -- activate(true) may instead focus Hammerspoon Console if it is the
+            -- application's remembered key window.
+            nativeWindow:raise()
+            nativeWindow:focus()
             local activated = app:activate(true)
             nativeWindow:focus()
             nativeWindow:raise()
