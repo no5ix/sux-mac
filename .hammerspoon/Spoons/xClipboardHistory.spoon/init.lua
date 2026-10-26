@@ -51,6 +51,10 @@ local dateHistoryCache = {}
 local allHistoryCache = {}
 local allHistoryCacheLoaded = 0
 local allHistoryTotalCount = nil
+-- Hold one completed global search per query/type for this open-panel session.
+-- Switching date chips or returning to All Dates reuses these matches instead
+-- of scanning every persisted daily history file again.
+local searchResultsCache = nil
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -1470,16 +1474,28 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     if query~="" then
         if clipboardDateFilter then
-            -- The date chip is an explicit scope: search only within that date.
-            local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
-            menuData={}
-            for _,entry in ipairs(dayEntries) do
-                if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+            -- Date views are subsets of the already computed global query results.
+            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+                menuData={}
+                for _,entry in ipairs(searchResultsCache.entries) do
+                    if entry.dateKey==clipboardDateFilter then menuData[#menuData+1]=entry end
+                end
+            else
+                local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
+                menuData={}
+                for _,entry in ipairs(dayEntries) do
+                    if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+                end
             end
             table.sort(menuData,function(a,b)return a.ts>b.ts end)
             browseMode="date"
         else
-            menuData=searchPersistentHistory(query,kind)
+            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+                menuData=searchResultsCache.entries
+            else
+                menuData=searchPersistentHistory(query,kind)
+                searchResultsCache={query=query,kind=kind,entries=menuData}
+            end
             browseMode="search"
         end
         browseCursor=0
@@ -1547,26 +1563,52 @@ function handleClipboardPanelMessage(message)
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
         if tostring(body.query or "")=="" then lastSearchRestoreDateKey=nil end
-        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=body.query or ""; clipboard_type_filter=kind
+        clipboardDateFilter=dateKey
+        allDatesFilterSelected=false
+        browseMode="date"
+        clipboard_search=body.query or ""
+        clipboard_type_filter=kind
         menuData=loadPersistentDateHistory(dateKey,"all")
         updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=body.query or ""; clipboard_type_filter=body.kind or "all"; browseMode="all"
-        local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
-        menuData=cached
-        browseCursor=loaded
-        updateClipboardPanel(body.query or "",body.kind or "all",0,false)
+        -- If a query is active, return to its cached cross-date result set.
+        -- Do not perform another persistent-history search when switching back.
+        local query=tostring(body.query or "")
+        local kind=body.kind or "all"
+        clipboardDateFilter=nil
+        allDatesFilterSelected=true
+        clipboard_search=query
+        clipboard_type_filter=kind
+        if query~="" then
+            browseMode="search"
+            if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+            end
+            menuData=searchResultsCache.entries
+            browseCursor=0
+            updateClipboardPanel(query,kind,0,false)
+        else
+            browseMode="all"
+            local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
+            menuData=cached
+            browseCursor=loaded
+            updateClipboardPanel("",kind,0,false)
+        end
     elseif body.action == "search" or body.action == "filter" then
         local query=tostring(body.query or "")
         local kind=body.kind or clipboard_type_filter or "all"
-        if body.action=="search" and query~=clipboard_search then
+        if body.action=="search" then
             if query=="" then
+                searchResultsCache=nil
                 clipboardDateFilter=lastSearchRestoreDateKey
                 allDatesFilterSelected=clipboardDateFilter==nil
             else
                 if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 clipboardDateFilter=nil
                 allDatesFilterSelected=true
+                if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                    searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+                end
             end
         end
         updateClipboardPanel(query,kind,0,false)
@@ -1662,6 +1704,7 @@ closeClipboardPanel = function()
     allHistoryCache={}
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
+    searchResultsCache=nil
     clipboardSessionOpen=false
     panelCacheKey=nil
     panelCacheHTML=nil
@@ -1711,7 +1754,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
-                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; clipboardSessionOpen=false
+                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; searchResultsCache=nil; clipboardSessionOpen=false
                 panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
                     for _,entry in ipairs(list) do
