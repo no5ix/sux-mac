@@ -51,6 +51,10 @@ local dateHistoryCache = {}
 local allHistoryCache = {}
 local allHistoryCacheLoaded = 0
 local allHistoryTotalCount = nil
+-- Hold one completed global search per query/type for this open-panel session.
+-- Switching date chips or returning to All Dates reuses these matches instead
+-- of scanning every persisted daily history file again.
+local searchResultsCache = nil
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -316,6 +320,37 @@ local function insertCacheEntry(entry)
     end
 end
 
+local function thumbnailPathForImage(path)
+    if type(path)~="string" or path=="" then return nil end
+    local parent=path:match("^(.*)/[^/]+$")
+    if not parent then return nil end
+    return parent.."/thumbnails/"..(path:match("([^/]+)$") or "image")..".jpg"
+end
+
+local function readCachedThumbnail(path)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath then return "" end
+    local file=io.open(thumbPath,"rb")
+    if not file then return "" end
+    local bytes=file:read("*a")
+    file:close()
+    if not bytes or #bytes==0 then return "" end
+    return "data:image/jpeg;base64,"..hs.base64.encode(bytes)
+end
+
+local function writeCachedThumbnail(path, data)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath or type(data)~="string" or data=="" then return false end
+    local directory=thumbPath:match("^(.*)/[^/]+$")
+    if not directory or not ensureDirectory(directory) then return false end
+    local base64=data:match("^data:image/[%w%+%.%-]+;base64,(.+)$")
+    if not base64 then return false end
+    local bytes=hs.base64.decode(base64)
+    if type(bytes)~="string" or bytes=="" then return false end
+    return atomicWrite(thumbPath,bytes)
+end
+
+
 local function restorePersistentHistory()
     text_clipboard_history,img_clipboard_history={},{}
     -- Restore the newest 32 mixed records, scanning newest day first and stopping early.
@@ -356,7 +391,10 @@ local function readImageAtPath(path)
     logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
 end
 
+
 local function makeThumbnailAtPath(path)
+    local cached=readCachedThumbnail(path)
+    if cached~="" then return cached end
     local original=readImageAtPath(path); if not original then return "" end
     local ok,result=pcall(function()
         local size=original:size(); local w,h=tonumber(size and size.w) or 0,tonumber(size and size.h) or 0
@@ -365,8 +403,11 @@ local function makeThumbnailAtPath(path)
         local thumb=original:bitmapRepresentation({w=math.max(1,math.floor(w*scale+0.5)),h=math.max(1,math.floor(h*scale+0.5))})
         return thumb and thumb:encodeAsURLString() or ""
     end)
-    original=nil; collectgarbage("collect")
-    return ok and result or ""
+    original=nil
+    collectgarbage("collect")
+    local thumbnail=ok and result or ""
+    if thumbnail~="" then writeCachedThumbnail(path,thumbnail) end
+    return thumbnail
 end
 
 local function decodeImage(entry)
@@ -634,10 +675,7 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
             dayEntries={}
             for _,record in ipairs(readDayHistory(dateKey)) do
                 local entry=metadataEntry(record,dateKey)
-                if entry then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                    dayEntries[#dayEntries+1]=entry
-                end
+                if entry then dayEntries[#dayEntries+1]=entry end
             end
             table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
             if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
@@ -686,10 +724,7 @@ local function loadPersistentDateHistory(dateKey,kind)
         allEntries={}
         for _,record in ipairs(readDayHistory(dateKey)) do
             local entry=metadataEntry(record,dateKey)
-            if entry then
-                if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                allEntries[#allEntries+1]=entry
-            end
+            if entry then allEntries[#allEntries+1]=entry end
         end
         table.sort(allEntries,function(a,b)return a.ts>b.ts end)
         if clipboardSessionOpen then dateHistoryCache[dateKey]=allEntries end
@@ -706,15 +741,22 @@ local function searchPersistentHistory(query,kind)
     local out={}; local needle=string.lower(tostring(query or ""))
     if needle=="" then return out end
     for _,dateKey in ipairs(historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
-            if entry and (not kind or kind=="all" or entry.type==kind) then
+        local cached=dateHistoryCache[dateKey]
+        local dayEntries=cached
+        if not dayEntries then
+            dayEntries={}
+            for _,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey)
+                if entry then dayEntries[#dayEntries+1]=entry end
+            end
+            table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
+            if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
+        end
+        for _,entry in ipairs(dayEntries) do
+            if not kind or kind=="all" or entry.type==kind then
                 local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
-                if string.lower(value.." "..stamp):find(needle,1,true) then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                    out[#out+1]=entry
-                end
+                if string.lower(value.." "..stamp):find(needle,1,true) then out[#out+1]=entry end
             end
         end
     end
@@ -727,8 +769,8 @@ local function historyItemHTML(entry, index)
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=imageEntry.thumbnailData or ""
-        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="eager" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
+        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview will load when visible</div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-image-path="'..escapeHTML(imageEntry.imagePath or "")..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
     local previewText = content
@@ -1463,6 +1505,89 @@ local function pasteHistoryEntry(index)
     end)
 end
 
+local thumbnailQueue = {}
+local thumbnailQueueTimer = nil
+local thumbnailQueueGeneration = 0
+
+
+
+local function hasThumbnailCached(imagePath)
+    if not imagePath then return false end
+    local cached=readCachedThumbnail(imagePath)
+    if cached~="" then return cached end
+    for _,entry in ipairs(img_clipboard_history) do
+        if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return entry.thumbnailData end
+    end
+    for _,entries in pairs(dateHistoryCache) do
+        for _,entry in ipairs(entries) do
+            if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return entry.thumbnailData end
+        end
+    end
+    return false
+end
+
+
+local function cancelThumbnailQueue()
+    thumbnailQueueGeneration=thumbnailQueueGeneration+1
+    thumbnailQueue={}
+    if thumbnailQueueTimer then
+        pcall(function() thumbnailQueueTimer:stop() end)
+        thumbnailQueueTimer=nil
+    end
+end
+
+
+
+
+
+local function enqueueThumbnail(entry, index)
+    if not entry or entry.type~="image" or entry.thumbnailData and entry.thumbnailData~="" then return end
+    local cachedThumbnail=hasThumbnailCached(entry.imagePath)
+    if cachedThumbnail then
+        -- Reuse disk or in-memory thumbnail without decoding the original again.
+        entry.thumbnailData=cachedThumbnail
+        return
+    end
+    local queueRecord={entry=entry,index=index,path=entry.imagePath,dateKey=entry.dateKey,generation=thumbnailQueueGeneration}
+    thumbnailQueue[#thumbnailQueue+1]=queueRecord
+    if thumbnailQueueTimer then return end
+    local generation=thumbnailQueueGeneration
+    local function processNext()
+        thumbnailQueueTimer=nil
+        if generation~=thumbnailQueueGeneration or not clipboardSessionOpen or not clipboard_webview then
+            thumbnailQueue={}
+            return
+        end
+        local task=table.remove(thumbnailQueue,1)
+        if not task then return end
+        if task.generation==generation
+            and (not clipboardDateFilter or clipboardDateFilter==task.dateKey)
+            and task.path then
+            -- Read the persistent thumbnail first. This path does not decode the
+            -- original image, and it runs only after the initial card markup paints.
+            local thumbnail=readCachedThumbnail(task.path)
+            if thumbnail=="" then
+                thumbnail=makeThumbnailAtPath(task.path)
+            end
+            if thumbnail and thumbnail~="" then
+                task.entry.thumbnailData=thumbnail
+                if generation==thumbnailQueueGeneration and clipboard_webview then
+                    local src=jsStringLiteral(thumbnail)
+                    local key=jsStringLiteral(task.path)
+                    clipboard_webview:evaluateJavaScript(
+                        "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
+                end
+                thumbnail=nil
+            end
+        end
+        if #thumbnailQueue>0 and generation==thumbnailQueueGeneration then
+            thumbnailQueueTimer=hs.timer.doAfter(0.03,processNext)
+        end
+    end
+    thumbnailQueueTimer=hs.timer.doAfter(0,processNext)
+end
+
+
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
@@ -1470,16 +1595,28 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     if query~="" then
         if clipboardDateFilter then
-            -- The date chip is an explicit scope: search only within that date.
-            local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
-            menuData={}
-            for _,entry in ipairs(dayEntries) do
-                if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+            -- Date views are subsets of the already computed global query results.
+            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+                menuData={}
+                for _,entry in ipairs(searchResultsCache.entries) do
+                    if entry.dateKey==clipboardDateFilter then menuData[#menuData+1]=entry end
+                end
+            else
+                local dayEntries=loadPersistentDateHistory(clipboardDateFilter,"all")
+                menuData={}
+                for _,entry in ipairs(dayEntries) do
+                    if clipboardEntryMatches(entry,query,kind) then menuData[#menuData+1]=entry end
+                end
             end
             table.sort(menuData,function(a,b)return a.ts>b.ts end)
             browseMode="date"
         else
-            menuData=searchPersistentHistory(query,kind)
+            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+                menuData=searchResultsCache.entries
+            else
+                menuData=searchPersistentHistory(query,kind)
+                searchResultsCache={query=query,kind=kind,entries=menuData}
+            end
             browseMode="search"
         end
         browseCursor=0
@@ -1505,10 +1642,15 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
 
+    -- A filter switch immediately creates only card markup; image thumbnails
+    -- are hydrated serially after the UI has had time to paint.
+    cancelThumbnailQueue()
     local cards={}
     for _,matchedIndex in ipairs(matches) do
         if not append or matchedIndex>previousMenuDataCount then
-            cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
+            local entry=menuData[matchedIndex]
+            cards[#cards+1]=historyItemHTML(entry,matchedIndex)
+            if entry and entry.type=="image" then enqueueThumbnail(entry,matchedIndex) end
         end
     end
     local html=table.concat(cards,"\n")
@@ -1547,31 +1689,76 @@ function handleClipboardPanelMessage(message)
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
         if tostring(body.query or "")=="" then lastSearchRestoreDateKey=nil end
-        clipboardDateFilter=dateKey; allDatesFilterSelected=false; browseMode="date"; clipboard_search=body.query or ""; clipboard_type_filter=kind
+        clipboardDateFilter=dateKey
+        allDatesFilterSelected=false
+        browseMode="date"
+        clipboard_search=body.query or ""
+        clipboard_type_filter=kind
         menuData=loadPersistentDateHistory(dateKey,"all")
         updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
-        clipboardDateFilter=nil; allDatesFilterSelected=true; clipboard_search=body.query or ""; clipboard_type_filter=body.kind or "all"; browseMode="all"
-        local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
-        menuData=cached
-        browseCursor=loaded
-        updateClipboardPanel(body.query or "",body.kind or "all",0,false)
+        -- If a query is active, return to its cached cross-date result set.
+        -- Do not perform another persistent-history search when switching back.
+        local query=tostring(body.query or "")
+        local kind=body.kind or "all"
+        clipboardDateFilter=nil
+        allDatesFilterSelected=true
+        clipboard_search=query
+        clipboard_type_filter=kind
+        if query~="" then
+            browseMode="search"
+            if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+            end
+            menuData=searchResultsCache.entries
+            browseCursor=0
+            updateClipboardPanel(query,kind,0,false)
+        else
+            browseMode="all"
+            local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
+            menuData=cached
+            browseCursor=loaded
+            updateClipboardPanel("",kind,0,false)
+        end
     elseif body.action == "search" or body.action == "filter" then
         local query=tostring(body.query or "")
         local kind=body.kind or clipboard_type_filter or "all"
-        if body.action=="search" and query~=clipboard_search then
+        if body.action=="search" then
             if query=="" then
+                searchResultsCache=nil
                 clipboardDateFilter=lastSearchRestoreDateKey
                 allDatesFilterSelected=clipboardDateFilter==nil
             else
                 if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 clipboardDateFilter=nil
                 allDatesFilterSelected=true
+                if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                    searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+                end
             end
         end
         updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
+    elseif body.action == "loadImagePreview" then
+        local index=tonumber(body.index)
+        local entry=index and menuData[index]
+        if entry and entry.type=="image" and clipboard_webview then
+            -- Full-resolution data is only generated for an explicit hover.
+            local image=decodeImage(entry)
+            if image then
+                local ok,data=pcall(function() return image:encodeAsURLString() end)
+                image=nil
+                collectgarbage("collect")
+                if ok and data and clipboard_webview then
+                    -- Decode the original only for a requested hover, then send
+                    -- its data URL to the one currently-open WebView.
+                    clipboard_webview:evaluateJavaScript(
+                        "window.setImagePreview("..jsStringLiteral(index)..","..jsStringLiteral(data)..");")
+                    data=nil
+                end
+            end
+        end
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
         local entry = index and menuData[index]
@@ -1658,11 +1845,14 @@ closeClipboardPanel = function()
     browseCursor=0
     typeBrowseCursor={text=nil,image=nil}
     menuData={}
+    cancelThumbnailQueue()
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
+    searchResultsCache=nil
     clipboardSessionOpen=false
+    cancelThumbnailQueue()
     panelCacheKey=nil
     panelCacheHTML=nil
     visibleIndices={}
@@ -1677,7 +1867,9 @@ closeClipboardPanel = function()
                 entry.imageObject=nil
                 entry.imageData=nil
                 entry.dataURL=nil
-                entry.thumbnailData=entry.thumbnailData or ""
+                -- Keep the lightweight thumbnail file on disk, but release its
+                -- base64 data URL from RAM. It will be loaded on the next visit.
+                entry.thumbnailData=""
             end
         end
     end
@@ -1711,7 +1903,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
-                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; clipboardSessionOpen=false
+                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; searchResultsCache=nil; clipboardSessionOpen=false
                 panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
                     for _,entry in ipairs(list) do
