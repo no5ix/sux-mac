@@ -1746,6 +1746,8 @@ end
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
+    -- Stop global monitoring before destroying the panel.
+    stopOutsideClickMonitor()
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1827,17 +1829,59 @@ local function configureClipboardWebview(view)
                 trimHistoryCache(CLIPBOARD_CACHE_SIZE)
                 collectgarbage("collect")
             end
-        elseif action == "focusChange" and focused == false and not suppressFocusDismiss then
-            hs.timer.doAfter(0.1, function()
-                if not suppressFocusDismiss and clipboard_webview == view and view:isVisible() then
-                    closeClipboardPanel()
-                end
-            end)
+        -- Do not dismiss on focus loss alone. A browser may briefly change
+        -- keyboard focus while the user is pasting into login/API-key fields.
+        -- Outside mouse clicks are handled by the dedicated mouse monitor below.
         end
     end)
 end
 
 local clipboardPanelHTMLReady = false
+
+-- Close the clipboard history only when the user clicks outside its native
+-- window, not whenever it loses keyboard focus. This prevents browser input
+-- fields (including password/API-key fields) from dismissing the panel merely
+-- because WebKit/macOS changes focus during a paste workflow.
+local outsideClickMonitor = nil
+local function stopOutsideClickMonitor()
+    if outsideClickMonitor then
+        outsideClickMonitor:stop()
+        outsideClickMonitor = nil
+    end
+end
+
+local function pointIsInsideClipboardPanel(point)
+    local view = clipboard_webview
+    if not view or not view:isVisible() then return false end
+    local frame = view:frame()
+    if not frame then return false end
+    return point.x >= frame.x and point.x <= frame.x + frame.w
+        and point.y >= frame.y and point.y <= frame.y + frame.h
+end
+
+local function startOutsideClickMonitor()
+    stopOutsideClickMonitor()
+    outsideClickMonitor = hs.eventtap.new({hs.eventtap.event.types.leftMouseDown}, function(event)
+        local view = clipboard_webview
+        if not view or not view:isVisible() then
+            stopOutsideClickMonitor()
+            return false
+        end
+
+        local point = hs.mouse.absolutePosition()
+        if not pointIsInsideClipboardPanel(point) then
+            -- Defer destruction until after the click has been delivered to the
+            -- target app, so the click itself retains its normal behavior.
+            hs.timer.doAfter(0, function()
+                if clipboard_webview == view and view:isVisible() then
+                    closeClipboardPanel()
+                end
+            end)
+        end
+        return false
+    end)
+    outsideClickMonitor:start()
+end
 
 local function createClipboardWebview()
     clipboardPanelHTMLReady = false
@@ -1983,6 +2027,7 @@ function showClipboardHistory()
     end
 
     suppressFocusDismiss = true
+    startOutsideClickMonitor()
     if not clipboardSessionOpen then dateHistoryCache = {} end
     clipboardSessionOpen = true
     clipboard_search = ""
