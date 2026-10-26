@@ -2056,39 +2056,49 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- Use the native window's activation path. Floating window levels
-        -- control stacking only and cannot make an accessory app key.
+        -- Bring the panel above normal windows, then use a harmless click on
+        -- its title bar to request actual AppKit activation. Raising a window
+        -- alone doesn't make its app receive mouse/keyboard events.
         local nativeWindow = view:hswindow()
         if not nativeWindow then
             logger.w("Clipboard History window unavailable after show")
         else
-            -- Ask Hammerspoon to activate this window, then verify the result.
-            -- The hs.application module does not expose an activation-policy setter,
-            -- so don't pretend a Lua call can change NSApplication's policy.
-            local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
-            local activated = hammerspoonApp and hammerspoonApp:activate(true) or false
-            local setFrontmost = hammerspoonApp and hammerspoonApp:setFrontmost(true) or false
             view:level(hs.drawing.windowLevels.floating)
             view:bringToFront(true)
             view:orderAbove()
             nativeWindow:raise()
             nativeWindow:focus()
 
-            hs.timer.doAfter(0.15, function()
-                if clipboard_webview ~= view or not view:isVisible() then return end
-                local focusedWindow = hs.window.focusedWindow()
-                local currentNativeWindow = view:hswindow()
-                local ownsFocus = focusedWindow and currentNativeWindow
-                    and focusedWindow:id() == currentNativeWindow:id()
-                local frontmost = application.frontmostApplication()
-                if not ownsFocus then
-                    logger.w("Clipboard History activation result: activate="
-                        .. tostring(activated)
-                        .. "; setFrontmost=" .. tostring(setFrontmost)
-                        .. "; frontmost app=" .. tostring(frontmost and frontmost:bundleID())
-                        .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
-                end
-            end)
+            -- A title-bar click activates the visible window without selecting a
+            -- clipboard item or disturbing the destination input field.
+            local originalMousePosition = hs.mouse.absolutePosition()
+            local windowFrame = nativeWindow:frame()
+            if windowFrame then
+                local activationPoint = {
+                    x = windowFrame.x + math.min(180, windowFrame.w / 2),
+                    y = windowFrame.y + math.max(12, math.min(16, windowFrame.h / 2))
+                }
+                hs.timer.doAfter(0.05, function()
+                    if clipboard_webview ~= view or not view:isVisible() then return end
+                    hs.eventtap.leftClick(activationPoint, 50000)
+                    hs.timer.doAfter(0.05, function()
+                        hs.mouse.absolutePosition(originalMousePosition)
+                        if clipboard_webview ~= view or not view:isVisible() then return end
+                        local focusedWindow = hs.window.focusedWindow()
+                        local currentNativeWindow = view:hswindow()
+                        local ownsFocus = focusedWindow and currentNativeWindow
+                            and focusedWindow:id() == currentNativeWindow:id()
+                        local frontmost = application.frontmostApplication()
+                        if not ownsFocus then
+                            logger.w("Clipboard History title-bar activation failed; frontmost app="
+                                .. tostring(frontmost and frontmost:bundleID())
+                                .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
+                        end
+                    end)
+                end)
+            else
+                logger.w("Clipboard History native window has no frame for activation")
+            end
         end
         startOutsideClickMonitor()
     end
