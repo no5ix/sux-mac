@@ -1937,7 +1937,8 @@ local function activateClipboardPanel(view)
         if not app then
             logger.w("Clipboard History activation attempt " .. attempts
                 .. ": native window has no owning application yet")
-        else
+        end
+        if app then
             local activated = app:activate(true)
             nativeWindow:focus()
             nativeWindow:raise()
