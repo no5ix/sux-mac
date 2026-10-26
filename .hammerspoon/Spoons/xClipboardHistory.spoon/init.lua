@@ -2052,10 +2052,9 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- Bring the panel into the active application context before focusing
-        -- its native window. The earlier raise/focus calls alone left VoicePaste
-        -- frontmost on some systems.
-        local function activateClipboardPanel(attempt)
+        -- The activation call has to be checked: macOS may refuse to make
+        -- Hammerspoon frontmost when its activation policy is accessory.
+        local function activateClipboardPanel()
             if clipboard_webview ~= view or not view:isVisible() then return end
 
             local nativeWindow = view:hswindow()
@@ -2065,50 +2064,35 @@ function showClipboardHistory()
             end
 
             local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
-            if hammerspoonApp then hammerspoonApp:activate(true) end
+            local activated = hammerspoonApp and hammerspoonApp:activate(true) or false
+            local setFrontmost = hammerspoonApp and hammerspoonApp:setFrontmost(true) or false
 
-            -- activate(true) can take a short time to complete. Apply window
-            -- activation after asking macOS to activate the owning app.
-            hs.timer.doAfter(0.05, function()
+            -- Put the panel above normal app windows independently of whether
+            -- macOS allows the Hammerspoon app itself to become frontmost.
+            view:level(hs.drawing.windowLevels.floating)
+            view:bringToFront(true)
+            view:orderAbove()
+            nativeWindow:raise()
+            nativeWindow:focus()
+
+            hs.timer.doAfter(0.1, function()
                 if clipboard_webview ~= view or not view:isVisible() then return end
-
-                local activeApp = application.frontmostApplication()
-                if not activeApp or activeApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
-                    if attempt < 3 then
-                        activateClipboardPanel(attempt + 1)
-                    else
-                        logger.w("Clipboard History activation failed; frontmost app="
-                            .. tostring(activeApp and activeApp:bundleID()))
-                    end
-                    return
+                local focusedWindow = hs.window.focusedWindow()
+                local currentNativeWindow = view:hswindow()
+                local ownsFocus = focusedWindow and currentNativeWindow
+                    and focusedWindow:id() == currentNativeWindow:id()
+                local frontmost = application.frontmostApplication()
+                if not ownsFocus then
+                    logger.w("Clipboard History activation result: activate="
+                        .. tostring(activated)
+                        .. "; setFrontmost=" .. tostring(setFrontmost)
+                        .. "; frontmost app=" .. tostring(frontmost and frontmost:bundleID())
+                        .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
                 end
-
-                nativeWindow:raise()
-                nativeWindow:focus()
-                view:bringToFront(true)
-
-                hs.timer.doAfter(0.05, function()
-                    if clipboard_webview ~= view or not view:isVisible() then return end
-                    local focusedWindow = hs.window.focusedWindow()
-                    local currentNativeWindow = view:hswindow()
-                    local ownsFocus = focusedWindow and currentNativeWindow
-                        and focusedWindow:id() == currentNativeWindow:id()
-                    if not ownsFocus then
-                        if attempt < 3 then
-                            activateClipboardPanel(attempt + 1)
-                        else
-                            local focusedApp = application.frontmostApplication()
-                            logger.w("Clipboard History panel remained visible but inactive after "
-                                .. tostring(attempt) .. " activation attempts; frontmost app="
-                                .. tostring(focusedApp and focusedApp:bundleID())
-                                .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
-                        end
-                    end
-                end)
             end)
         end
 
-        activateClipboardPanel(1)
+        activateClipboardPanel()
         startOutsideClickMonitor()
     end
 
