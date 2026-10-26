@@ -2086,45 +2086,58 @@ function showClipboardHistory()
 
             local frame = view:frame()
             local pointerBefore = hs.mouse.absolutePosition()
-            local clickPoint = {
-                x = frame.x + math.min(70, math.max(24, frame.w * 0.08)),
+            -- Use the native window's title-bar geometry where available. It
+            -- avoids guessing whether the panel is using a 22px or 28px title
+            -- bar on this macOS release.
+            local titleBarRect = nativeWindow:zoomButtonRect()
+            local clickPoint = titleBarRect and {
+                x = titleBarRect.x + titleBarRect.w + 42,
+                y = titleBarRect.y + titleBarRect.h / 2
+            } or {
+                x = frame.x + math.min(100, math.max(60, frame.w * 0.12)),
                 y = frame.y + 12
             }
-            suppressOutsideClickUntil = hs.timer.secondsSinceEpoch() + 0.35
+            suppressOutsideClickUntil = hs.timer.secondsSinceEpoch() + 1.0
             view:level(hs.drawing.windowLevels.floating)
             view:bringToFront(true)
             view:orderAbove()
             nativeWindow:raise()
 
-            -- Repeat once in case the first activation reaches the window before
-            -- macOS has finished ordering it frontmost. Do not park the pointer.
-            hs.eventtap.leftClick(clickPoint)
-            hs.timer.doAfter(0.04, function()
-                if clipboard_webview ~= view or not view:isVisible() then return end
-                local currentWindow = view:hswindow()
-                if currentWindow then
-                    currentWindow:raise()
-                    currentWindow:focus()
-                    view:bringToFront(true)
-                end
-                hs.eventtap.leftClick(clickPoint)
-                hs.timer.doAfter(0.04, function()
-                    hs.mouse.absolutePosition(pointerBefore)
-                    if clipboard_webview ~= view or not view:isVisible() then return end
-                    local focusedWindow = hs.window.focusedWindow()
-                    local app = currentWindow and currentWindow:application()
-                    local frontApp = application.frontmostApplication()
-                    local appFocused = app and frontApp and app:pid() == frontApp:pid()
-                    local windowFocused = focusedWindow and currentWindow
-                        and focusedWindow:id() == currentWindow:id()
-                    logger.d("Clipboard History title-bar activation: appFocused="
-                        .. tostring(appFocused) .. ", windowFocused=" .. tostring(windowFocused))
-                    if not (appFocused and windowFocused) then
-                        logger.w("Clipboard History title-bar click did not activate the panel")
+            local function clickTitleBarAndRestorePointer()
+                hs.eventtap.leftClick(clickPoint, 20000)
+                hs.timer.doAfter(0.06, function()
+                    -- Re-raise between clicks so the second click is always
+                    -- sent to the panel instead of the previous foreground app.
+                    if clipboard_webview ~= view or not view:isVisible() then
+                        hs.mouse.absolutePosition(pointerBefore)
+                        return
                     end
-                    startOutsideClickMonitor()
+                    local currentWindow = view:hswindow()
+                    if currentWindow then
+                        currentWindow:raise()
+                        currentWindow:focus()
+                        view:bringToFront(true)
+                    end
+                    hs.eventtap.leftClick(clickPoint, 20000)
+                    hs.timer.doAfter(0.06, function()
+                        hs.mouse.absolutePosition(pointerBefore)
+                        if clipboard_webview ~= view or not view:isVisible() then return end
+                        local focusedWindow = hs.window.focusedWindow()
+                        local app = currentWindow and currentWindow:application()
+                        local frontApp = application.frontmostApplication()
+                        local appFocused = app and frontApp and app:pid() == frontApp:pid()
+                        local windowFocused = focusedWindow and currentWindow
+                            and focusedWindow:id() == currentWindow:id()
+                        logger.d("Clipboard History title-bar activation: appFocused="
+                            .. tostring(appFocused) .. ", windowFocused=" .. tostring(windowFocused))
+                        if not (appFocused and windowFocused) then
+                            logger.w("Clipboard History title-bar click did not activate the panel")
+                        end
+                        startOutsideClickMonitor()
+                    end)
                 end)
-            end)
+            end
+            clickTitleBarAndRestorePointer()
         end)
     end
 
