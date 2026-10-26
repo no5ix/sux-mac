@@ -300,19 +300,11 @@ local display_max_text_length = 200
 local function historyDateDirectories()
     local dates={}
     if not fs.attributes(HISTORY_ROOT) then return dates end
+    -- The date directories are the index. Do not read each JSON file or stat
+    -- each original image just to build the available-date list.
     for name in fs.dir(HISTORY_ROOT) do
-        if validDateKey(name) then
-            local records=readDayHistory(name)
-            local hasRecord=false
-            for _,record in ipairs(records) do
-                local ts=tonumber(record and record.ts)
-                if ts and ((record.type=="text" and type(record.content)=="string")
-                    or (record.type=="image" and type(record.imagePath)=="string" and fs.attributes(record.imagePath))) then
-                    hasRecord=true
-                    break
-                end
-            end
-            if hasRecord then dates[#dates+1]=name end
+        if validDateKey(name) and fs.attributes(historyJSONPath(name)) then
+            dates[#dates+1]=name
         end
     end
     table.sort(dates,function(a,b)return a>b end)
