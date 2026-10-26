@@ -840,8 +840,27 @@ function obj:start()
 
     local lastText = ""
     local lastShownAt = 0
+    local toolbarExpiryTimer = nil
     local pendingCapture = false
     local eventTapHealthTimer = nil
+
+    -- Keep the selection toolbar available for normal reading and pointer
+    -- travel; this timeout is only a long safety net for stale selections.
+    local TOOLBAR_VISIBLE_TIMEOUT = 30
+
+    local function scheduleToolbarExpiry()
+        if toolbarExpiryTimer then
+            toolbarExpiryTimer:stop()
+            toolbarExpiryTimer = nil
+        end
+        toolbarExpiryTimer = timer.doAfter(TOOLBAR_VISIBLE_TIMEOUT, function()
+            toolbarExpiryTimer = nil
+            if toolbar and toolbar:isVisible()
+                and timer.secondsSinceEpoch() - lastShownAt >= TOOLBAR_VISIBLE_TIMEOUT then
+                hideToolbar()
+            end
+        end)
+    end
     local captureSelectionFromClipboardFallback
 
     local function reportEventTapState(reason)
@@ -920,6 +939,7 @@ function obj:start()
         -- later selections just because the selected text matches the previous one.
         if toolbar and toolbar:isVisible() and selectedText == value then
             lastShownAt = now
+            scheduleToolbarExpiry()
             return true
         end
         -- A hidden toolbar must never suppress a genuine new selection, even if
@@ -928,6 +948,7 @@ function obj:start()
         lastText = value
         lastShownAt = now
         buildToolbar(value)
+        scheduleToolbarExpiry()
         return true
     end
 
@@ -1068,6 +1089,7 @@ function obj:stop()
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
+    if toolbarExpiryTimer then toolbarExpiryTimer:stop(); toolbarExpiryTimer = nil end
     if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
