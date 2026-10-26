@@ -2055,14 +2055,35 @@ function showClipboardHistory()
             if clipboard_webview ~= view then return end
             local nativeWindow = view:hswindow()
             if nativeWindow then
-                -- Explicitly raise and focus the panel. WebView focus alone
-                -- isn't sufficient when another app is already frontmost.
+                -- Activate Hammerspoon as well as the native window. Raising
+                -- a window alone can leave another application's controls
+                -- active, which prevents hover and keyboard handling here.
+                local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
+                if hammerspoonApp then hammerspoonApp:activate(true) end
                 nativeWindow:raise()
                 nativeWindow:focus()
                 view:bringToFront(true)
             else
                 logger.w("Clipboard History window unavailable after show")
             end
+            hs.timer.doAfter(0.05, function()
+                if clipboard_webview ~= view or not view:isVisible() then return end
+                local focusedWindow = hs.window.focusedWindow()
+                local focusedApp = application.frontmostApplication()
+                local ownsFocus = focusedWindow and view:hswindow()
+                    and focusedWindow:id() == view:hswindow():id()
+                if not ownsFocus then
+                    logger.w("Clipboard History panel is visible but did not become the focused window"
+                        .. "; frontmost app=" .. tostring(focusedApp and focusedApp:bundleID())
+                        .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
+                    -- Retry activation once after macOS has processed the show/focus transition.
+                    local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
+                    if hammerspoonApp then hammerspoonApp:activate(true) end
+                    nativeWindow:raise()
+                    nativeWindow:focus()
+                    view:bringToFront(true)
+                end
+            end)
             startOutsideClickMonitor()
         end)
     end
