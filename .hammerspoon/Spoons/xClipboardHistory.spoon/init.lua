@@ -1899,6 +1899,10 @@ local function createClipboardWebview()
         clipboard_usercontent
     ):windowStyle({"titled", "closable", "resizable"})
     configureClipboardWebview(clipboard_webview)
+    -- This Spoon is loaded from Hammerspoon's accessory/menu-bar app. Make the
+    -- history window a regular, activatable foreground window rather than just
+    -- floating above other applications.
+    clipboard_webview:level(hs.drawing.windowLevels.normal)
 end
 createClipboardWebview()
 
@@ -2052,30 +2056,34 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- The activation call has to be checked: macOS may refuse to make
-        -- Hammerspoon frontmost when its activation policy is accessory.
-        local function activateClipboardPanel()
-            if clipboard_webview ~= view or not view:isVisible() then return end
+        -- Use the native window's activation path. Floating window levels
+        -- control stacking only and cannot make an accessory app key.
+        local nativeWindow = view:hswindow()
+        if not nativeWindow then
+            logger.w("Clipboard History window unavailable after show")
+        else
+            local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
+            local previousPolicy = nil
+            local policyChanged = false
 
-            local nativeWindow = view:hswindow()
-            if not nativeWindow then
-                logger.w("Clipboard History window unavailable after show")
-                return
+            -- Hammerspoon normally runs as an accessory app. Temporarily switch
+            -- its activation policy to regular so AppKit can make this window key.
+            if hs.application and hs.application.activationPolicy then
+                previousPolicy = hs.application.activationPolicy()
+            end
+            if hs.application and hs.application.setActivationPolicy then
+                policyChanged = hs.application.setActivationPolicy("regular") ~= false
             end
 
-            local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
-            local activated = hammerspoonApp and hammerspoonApp:activate(true) or false
-            local setFrontmost = hammerspoonApp and hammerspoonApp:setFrontmost(true) or false
-
-            -- Put the panel above normal app windows independently of whether
-            -- macOS allows the Hammerspoon app itself to become frontmost.
-            view:level(hs.drawing.windowLevels.floating)
-            view:bringToFront(true)
-            view:orderAbove()
+            if hammerspoonApp then
+                hammerspoonApp:unhide()
+                hammerspoonApp:activate(true)
+            end
             nativeWindow:raise()
             nativeWindow:focus()
+            view:bringToFront(true)
 
-            hs.timer.doAfter(0.1, function()
+            hs.timer.doAfter(0.15, function()
                 if clipboard_webview ~= view or not view:isVisible() then return end
                 local focusedWindow = hs.window.focusedWindow()
                 local currentNativeWindow = view:hswindow()
@@ -2083,16 +2091,24 @@ function showClipboardHistory()
                     and focusedWindow:id() == currentNativeWindow:id()
                 local frontmost = application.frontmostApplication()
                 if not ownsFocus then
-                    logger.w("Clipboard History activation result: activate="
-                        .. tostring(activated)
-                        .. "; setFrontmost=" .. tostring(setFrontmost)
+                    logger.w("Clipboard History activation still failed; policyChanged="
+                        .. tostring(policyChanged)
+                        .. "; previousPolicy=" .. tostring(previousPolicy)
                         .. "; frontmost app=" .. tostring(frontmost and frontmost:bundleID())
                         .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
                 end
             end)
-        end
 
-        activateClipboardPanel()
+            -- Keep the regular policy only while this panel is open. On dismissal,
+            -- restore the prior policy so Hammerspoon returns to its normal role.
+            if not restoreClipboardActivationPolicy then
+                restoreClipboardActivationPolicy = function()
+                    if previousPolicy ~= nil and hs.application and hs.application.setActivationPolicy then
+                        hs.application.setActivationPolicy(previousPolicy)
+                    end
+                end
+            end
+        end
         startOutsideClickMonitor()
     end
 
