@@ -30,33 +30,23 @@ local CUSTOM_AI_BUTTONS = {
         id = "translation",
         label = "Translation",
         icon = "🌏",
-        prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
-        -- prompt = "If there is only one sentence, don’t provide a bilingual translation with the original foreign-language text and Chinese side by side. If there are multiple sentences, provide a bilingual translation with each sentence in the original foreign language followed by its Chinese translation. If there is any Thai text, translate only the Thai text and don’t translate the English. If the text is entirely in English, translate it directly into Chinese. For English text, explain any words above the B1 level at the end of each sentence and include their IPA pronunciations: \\n\\n{{text}}",
-        -- prompt = [[Please process the text below according to the following rules.
+        prompt = [[You are a professional multilingual translation agent. Follow these instructions strictly:
 
-        --     **1. Translation Format**
-        --     - If the input contains only one sentence, provide the Chinese translation directly without displaying the original foreign-language sentence alongside it.
-        --     - If the input contains multiple sentences, provide a bilingual translation, with each sentence in the original foreign language followed immediately by its Chinese translation.
-        --     - If the input contains any Thai text, translate only the Thai text into Chinese and leave all English text untranslated.
-        --     - If the input is entirely in English, translate the English text directly into Chinese.
+            1. Automatically detect the language of the input text.
+            2. If the input is in English, translate it into natural, fluent Chinese.
+            3. If the input is in Chinese, translate it into natural, fluent English.
+            4. If the input is in Thai, translate it into natural, fluent Chinese.
+            5. Preserve the original meaning, tone, intent, and emotional nuance. Use natural expressions that native speakers would use in everyday communication.
+            6. Do not add explanations, comments, introductions, quotation marks, or alternative translations.
+            7. If the input contains multiple languages, identify the primary language and apply the corresponding translation rule.
+            8. If the input is already in the target language or contains only a few words in another language, use the context to determine the most appropriate translation.
 
-        --     **2. Vocabulary Explanations for English Text**
-        --     - For English text, identify words above the B1 level in each sentence and explain their meanings in Chinese.
-        --     - Include the IPA pronunciation of each identified word.
-        --     - Place the vocabulary explanations immediately after the Chinese translation of the corresponding sentence.
-        --     - If a sentence contains no words above the B1 level, do not add a vocabulary explanation for that sentence.
-        --     - Avoid explaining the same word repeatedly unless its meaning differs by context.
+            Output **only the translated text**, with no additional content.
+            
+            **Text to Process:**
 
-        --     **3. Important Rules**
-        --     - Preserve the original meaning and context when translating.
-        --     - Use natural, colloquial Chinese rather than stiff, word-for-word translations.
-        --     - Follow the sentence-by-sentence format consistently when the input contains multiple sentences.
-        --     - Do not add introductions, conclusions, or unrelated commentary.
-
-        --     **Text to Process:**
-
-        --     {{text}}
-        -- ]],
+            {{text}}
+        ]],
     },
     {
         id = "correct",
@@ -222,7 +212,7 @@ local translationRequestId = 0
 local translationWindowPinned = false
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
-local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
+local TRANSLATION_MODEL = "Qwen3-4B-Instruct-2507-4bit"
 local TRANSLATION_PROVIDER_CHOICE = "local" -- local oMLX+Qwen or ChatGPT
 
 -- Add custom local-AI actions here. Each entry creates a toolbar button and
