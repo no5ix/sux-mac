@@ -1468,6 +1468,54 @@ local function pasteHistoryEntry(index)
     end)
 end
 
+local thumbnailQueue = {}
+local thumbnailQueueTimer = nil
+local thumbnailQueueGeneration = 0
+
+local function cancelThumbnailQueue()
+    thumbnailQueueGeneration=thumbnailQueueGeneration+1
+    thumbnailQueue={}
+    if thumbnailQueueTimer then
+        pcall(function() thumbnailQueueTimer:stop() end)
+        thumbnailQueueTimer=nil
+    end
+end
+
+local function enqueueThumbnail(entry, index)
+    if not entry or entry.type~="image" or entry.thumbnailData and entry.thumbnailData~="" then return end
+    thumbnailQueue[#thumbnailQueue+1]={entry=entry,index=index,path=entry.imagePath,dateKey=entry.dateKey,generation=thumbnailQueueGeneration}
+    if thumbnailQueueTimer then return end
+    local generation=thumbnailQueueGeneration
+    local function processNext()
+        thumbnailQueueTimer=nil
+        if generation~=thumbnailQueueGeneration or not clipboardSessionOpen or not clipboard_webview then
+            thumbnailQueue={}
+            return
+        end
+        local task=table.remove(thumbnailQueue,1)
+        if not task then return end
+        if task.generation==generation
+            and (not clipboardDateFilter or clipboardDateFilter==task.dateKey)
+            and task.path then
+            local thumbnail=makeThumbnailAtPath(task.path)
+            if thumbnail and thumbnail~="" then
+                task.entry.thumbnailData=thumbnail
+                if generation==thumbnailQueueGeneration and clipboard_webview then
+                    local src=jsStringLiteral(thumbnail)
+                    local key=jsStringLiteral(task.path)
+                    clipboard_webview:evaluateJavaScript(
+                        "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
+                end
+                thumbnail=nil
+            end
+        end
+        if #thumbnailQueue>0 and generation==thumbnailQueueGeneration then
+            thumbnailQueueTimer=hs.timer.doAfter(0.03,processNext)
+        end
+    end
+    thumbnailQueueTimer=hs.timer.doAfter(0,processNext)
+end
+
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
@@ -1522,34 +1570,15 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
 
+    -- A filter switch immediately creates only card markup; image thumbnails
+    -- are hydrated serially after the UI has had time to paint.
+    cancelThumbnailQueue()
     local cards={}
     for _,matchedIndex in ipairs(matches) do
         if not append or matchedIndex>previousMenuDataCount then
             local entry=menuData[matchedIndex]
-            if entry and entry.type=="image" and not entry.thumbnailData then
-                -- Render a placeholder immediately. Thumbnail generation is a
-                -- separate timer task, not part of the filter-switch callback.
-                cards[#cards+1]=historyItemHTML(entry,matchedIndex)
-                local dateKey=entry.dateKey
-                local imagePath=entry.imagePath
-                local cacheEntry=entry
-                local viewAtRequest=clipboard_webview
-                hs.timer.doAfter(0,function()
-                    if not clipboardSessionOpen or not clipboard_webview or clipboard_webview~=viewAtRequest then return end
-                    if clipboardDateFilter and clipboardDateFilter~=dateKey then return end
-                    local thumbnail=makeThumbnailAtPath(imagePath)
-                    if thumbnail and thumbnail~="" then
-                        cacheEntry.thumbnailData=thumbnail
-                        local src=jsStringLiteral(thumbnail)
-                        local key=jsStringLiteral(imagePath)
-                        clipboard_webview:evaluateJavaScript(
-                            "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
-                        thumbnail=nil
-                    end
-                end)
-            else
-                cards[#cards+1]=historyItemHTML(entry,matchedIndex)
-            end
+            cards[#cards+1]=historyItemHTML(entry,matchedIndex)
+            if entry and entry.type=="image" then enqueueThumbnail(entry,matchedIndex) end
         end
     end
     local html=table.concat(cards,"\n")
@@ -1744,6 +1773,7 @@ closeClipboardPanel = function()
     browseCursor=0
     typeBrowseCursor={text=nil,image=nil}
     menuData={}
+    cancelThumbnailQueue()
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
