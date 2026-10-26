@@ -38,6 +38,9 @@ local previousApplication = nil
 local outsideClickMonitor = nil
 local closeOutsideClickPending = false
 local stopOutsideClickMonitor
+local panelActivationTimer = nil
+local panelActivationGeneration = 0
+local suppressOutsideClickUntil = 0
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
@@ -1750,8 +1753,13 @@ end
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
-    -- Stop global monitoring before destroying the panel.
+    -- Stop global monitoring and pending activation attempts before destroying the panel.
     stopOutsideClickMonitor()
+    panelActivationGeneration = panelActivationGeneration + 1
+    if panelActivationTimer then
+        panelActivationTimer:stop()
+        panelActivationTimer = nil
+    end
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1817,6 +1825,11 @@ local function configureClipboardWebview(view)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
             stopOutsideClickMonitor()
+            panelActivationGeneration = panelActivationGeneration + 1
+            if panelActivationTimer then
+                panelActivationTimer:stop()
+                panelActivationTimer = nil
+            end
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
@@ -1869,6 +1882,11 @@ local function startOutsideClickMonitor()
             return false
         end
 
+        -- The deliberate title-bar click used to activate the window is
+        -- synthetic and must never trigger the outside-click dismissal logic.
+        if hs.timer.secondsSinceEpoch() < suppressOutsideClickUntil then
+            return false
+        end
         local point = hs.mouse.absolutePosition()
         if not pointIsInsideClipboardPanel(point) then
             -- Only schedule one dismissal for a single outside click. The
@@ -2051,19 +2069,69 @@ function showClipboardHistory()
         positionPanelOnCurrentScreen()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-        hs.timer.doAfter(0.05, function()
-            if clipboard_webview ~= view then return end
+
+        -- A programmatic raise is only a z-order operation. Use a real native
+        -- title-bar click to force macOS to make this window key/main, which
+        -- matches the interaction that reliably activates ordinary app windows.
+        -- Restore the pointer immediately so the shortcut does not disrupt the
+        -- user's cursor position in the API-key field.
+        hs.timer.doAfter(0.08, function()
+            if clipboard_webview ~= view or not view:isVisible() then return end
             local nativeWindow = view:hswindow()
-            if nativeWindow then
-                -- Explicitly raise and focus the panel. WebView focus alone
-                -- isn't sufficient when another app is already frontmost.
-                nativeWindow:raise()
-                nativeWindow:focus()
-                view:bringToFront(true)
-            else
+            if not nativeWindow then
                 logger.w("Clipboard History window unavailable after show")
+                startOutsideClickMonitor()
+                return
             end
-            startOutsideClickMonitor()
+
+            local frame = view:frame()
+            local pointerBefore = hs.mouse.absolutePosition()
+            -- Use the native window's title-bar geometry where available. It
+            -- avoids guessing whether the panel is using a 22px or 28px title
+            -- bar on this macOS release.
+            local titleBarRect = nativeWindow:zoomButtonRect()
+            local clickPoint = titleBarRect and {
+                x = titleBarRect.x + titleBarRect.w + 42,
+                y = titleBarRect.y + titleBarRect.h / 2
+            } or {
+                x = frame.x + math.min(100, math.max(60, frame.w * 0.12)),
+                y = frame.y + 12
+            }
+            suppressOutsideClickUntil = hs.timer.secondsSinceEpoch() + 1.0
+            view:level(hs.drawing.windowLevels.floating)
+            view:bringToFront(true)
+            view:orderAbove()
+            nativeWindow:raise()
+
+            local function clickTitleBarAndRestorePointer()
+                -- One native title-bar click is sufficient to ask macOS to make
+                -- the panel key/main. Do not click again: a double click can
+                -- zoom the window or trigger another title-bar action.
+                hs.eventtap.leftClick(clickPoint, 20000)
+                hs.timer.doAfter(0.08, function()
+                    hs.mouse.absolutePosition(pointerBefore)
+                    if clipboard_webview ~= view or not view:isVisible() then return end
+                    local currentWindow = view:hswindow()
+                    if currentWindow then
+                        currentWindow:raise()
+                        currentWindow:focus()
+                        view:bringToFront(true)
+                    end
+                    local focusedWindow = hs.window.focusedWindow()
+                    local app = currentWindow and currentWindow:application()
+                    local frontApp = application.frontmostApplication()
+                    local appFocused = app and frontApp and app:pid() == frontApp:pid()
+                    local windowFocused = focusedWindow and currentWindow
+                        and focusedWindow:id() == currentWindow:id()
+                    logger.d("Clipboard History title-bar activation: appFocused="
+                        .. tostring(appFocused) .. ", windowFocused=" .. tostring(windowFocused))
+                    if not (appFocused and windowFocused) then
+                        logger.w("Clipboard History title-bar click did not activate the panel")
+                    end
+                    startOutsideClickMonitor()
+                end)
+            end
+            clickTitleBarAndRestorePointer()
         end)
     end
 
