@@ -38,6 +38,7 @@ local previousApplication = nil
 local outsideClickMonitor = nil
 local closeOutsideClickPending = false
 local stopOutsideClickMonitor
+local restoreClipboardActivationPolicy = nil
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
@@ -1752,6 +1753,10 @@ end
 closeClipboardPanel = function()
     -- Stop global monitoring before destroying the panel.
     stopOutsideClickMonitor()
+    if restoreClipboardActivationPolicy then
+        pcall(restoreClipboardActivationPolicy)
+        restoreClipboardActivationPolicy = nil
+    end
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1817,6 +1822,10 @@ local function configureClipboardWebview(view)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
             stopOutsideClickMonitor()
+            if restoreClipboardActivationPolicy then
+                pcall(restoreClipboardActivationPolicy)
+                restoreClipboardActivationPolicy = nil
+            end
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
