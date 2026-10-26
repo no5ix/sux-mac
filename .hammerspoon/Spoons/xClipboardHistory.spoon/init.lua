@@ -733,7 +733,7 @@ local function historyItemHTML(entry, index)
         local imageEntry=entry.historyEntry or entry
         local thumbnail=imageEntry.thumbnailData or ""
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview will load when visible</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-image-path="'..escapeHTML(imageEntry.imagePath or "")..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
     local previewText = content
@@ -1527,11 +1527,28 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append or matchedIndex>previousMenuDataCount then
             local entry=menuData[matchedIndex]
             if entry and entry.type=="image" and not entry.thumbnailData then
-                -- Decode/resize only the images in this rendered page, never
-                -- every image in the selected date or the entire search result.
-                entry.thumbnailData=makeThumbnailAtPath(entry.imagePath)
+                -- Rendering a card never decodes an original image. The thumbnail
+                -- is hydrated asynchronously from its persisted lightweight path.
+                cards[#cards+1]=historyItemHTML(entry,matchedIndex)
+                local dateKey=entry.dateKey
+                local imagePath=entry.imagePath
+                local cacheEntry=entry
+                hs.timer.doAfter(0,function()
+                    if not clipboardSessionOpen or clipboardDateFilter and dateKey~=clipboardDateFilter then return end
+                    local thumbnail=makeThumbnailAtPath(imagePath)
+                    if thumbnail~="" then
+                        cacheEntry.thumbnailData=thumbnail
+                        if clipboard_webview and clipboardSessionOpen then
+                            local src=jsStringLiteral(thumbnail)
+                            local key=jsStringLiteral(imagePath)
+                            clipboard_webview:evaluateJavaScript(
+                                "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
+                        end
+                    end
+                end)
+            else
+                cards[#cards+1]=historyItemHTML(entry,matchedIndex)
             end
-            cards[#cards+1]=historyItemHTML(entry,matchedIndex)
         end
     end
     local html=table.concat(cards,"\n")
