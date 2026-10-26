@@ -1638,6 +1638,22 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(query,kind,0,false)
     elseif body.action == "loadMore" then
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
+    elseif body.action == "loadImagePreview" then
+        local index=tonumber(body.index)
+        local entry=index and menuData[index]
+        if entry and entry.type=="image" and clipboard_webview then
+            -- Full-resolution data is only generated for an explicit hover.
+            local image=decodeImage(entry)
+            if image then
+                local ok,data=pcall(function() return image:encodeAsURLString() end)
+                image=nil
+                collectgarbage("collect")
+                if ok and data then
+                    clipboard_webview:evaluateJavaScript(
+                        "window.setImagePreview("..jsStringLiteral(index)..","..jsStringLiteral(data)..");")
+                end
+            end
+        end
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
         local entry = index and menuData[index]
