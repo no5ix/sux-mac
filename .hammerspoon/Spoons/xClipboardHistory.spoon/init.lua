@@ -1648,9 +1648,12 @@ function handleClipboardPanelMessage(message)
                 local ok,data=pcall(function() return image:encodeAsURLString() end)
                 image=nil
                 collectgarbage("collect")
-                if ok and data then
+                if ok and data and clipboard_webview then
+                    -- Decode the original only for a requested hover, then send
+                    -- its data URL to the one currently-open WebView.
                     clipboard_webview:evaluateJavaScript(
                         "window.setImagePreview("..jsStringLiteral(index)..","..jsStringLiteral(data)..");")
+                    data=nil
                 end
             end
         end
