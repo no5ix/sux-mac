@@ -375,9 +375,7 @@ local function readCachedThumbnail(path)
     local bytes=file:read("*a")
     file:close()
     if not bytes or #bytes==0 then return "" end
-    local ext=string.lower(thumbPath:match("%.([%w]+)$") or "jpg")
-    local mime=ext=="png" and "image/png" or "image/jpeg"
-    return "data:"..mime..";base64,"..hs.base64.encode(bytes)
+    return "data:image/jpeg;base64,"..hs.base64.encode(bytes)
 end
 
 local function writeCachedThumbnail(path, data)
@@ -403,7 +401,8 @@ local function makeThumbnailAtPath(path)
         local thumb=original:bitmapRepresentation({w=math.max(1,math.floor(w*scale+0.5)),h=math.max(1,math.floor(h*scale+0.5))})
         return thumb and thumb:encodeAsURLString() or ""
     end)
-    original=nil; collectgarbage("collect")
+    original=nil
+    collectgarbage("collect")
     local thumbnail=ok and result or ""
     if thumbnail~="" then writeCachedThumbnail(path,thumbnail) end
     return thumbnail
@@ -1516,6 +1515,8 @@ local function cancelThumbnailQueue()
         thumbnailQueueTimer=nil
     end
 end
+
+
 
 local function hasThumbnailCached(imagePath)
     if not imagePath then return false end
