@@ -1,1 +1,1 @@
-test
+local pkg = {}
