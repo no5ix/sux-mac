@@ -33,7 +33,11 @@ local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
 local previousApplication = nil
-local suppressFocusDismiss = false
+-- Declared before panel callbacks so window-close and dismissal handlers can
+-- stop the global click monitor safely.
+local outsideClickMonitor = nil
+local closeOutsideClickPending = false
+local stopOutsideClickMonitor
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
@@ -1812,6 +1816,7 @@ local function configureClipboardWebview(view)
     view:closeOnEscape(false)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
+            stopOutsideClickMonitor()
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
@@ -1839,9 +1844,6 @@ local clipboardPanelHTMLReady = false
 
 -- Close the panel after an outside click, while ignoring focus changes alone.
 -- This keeps clicks in browser inputs from being treated as an automatic dismiss.
-local outsideClickMonitor = nil
-local closeOutsideClickPending = false
-
 local function pointIsInsideClipboardPanel(point)
     local view = clipboard_webview
     if not view or not view:isVisible() then return false end
@@ -1851,7 +1853,7 @@ local function pointIsInsideClipboardPanel(point)
         and point.y >= frame.y and point.y <= frame.y + frame.h
 end
 
-local function stopOutsideClickMonitor()
+stopOutsideClickMonitor = function()
     if outsideClickMonitor then
         outsideClickMonitor:stop()
         outsideClickMonitor = nil
@@ -2026,12 +2028,9 @@ function showClipboardHistory()
     local view = clipboard_webview
     if not view then
         logger.e("Unable to create Clipboard History WebView")
-        suppressFocusDismiss = false
         return
     end
 
-    suppressFocusDismiss = true
-    startOutsideClickMonitor()
     if not clipboardSessionOpen then dateHistoryCache = {} end
     clipboardSessionOpen = true
     clipboard_search = ""
@@ -2060,7 +2059,6 @@ function showClipboardHistory()
             else
                 logger.w("Clipboard History window unavailable after show")
             end
-            suppressFocusDismiss = false
         end)
     end
 
