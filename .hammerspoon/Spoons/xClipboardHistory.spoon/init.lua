@@ -638,10 +638,7 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
             dayEntries={}
             for _,record in ipairs(readDayHistory(dateKey)) do
                 local entry=metadataEntry(record,dateKey)
-                if entry then
-                    if entry.type=="image" and entry.thumbnailData=="" then entry.thumbnailData=makeThumbnailAtPath(entry.imagePath) end
-                    dayEntries[#dayEntries+1]=entry
-                end
+                if entry then dayEntries[#dayEntries+1]=entry end
             end
             table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
             if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
