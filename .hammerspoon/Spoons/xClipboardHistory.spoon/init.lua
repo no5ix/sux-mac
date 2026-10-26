@@ -1483,6 +1483,23 @@ end
 
 local function enqueueThumbnail(entry, index)
     if not entry or entry.type~="image" or entry.thumbnailData and entry.thumbnailData~="" then return end
+    if hasThumbnailCached(entry.imagePath) then
+        -- Reuse the thumbnail already generated for this file during an earlier visit.
+        for _,cachedEntry in ipairs(img_clipboard_history) do
+            if cachedEntry.imagePath==entry.imagePath and cachedEntry.thumbnailData and cachedEntry.thumbnailData~="" then
+                entry.thumbnailData=cachedEntry.thumbnailData
+                return
+            end
+        end
+        for _,entries in pairs(dateHistoryCache) do
+            for _,cachedEntry in ipairs(entries) do
+                if cachedEntry.imagePath==entry.imagePath and cachedEntry.thumbnailData and cachedEntry.thumbnailData~="" then
+                    entry.thumbnailData=cachedEntry.thumbnailData
+                    return
+                end
+            end
+        end
+    end
     local queueRecord={entry=entry,index=index,path=entry.imagePath,dateKey=entry.dateKey,generation=thumbnailQueueGeneration}
     thumbnailQueue[#thumbnailQueue+1]=queueRecord
     if thumbnailQueueTimer then return end
@@ -1515,6 +1532,19 @@ local function enqueueThumbnail(entry, index)
         end
     end
     thumbnailQueueTimer=hs.timer.doAfter(0,processNext)
+end
+
+local function hasThumbnailCached(imagePath)
+    if not imagePath then return false end
+    for _,entry in ipairs(img_clipboard_history) do
+        if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
+    end
+    for _,entries in pairs(dateHistoryCache) do
+        for _,entry in ipairs(entries) do
+            if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
+        end
+    end
+    return false
 end
 
 local function updateClipboardPanel(query,kind,offset,append)
