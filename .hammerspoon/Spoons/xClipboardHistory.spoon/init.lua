@@ -1972,16 +1972,26 @@ local function activateClipboardPanel(view)
                 local focusedWindow = hs.window.focusedWindow()
                 local appIsFrontmost = currentApp and frontApp
                     and frontApp:pid() == currentApp:pid()
-                local panelHasFocus = focusedWindow and currentWindow
+
+                -- When Hammerspoon is an accessory app, macOS may report no
+                -- focused AX window even while its WebView is visible and
+                -- active for mouse events. Prefer the app's focused window and
+                -- include native focus state in the diagnostics.
+                local appFocusedWindow = currentApp and currentApp:focusedWindow()
+                local panelHasFocus = appFocusedWindow and currentWindow
+                    and appFocusedWindow:id() and currentWindow:id()
+                    and appFocusedWindow:id() == currentWindow:id()
+                local globalPanelHasFocus = focusedWindow and currentWindow
                     and focusedWindow:id() and currentWindow:id()
                     and focusedWindow:id() == currentWindow:id()
 
                 logger.d("Clipboard History activation attempt " .. attempts
                     .. ": activated=" .. tostring(activated)
                     .. ", appFrontmost=" .. tostring(appIsFrontmost)
-                    .. ", panelFocused=" .. tostring(panelHasFocus))
+                    .. ", appPanelFocused=" .. tostring(panelHasFocus)
+                    .. ", globalPanelFocused=" .. tostring(globalPanelHasFocus))
 
-                if appIsFrontmost and panelHasFocus then
+                if appIsFrontmost and (panelHasFocus or globalPanelHasFocus) then
                     panelActivationTimer = nil
                     return
                 end
