@@ -2068,7 +2068,6 @@ function showClipboardHistory()
             view:orderAbove()
             nativeWindow:raise()
             nativeWindow:focus()
-            view:focus()
         end
         startOutsideClickMonitor()
     end
