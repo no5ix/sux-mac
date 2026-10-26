@@ -2056,9 +2056,10 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- Show the panel above normal windows and focus it directly. Avoid
-        -- synthetic mouse clicks and repeated activation attempts: they can
-        -- move the pointer and make hover behavior feel delayed.
+        -- Raising controls z-order only; it does not guarantee that the
+        -- Hammerspoon accessory app/window becomes active for mouse hover.
+        -- Ask macOS to activate Hammerspoon, then focus the native WebView
+        -- window. Do this without synthetic clicks or pointer movement.
         local nativeWindow = view:hswindow()
         if not nativeWindow then
             logger.w("Clipboard History window unavailable after show")
@@ -2067,7 +2068,27 @@ function showClipboardHistory()
             view:bringToFront(true)
             view:orderAbove()
             nativeWindow:raise()
+
+            local app = nativeWindow:application()
+            local activated = false
+            if app then
+                activated = app:activate(true)
+            end
             nativeWindow:focus()
+
+            -- Activation can be asynchronous when Hammerspoon starts as an
+            -- accessory app. Re-assert focus once on the next run-loop turn,
+            -- but only while this panel is still the visible active target.
+            hs.timer.doAfter(0, function()
+                if clipboard_webview ~= view or not view:isVisible() then return end
+                local currentWindow = view:hswindow()
+                if currentWindow then
+                    currentWindow:raise()
+                    currentWindow:focus()
+                end
+            end)
+
+            logger.d("Clipboard History activation requested: " .. tostring(activated))
         end
         startOutsideClickMonitor()
     end
