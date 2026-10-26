@@ -38,7 +38,6 @@ local previousApplication = nil
 local outsideClickMonitor = nil
 local closeOutsideClickPending = false
 local stopOutsideClickMonitor
-local restoreClipboardActivationPolicy = nil
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
@@ -1753,10 +1752,6 @@ end
 closeClipboardPanel = function()
     -- Stop global monitoring before destroying the panel.
     stopOutsideClickMonitor()
-    if restoreClipboardActivationPolicy then
-        pcall(restoreClipboardActivationPolicy)
-        restoreClipboardActivationPolicy = nil
-    end
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1822,10 +1817,6 @@ local function configureClipboardWebview(view)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
             stopOutsideClickMonitor()
-            if restoreClipboardActivationPolicy then
-                pcall(restoreClipboardActivationPolicy)
-                restoreClipboardActivationPolicy = nil
-            end
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
@@ -2071,26 +2062,17 @@ function showClipboardHistory()
         if not nativeWindow then
             logger.w("Clipboard History window unavailable after show")
         else
+            -- Ask Hammerspoon to activate this window, then verify the result.
+            -- The hs.application module does not expose an activation-policy setter,
+            -- so don't pretend a Lua call can change NSApplication's policy.
             local hammerspoonApp = application.get("org.hammerspoon.Hammerspoon")
-            local previousPolicy = nil
-            local policyChanged = false
-
-            -- Hammerspoon normally runs as an accessory app. Temporarily switch
-            -- its activation policy to regular so AppKit can make this window key.
-            if hs.application and hs.application.activationPolicy then
-                previousPolicy = hs.application.activationPolicy()
-            end
-            if hs.application and hs.application.setActivationPolicy then
-                policyChanged = hs.application.setActivationPolicy("regular") ~= false
-            end
-
-            if hammerspoonApp then
-                hammerspoonApp:unhide()
-                hammerspoonApp:activate(true)
-            end
+            local activated = hammerspoonApp and hammerspoonApp:activate(true) or false
+            local setFrontmost = hammerspoonApp and hammerspoonApp:setFrontmost(true) or false
+            view:level(hs.drawing.windowLevels.floating)
+            view:bringToFront(true)
+            view:orderAbove()
             nativeWindow:raise()
             nativeWindow:focus()
-            view:bringToFront(true)
 
             hs.timer.doAfter(0.15, function()
                 if clipboard_webview ~= view or not view:isVisible() then return end
@@ -2100,23 +2082,13 @@ function showClipboardHistory()
                     and focusedWindow:id() == currentNativeWindow:id()
                 local frontmost = application.frontmostApplication()
                 if not ownsFocus then
-                    logger.w("Clipboard History activation still failed; policyChanged="
-                        .. tostring(policyChanged)
-                        .. "; previousPolicy=" .. tostring(previousPolicy)
+                    logger.w("Clipboard History activation result: activate="
+                        .. tostring(activated)
+                        .. "; setFrontmost=" .. tostring(setFrontmost)
                         .. "; frontmost app=" .. tostring(frontmost and frontmost:bundleID())
                         .. "; focused window=" .. tostring(focusedWindow and focusedWindow:title()))
                 end
             end)
-
-            -- Keep the regular policy only while this panel is open. On dismissal,
-            -- restore the prior policy so Hammerspoon returns to its normal role.
-            if not restoreClipboardActivationPolicy then
-                restoreClipboardActivationPolicy = function()
-                    if previousPolicy ~= nil and hs.application and hs.application.setActivationPolicy then
-                        hs.application.setActivationPolicy(previousPolicy)
-                    end
-                end
-            end
         end
         startOutsideClickMonitor()
     end
