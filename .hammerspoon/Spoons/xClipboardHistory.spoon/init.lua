@@ -945,6 +945,15 @@ main:focus { outline:none; }
 .hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
 #clipboard-items.item-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
+
+/* Tab focuses the results container to enable arrow-key navigation. Keep that
+   container focus invisible; individual cards retain their own focus/selection
+   outlines so the blue border never wraps the entire grid. */
+#clipboard-items:focus,
+#clipboard-items:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
 .load-more-wrap { flex:0 0 auto; width:100%; display:flex; justify-content:flex-start; }
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
