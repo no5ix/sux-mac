@@ -732,11 +732,7 @@ local function historyItemHTML(entry, index)
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=imageEntry.thumbnailData or ""
-        if thumbnail=="" and imageEntry.imagePath then
-            thumbnail=makeThumbnailAtPath(imageEntry.imagePath)
-            imageEntry.thumbnailData=thumbnail
-        end
-        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="eager" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
+        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview will load when visible</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
@@ -1529,7 +1525,13 @@ local function updateClipboardPanel(query,kind,offset,append)
     local cards={}
     for _,matchedIndex in ipairs(matches) do
         if not append or matchedIndex>previousMenuDataCount then
-            cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
+            local entry=menuData[matchedIndex]
+            if entry and entry.type=="image" and not entry.thumbnailData then
+                -- Decode/resize only the images in this rendered page, never
+                -- every image in the selected date or the entire search result.
+                entry.thumbnailData=makeThumbnailAtPath(entry.imagePath)
+            end
+            cards[#cards+1]=historyItemHTML(entry,matchedIndex)
         end
     end
     local html=table.concat(cards,"\n")
