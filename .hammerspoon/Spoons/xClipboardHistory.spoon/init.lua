@@ -1905,17 +1905,14 @@ end
 -- Raising changes z-order only; it does not transfer focus. Activate the owning
 -- application, focus the actual WebView window, and verify the foreground result.
 -- Retries are bounded and cancelled if the panel closes or is replaced.
-local function cancelPanelActivation()
+local function activateClipboardPanel(view)
     panelActivationGeneration = panelActivationGeneration + 1
+    local generation = panelActivationGeneration
     if panelActivationTimer then
         panelActivationTimer:stop()
         panelActivationTimer = nil
     end
-end
 
-local function activateClipboardPanel(view)
-    cancelPanelActivation()
-    local generation = panelActivationGeneration
     local attempts = 0
     local maxAttempts = 5
 
@@ -1933,33 +1930,57 @@ local function activateClipboardPanel(view)
             return
         end
 
+        -- The native window's application is authoritative. If the WebView has
+        -- not been attached to a window yet, retry rather than activating the
+        -- generic Hammerspoon process and potentially focusing its Console.
         local app = nativeWindow:application()
-            or application.get("org.hammerspoon.Hammerspoon")
-        if app then
+        if not app then
+            logger.w("Clipboard History activation attempt " .. attempts
+                .. ": native window has no owning application yet")
+        else
             local activated = app:activate(true)
             nativeWindow:focus()
             nativeWindow:raise()
 
-            local frontApp = application.frontmostApplication()
-            local focusedWindow = hs.window.focusedWindow()
-            local appIsFrontmost = frontApp and frontApp:pid() == app:pid()
-            local panelHasFocus = focusedWindow and nativeWindow:id()
-                and focusedWindow:id() == nativeWindow:id()
-
-            logger.d("Clipboard History activation attempt " .. attempts
-                .. ": activated=" .. tostring(activated)
-                .. ", appFrontmost=" .. tostring(appIsFrontmost)
-                .. ", panelFocused=" .. tostring(panelHasFocus))
-
-            if appIsFrontmost and panelHasFocus then
-                if panelActivationTimer then
-                    panelActivationTimer:stop()
+            -- Re-read the actual foreground state on the next run-loop turn;
+            -- querying it synchronously can race macOS window activation.
+            panelActivationTimer = hs.timer.doAfter(0.03, function()
+                if generation ~= panelActivationGeneration
+                    or clipboard_webview ~= view
+                    or not view:isVisible() then
                     panelActivationTimer = nil
+                    return
                 end
-                return
-            end
-        else
-            logger.w("Clipboard History activation failed: owning app unavailable")
+
+                local currentWindow = view:hswindow()
+                local currentApp = currentWindow and currentWindow:application()
+                local frontApp = application.frontmostApplication()
+                local focusedWindow = hs.window.focusedWindow()
+                local appIsFrontmost = currentApp and frontApp
+                    and frontApp:pid() == currentApp:pid()
+                local panelHasFocus = focusedWindow and currentWindow
+                    and focusedWindow:id() and currentWindow:id()
+                    and focusedWindow:id() == currentWindow:id()
+
+                logger.d("Clipboard History activation attempt " .. attempts
+                    .. ": activated=" .. tostring(activated)
+                    .. ", appFrontmost=" .. tostring(appIsFrontmost)
+                    .. ", panelFocused=" .. tostring(panelHasFocus))
+
+                if appIsFrontmost and panelHasFocus then
+                    panelActivationTimer = nil
+                    return
+                end
+
+                if attempts < maxAttempts then
+                    panelActivationTimer = hs.timer.doAfter(0.08, attempt)
+                else
+                    panelActivationTimer = nil
+                    logger.e("Clipboard History window remained unactivated after "
+                        .. maxAttempts .. " attempts; inspect activation logs above")
+                end
+            end)
+            return
         end
 
         if attempts < maxAttempts then
