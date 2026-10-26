@@ -1563,7 +1563,12 @@ local function enqueueThumbnail(entry, index)
         if task.generation==generation
             and (not clipboardDateFilter or clipboardDateFilter==task.dateKey)
             and task.path then
-            local thumbnail=makeThumbnailAtPath(task.path)
+            -- Read the persistent thumbnail first. This path does not decode the
+            -- original image, and it runs only after the initial card markup paints.
+            local thumbnail=readCachedThumbnail(task.path)
+            if thumbnail=="" then
+                thumbnail=makeThumbnailAtPath(task.path)
+            end
             if thumbnail and thumbnail~="" then
                 task.entry.thumbnailData=thumbnail
                 if generation==thumbnailQueueGeneration and clipboard_webview then
