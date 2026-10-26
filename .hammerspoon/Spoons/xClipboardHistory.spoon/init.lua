@@ -1899,9 +1899,8 @@ local function createClipboardWebview()
         clipboard_usercontent
     ):windowStyle({"titled", "closable", "resizable"})
     configureClipboardWebview(clipboard_webview)
-    -- This Spoon is loaded from Hammerspoon's accessory/menu-bar app. Make the
-    -- history window a regular, activatable foreground window rather than just
-    -- floating above other applications.
+    -- This Spoon is loaded from Hammerspoon's accessory/menu-bar app.
+    -- Use a normal window level; activation is explicitly requested when shown.
     clipboard_webview:level(hs.drawing.windowLevels.normal)
 end
 createClipboardWebview()
@@ -2056,10 +2055,10 @@ function showClipboardHistory()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
 
-        -- Raising controls z-order only; it does not guarantee that the
-        -- Hammerspoon accessory app/window becomes active for mouse hover.
-        -- Ask macOS to activate Hammerspoon, then focus the native WebView
-        -- window. Do this without synthetic clicks or pointer movement.
+        -- Raising/focusing an hs.webview's native window does not reliably
+        -- activate Hammerspoon when it is running as an accessory application.
+        -- Switch Hammerspoon to regular activation policy before showing the
+        -- panel, then explicitly activate the app and focus this window.
         local nativeWindow = view:hswindow()
         if not nativeWindow then
             logger.w("Clipboard History window unavailable after show")
@@ -2069,26 +2068,46 @@ function showClipboardHistory()
             view:orderAbove()
             nativeWindow:raise()
 
-            local app = nativeWindow:application()
+            -- Some Hammerspoon builds do not expose activation-policy controls
+            -- in Lua. Use the supported macOS Launch Services API through
+            -- hs.osascript to make Hammerspoon a regular app while the panel is
+            -- open. This is synchronous and does not move the pointer.
+            local policyOK, policyResult = pcall(function()
+                return hs.osascript.applescript([[
+                    use framework "AppKit"
+                    current application's NSApplication's sharedApplication()'s setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
+                    return "regular"
+                ]])
+            end)
+            if not policyOK then
+                logger.w("Could not switch Hammerspoon activation policy: " .. tostring(policyResult))
+            end
+
+            local app = nativeWindow:application() or hs.application.frontmostApplication()
             local activated = false
             if app then
-                activated = app:activate(true)
+                activated = app:setFrontmost(true)
+                if not activated then activated = app:activate(true) end
             end
+            nativeWindow:becomeMain()
             nativeWindow:focus()
+            nativeWindow:raise()
 
-            -- Activation can be asynchronous when Hammerspoon starts as an
-            -- accessory app. Re-assert focus once on the next run-loop turn,
-            -- but only while this panel is still the visible active target.
-            hs.timer.doAfter(0, function()
+            hs.timer.doAfter(0.05, function()
                 if clipboard_webview ~= view or not view:isVisible() then return end
                 local currentWindow = view:hswindow()
+                local currentApp = currentWindow and currentWindow:application()
+                if currentApp and not currentApp:isFrontmost() then
+                    currentApp:setFrontmost(true)
+                end
                 if currentWindow then
-                    currentWindow:raise()
+                    currentWindow:becomeMain()
                     currentWindow:focus()
                 end
             end)
 
-            logger.d("Clipboard History activation requested: " .. tostring(activated))
+            logger.d("Clipboard History activation requested: " .. tostring(activated)
+                .. "; activation policy call: " .. tostring(policyOK))
         end
         startOutsideClickMonitor()
     end
