@@ -38,6 +38,8 @@ local previousApplication = nil
 local outsideClickMonitor = nil
 local closeOutsideClickPending = false
 local stopOutsideClickMonitor
+local panelActivationTimer = nil
+local panelActivationGeneration = 0
 local selectedVisibleIndex = 1
 local visibleIndices = {}
 local panelScreenUUID = nil
@@ -1750,8 +1752,13 @@ end
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
-    -- Stop global monitoring before destroying the panel.
+    -- Stop monitoring and pending activation attempts before destroying the panel.
     stopOutsideClickMonitor()
+    panelActivationGeneration = panelActivationGeneration + 1
+    if panelActivationTimer then
+        panelActivationTimer:stop()
+        panelActivationTimer = nil
+    end
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
@@ -1817,6 +1824,11 @@ local function configureClipboardWebview(view)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
             stopOutsideClickMonitor()
+            panelActivationGeneration = panelActivationGeneration + 1
+            if panelActivationTimer then
+                panelActivationTimer:stop()
+                panelActivationTimer = nil
+            end
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
@@ -1887,6 +1899,124 @@ local function startOutsideClickMonitor()
         return false
     end)
     outsideClickMonitor:start()
+end
+
+-- Activation is an application-level operation as well as a window-level one.
+-- Raising changes z-order only; it does not transfer focus. Activate the owning
+-- application, focus the actual WebView window, and verify the foreground result.
+-- Retries are bounded and cancelled if the panel closes or is replaced.
+local function activateClipboardPanel(view)
+    panelActivationGeneration = panelActivationGeneration + 1
+    local generation = panelActivationGeneration
+    if panelActivationTimer then
+        panelActivationTimer:stop()
+        panelActivationTimer = nil
+    end
+
+    local attempts = 0
+    local maxAttempts = 5
+
+    local function attempt()
+        if generation ~= panelActivationGeneration
+            or clipboard_webview ~= view
+            or not view:isVisible() then
+            return
+        end
+
+        attempts = attempts + 1
+        local nativeWindow = view:hswindow()
+        if not nativeWindow then
+            logger.w("Clipboard History activation attempt " .. attempts
+                .. ": native window unavailable")
+            if attempts < maxAttempts then
+                panelActivationTimer = hs.timer.doAfter(0.08, attempt)
+            else
+                panelActivationTimer = nil
+                logger.e("Clipboard History window remained unavailable after "
+                    .. maxAttempts .. " attempts")
+            end
+            return
+        end
+
+        -- The native window's application is authoritative. If the WebView has
+        -- not been attached to a window yet, retry rather than activating the
+        -- generic Hammerspoon process and potentially focusing its Console.
+        local app = nativeWindow:application()
+        if not app then
+            logger.w("Clipboard History activation attempt " .. attempts
+                .. ": native window has no owning application yet")
+        end
+        if app then
+            -- Focus the specific history window, not merely the application:
+            -- activate(true) may instead focus Hammerspoon Console if it is the
+            -- application's remembered key window.
+            nativeWindow:raise()
+            nativeWindow:focus()
+            local activated = app:activate(true)
+            nativeWindow:focus()
+            nativeWindow:raise()
+
+            -- Re-read the actual foreground state on the next run-loop turn;
+            -- querying it synchronously can race macOS window activation.
+            panelActivationTimer = hs.timer.doAfter(0.03, function()
+                if generation ~= panelActivationGeneration
+                    or clipboard_webview ~= view
+                    or not view:isVisible() then
+                    panelActivationTimer = nil
+                    return
+                end
+
+                local currentWindow = view:hswindow()
+                local currentApp = currentWindow and currentWindow:application()
+                local frontApp = application.frontmostApplication()
+                local focusedWindow = hs.window.focusedWindow()
+                local appIsFrontmost = currentApp and frontApp
+                    and frontApp:pid() == currentApp:pid()
+
+                -- When Hammerspoon is an accessory app, macOS may report no
+                -- focused AX window even while its WebView is visible and
+                -- active for mouse events. Prefer the app's focused window and
+                -- include native focus state in the diagnostics.
+                local appFocusedWindow = currentApp and currentApp:focusedWindow()
+                local panelHasFocus = appFocusedWindow and currentWindow
+                    and appFocusedWindow:id() and currentWindow:id()
+                    and appFocusedWindow:id() == currentWindow:id()
+                local globalPanelHasFocus = focusedWindow and currentWindow
+                    and focusedWindow:id() and currentWindow:id()
+                    and focusedWindow:id() == currentWindow:id()
+
+                logger.d("Clipboard History activation attempt " .. attempts
+                    .. ": activated=" .. tostring(activated)
+                    .. ", appFrontmost=" .. tostring(appIsFrontmost)
+                    .. ", appPanelFocused=" .. tostring(panelHasFocus)
+                    .. ", globalPanelFocused=" .. tostring(globalPanelHasFocus))
+
+                if appIsFrontmost and (panelHasFocus or globalPanelHasFocus) then
+                    panelActivationTimer = nil
+                    return
+                end
+
+                if attempts < maxAttempts then
+                    panelActivationTimer = hs.timer.doAfter(0.08, attempt)
+                else
+                    panelActivationTimer = nil
+                    logger.e("Clipboard History window remained unactivated after "
+                        .. maxAttempts .. " attempts; inspect activation logs above")
+                end
+            end)
+            return
+        end
+
+        if attempts < maxAttempts then
+            panelActivationTimer = hs.timer.doAfter(0.08, attempt)
+        else
+            panelActivationTimer = nil
+            logger.e("Clipboard History window remained unactivated after "
+                .. maxAttempts .. " attempts; inspect activation logs above")
+        end
+    end
+
+    attempt()
 end
 
 local function createClipboardWebview()
@@ -2049,20 +2179,25 @@ function showClipboardHistory()
     local function showAfterHTMLLoaded()
         if clipboard_webview ~= view then return end
         positionPanelOnCurrentScreen()
+
+        -- Activate Hammerspoon before displaying the panel. A raised window
+        -- can remain visually on top without owning mouse/keyboard focus.
+        local nativeWindow = view:hswindow()
+        local owningApp = nativeWindow and nativeWindow:application()
+        if owningApp then
+            local activated = owningApp:activate(true)
+            logger.d("Clipboard History pre-show app activation: " .. tostring(activated))
+        else
+            logger.w("Clipboard History owning application unavailable before show")
+        end
+
         view:show()
+        view:bringToFront(true)
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
+
         hs.timer.doAfter(0.05, function()
             if clipboard_webview ~= view then return end
-            local nativeWindow = view:hswindow()
-            if nativeWindow then
-                -- Explicitly raise and focus the panel. WebView focus alone
-                -- isn't sufficient when another app is already frontmost.
-                nativeWindow:raise()
-                nativeWindow:focus()
-                view:bringToFront(true)
-            else
-                logger.w("Clipboard History window unavailable after show")
-            end
+            activateClipboardPanel(view)
             startOutsideClickMonitor()
         end)
     end
