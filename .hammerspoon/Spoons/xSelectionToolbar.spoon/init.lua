@@ -222,7 +222,7 @@ local translationRequestId = 0
 local translationWindowPinned = false
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
-local TRANSLATION_MODEL = "Qwen3-4B-Instruct-2507-4bit"
+local TRANSLATION_MODEL = "Qwen3-4B-MLX-4bit"
 local TRANSLATION_PROVIDER_CHOICE = "local" -- local oMLX+Qwen or ChatGPT
 
 -- Add custom local-AI actions here. Each entry creates a toolbar button and
