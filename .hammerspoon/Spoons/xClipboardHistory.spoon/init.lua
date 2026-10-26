@@ -1527,23 +1527,24 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append or matchedIndex>previousMenuDataCount then
             local entry=menuData[matchedIndex]
             if entry and entry.type=="image" and not entry.thumbnailData then
-                -- Rendering a card never decodes an original image. The thumbnail
-                -- is hydrated asynchronously from its persisted lightweight path.
+                -- Render a placeholder immediately. Thumbnail generation is a
+                -- separate timer task, not part of the filter-switch callback.
                 cards[#cards+1]=historyItemHTML(entry,matchedIndex)
                 local dateKey=entry.dateKey
                 local imagePath=entry.imagePath
                 local cacheEntry=entry
+                local viewAtRequest=clipboard_webview
                 hs.timer.doAfter(0,function()
-                    if not clipboardSessionOpen or clipboardDateFilter and dateKey~=clipboardDateFilter then return end
+                    if not clipboardSessionOpen or not clipboard_webview or clipboard_webview~=viewAtRequest then return end
+                    if clipboardDateFilter and clipboardDateFilter~=dateKey then return end
                     local thumbnail=makeThumbnailAtPath(imagePath)
-                    if thumbnail~="" then
+                    if thumbnail and thumbnail~="" then
                         cacheEntry.thumbnailData=thumbnail
-                        if clipboard_webview and clipboardSessionOpen then
-                            local src=jsStringLiteral(thumbnail)
-                            local key=jsStringLiteral(imagePath)
-                            clipboard_webview:evaluateJavaScript(
-                                "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
-                        end
+                        local src=jsStringLiteral(thumbnail)
+                        local key=jsStringLiteral(imagePath)
+                        clipboard_webview:evaluateJavaScript(
+                            "document.querySelectorAll('.image-item').forEach(function(card){if(card.dataset.imagePath==="..key.."){var img=card.querySelector('img.preview');if(img){img.src="..src..";img.loading='lazy';}}});")
+                        thumbnail=nil
                     end
                 end)
             else
