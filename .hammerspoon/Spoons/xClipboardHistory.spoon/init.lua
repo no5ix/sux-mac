@@ -360,7 +360,41 @@ local function readImageAtPath(path)
     logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
 end
 
+local function thumbnailPathForImage(path)
+    if type(path)~="string" or path=="" then return nil end
+    local parent=path:match("^(.*)/[^/]+$")
+    if not parent then return nil end
+    return parent.."/thumbnails/"..(path:match("([^/]+)$") or "image")..".jpg"
+end
+
+local function readCachedThumbnail(path)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath then return "" end
+    local file=io.open(thumbPath,"rb")
+    if not file then return "" end
+    local bytes=file:read("*a")
+    file:close()
+    if not bytes or #bytes==0 then return "" end
+    local ext=string.lower(thumbPath:match("%.([%w]+)$") or "jpg")
+    local mime=ext=="png" and "image/png" or "image/jpeg"
+    return "data:"..mime..";base64,"..hs.base64.encode(bytes)
+end
+
+local function writeCachedThumbnail(path, data)
+    local thumbPath=thumbnailPathForImage(path)
+    if not thumbPath or type(data)~="string" or data=="" then return false end
+    local directory=thumbPath:match("^(.*)/[^/]+$")
+    if not directory or not ensureDirectory(directory) then return false end
+    local base64=data:match("^data:image/[%w%+%.%-]+;base64,(.+)$")
+    if not base64 then return false end
+    local bytes=hs.base64.decode(base64)
+    if type(bytes)~="string" or bytes=="" then return false end
+    return atomicWrite(thumbPath,bytes)
+end
+
 local function makeThumbnailAtPath(path)
+    local cached=readCachedThumbnail(path)
+    if cached~="" then return cached end
     local original=readImageAtPath(path); if not original then return "" end
     local ok,result=pcall(function()
         local size=original:size(); local w,h=tonumber(size and size.w) or 0,tonumber(size and size.h) or 0
@@ -370,7 +404,9 @@ local function makeThumbnailAtPath(path)
         return thumb and thumb:encodeAsURLString() or ""
     end)
     original=nil; collectgarbage("collect")
-    return ok and result or ""
+    local thumbnail=ok and result or ""
+    if thumbnail~="" then writeCachedThumbnail(path,thumbnail) end
+    return thumbnail
 end
 
 local function decodeImage(entry)
@@ -1481,6 +1517,20 @@ local function cancelThumbnailQueue()
     end
 end
 
+local function hasThumbnailCached(imagePath)
+    if not imagePath then return false end
+    for _,entry in ipairs(img_clipboard_history) do
+        if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
+    end
+    for _,entries in pairs(dateHistoryCache) do
+        for _,entry in ipairs(entries) do
+            if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
+        end
+    end
+    return false
+end
+
+
 local function enqueueThumbnail(entry, index)
     if not entry or entry.type~="image" or entry.thumbnailData and entry.thumbnailData~="" then return end
     if hasThumbnailCached(entry.imagePath) then
@@ -1534,18 +1584,6 @@ local function enqueueThumbnail(entry, index)
     thumbnailQueueTimer=hs.timer.doAfter(0,processNext)
 end
 
-local function hasThumbnailCached(imagePath)
-    if not imagePath then return false end
-    for _,entry in ipairs(img_clipboard_history) do
-        if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
-    end
-    for _,entries in pairs(dateHistoryCache) do
-        for _,entry in ipairs(entries) do
-            if entry.imagePath==imagePath and entry.thumbnailData and entry.thumbnailData~="" then return true end
-        end
-    end
-    return false
-end
 
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
