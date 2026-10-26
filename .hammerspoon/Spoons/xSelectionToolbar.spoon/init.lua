@@ -31,32 +31,28 @@ local CUSTOM_AI_BUTTONS = {
         label = "Translation",
         icon = "🌏",
         prompt = "Detect the language of the text below. If it is English, translate it into natural, fluent Chinese. If it is Chinese, translate it into natural, fluent English. If it is Thai, translate it into natural, fluent Chinese. Output only the translation, preserving meaning and tone.\\n\\n{{text}}",
-        -- prompt = "If there is only one sentence, don’t provide a bilingual translation with the original foreign-language text and Chinese side by side. If there are multiple sentences, provide a bilingual translation with each sentence in the original foreign language followed by its Chinese translation. If there is any Thai text, translate only the Thai text and don’t translate the English. If the text is entirely in English, translate it directly into Chinese. For English text, explain any words above the B1 level at the end of each sentence and include their IPA pronunciations: \\n\\n{{text}}",
-        -- prompt = [[Please process the text below according to the following rules.
+    },
+    {
+        id = "Polishing",
+        label = "Polishing",
+        icon = "👞",
+        prompt = [[
+            Organize the speech-to-text content, and only output the final text, without adding other content.  
+            - Be faithful to the original meaning, not adding or altering the original text's meaning.  
+            - Delete tone words, repeated content, and extra colloquial vocabulary.  
+            - Clarify the sentence order, ensuring logical flow.  
+            - Identify punctuation marks in the input text and modify them to the corresponding symbols, for example, "bar" → "-", "etc." → "……".  
+            - Consider the context and determine the scene, identify possible errors in the speech recognition due to similar sounds, and restore them to the correct words or proper nouns, for example, "scale" → "Skill", "Cloud" → "Claude".  
+            - Identify numbers in the input text and convert them to Arabic numerals.  
 
-        --     **1. Translation Format**
-        --     - If the input contains only one sentence, provide the Chinese translation directly without displaying the original foreign-language sentence alongside it.
-        --     - If the input contains multiple sentences, provide a bilingual translation, with each sentence in the original foreign language followed immediately by its Chinese translation.
-        --     - If the input contains any Thai text, translate only the Thai text into Chinese and leave all English text untranslated.
-        --     - If the input is entirely in English, translate the English text directly into Chinese.
+            When the input text is long, additional content formatting is needed.  
+            - Consider whether the input text has a logical relationship, use paragraphs, line breaks, ordered lists ("-", "1. ", "2. "), and present it in a structured format.  
+            - If the input text does not have a clear hierarchical relationship or is short, no structural formatting adjustments are made.  
 
-        --     **2. Vocabulary Explanations for English Text**
-        --     - For English text, identify words above the B1 level in each sentence and explain their meanings in Chinese.
-        --     - Include the IPA pronunciation of each identified word.
-        --     - Place the vocabulary explanations immediately after the Chinese translation of the corresponding sentence.
-        --     - If a sentence contains no words above the B1 level, do not add a vocabulary explanation for that sentence.
-        --     - Avoid explaining the same word repeatedly unless its meaning differs by context.
+            **Text to Process:**
 
-        --     **3. Important Rules**
-        --     - Preserve the original meaning and context when translating.
-        --     - Use natural, colloquial Chinese rather than stiff, word-for-word translations.
-        --     - Follow the sentence-by-sentence format consistently when the input contains multiple sentences.
-        --     - Do not add introductions, conclusions, or unrelated commentary.
-
-        --     **Text to Process:**
-
-        --     {{text}}
-        -- ]],
+            {{text}}
+        ]],
     },
     {
         id = "correct",
