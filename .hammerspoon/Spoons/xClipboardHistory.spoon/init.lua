@@ -1747,7 +1747,10 @@ end
 -- macOS attach it to the currently active Space.
 closeClipboardPanel = function()
     -- Stop global monitoring before destroying the panel.
-    stopOutsideClickMonitor()
+    if outsideClickMonitor then
+        outsideClickMonitor:stop()
+        outsideClickMonitor = nil
+    end
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
     clipboard_webview=nil
