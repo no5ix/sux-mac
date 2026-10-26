@@ -1483,7 +1483,8 @@ end
 
 local function enqueueThumbnail(entry, index)
     if not entry or entry.type~="image" or entry.thumbnailData and entry.thumbnailData~="" then return end
-    thumbnailQueue[#thumbnailQueue+1]={entry=entry,index=index,path=entry.imagePath,dateKey=entry.dateKey,generation=thumbnailQueueGeneration}
+    local queueRecord={entry=entry,index=index,path=entry.imagePath,dateKey=entry.dateKey,generation=thumbnailQueueGeneration}
+    thumbnailQueue[#thumbnailQueue+1]=queueRecord
     if thumbnailQueueTimer then return end
     local generation=thumbnailQueueGeneration
     local function processNext()
@@ -1780,6 +1781,7 @@ closeClipboardPanel = function()
     allHistoryTotalCount=nil
     searchResultsCache=nil
     clipboardSessionOpen=false
+    cancelThumbnailQueue()
     panelCacheKey=nil
     panelCacheHTML=nil
     visibleIndices={}
