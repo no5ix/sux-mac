@@ -2068,22 +2068,23 @@ function showClipboardHistory()
             view:orderAbove()
             nativeWindow:raise()
 
-            -- Some Hammerspoon builds do not expose activation-policy controls
-            -- in Lua. Use the supported macOS Launch Services API through
-            -- hs.osascript to make Hammerspoon a regular app while the panel is
-            -- open. This is synchronous and does not move the pointer.
-            local policyOK, policyResult = pcall(function()
-                return hs.osascript.applescript([[
-                    use framework "AppKit"
-                    current application's NSApplication's sharedApplication()'s setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
-                    return "regular"
-                ]])
-            end)
-            if not policyOK then
-                logger.w("Could not switch Hammerspoon activation policy: " .. tostring(policyResult))
+            -- hs.osascript.applescript() does not make AppleScriptObjC
+            -- framework calls reliable across Hammerspoon/macOS versions.
+            -- Use JXA via the documented osascript JavaScript runner to call
+            -- AppKit directly and check whether the policy change succeeded.
+            local policyOK, policyResult, policyError = hs.osascript.javascript([[
+                ObjC.import('AppKit');
+                var app = $.NSApplication.sharedApplication;
+                var ok = app.setActivationPolicy($.NSApplicationActivationPolicyRegular);
+                if (ok) app.activateIgnoringOtherApps(true);
+                ObjC.unwrap(ok);
+            ]])
+            if not policyOK or policyResult ~= true then
+                logger.w("Could not switch Hammerspoon activation policy: "
+                    .. tostring(policyResult) .. "; " .. tostring(policyError))
             end
 
-            local app = nativeWindow:application() or hs.application.frontmostApplication()
+            local app = nativeWindow:application()
             local activated = false
             if app then
                 activated = app:setFrontmost(true)
@@ -2107,7 +2108,7 @@ function showClipboardHistory()
             end)
 
             logger.d("Clipboard History activation requested: " .. tostring(activated)
-                .. "; activation policy call: " .. tostring(policyOK))
+                .. "; activation policy succeeded: " .. tostring(policyOK and policyResult == true))
         end
         startOutsideClickMonitor()
     end
