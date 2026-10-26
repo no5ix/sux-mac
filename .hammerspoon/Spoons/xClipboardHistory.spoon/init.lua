@@ -1507,17 +1507,6 @@ local thumbnailQueue = {}
 local thumbnailQueueTimer = nil
 local thumbnailQueueGeneration = 0
 
-local function cancelThumbnailQueue()
-    thumbnailQueueGeneration=thumbnailQueueGeneration+1
-    thumbnailQueue={}
-    if thumbnailQueueTimer then
-        pcall(function() thumbnailQueueTimer:stop() end)
-        thumbnailQueueTimer=nil
-    end
-end
-
-
-
 local function hasThumbnailCached(imagePath)
     if not imagePath then return false end
     local cached=readCachedThumbnail(imagePath)
@@ -1532,6 +1521,19 @@ local function hasThumbnailCached(imagePath)
     end
     return false
 end
+
+
+local function cancelThumbnailQueue()
+    thumbnailQueueGeneration=thumbnailQueueGeneration+1
+    thumbnailQueue={}
+    if thumbnailQueueTimer then
+        pcall(function() thumbnailQueueTimer:stop() end)
+        thumbnailQueueTimer=nil
+    end
+end
+
+
+
 
 
 local function enqueueThumbnail(entry, index)
