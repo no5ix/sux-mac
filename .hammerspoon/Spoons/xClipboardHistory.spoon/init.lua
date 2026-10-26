@@ -300,12 +300,10 @@ local display_max_text_length = 200
 local function historyDateDirectories()
     local dates={}
     if not fs.attributes(HISTORY_ROOT) then return dates end
-    -- The date directories are the index. Do not read each JSON file or stat
-    -- each original image just to build the available-date list.
+    -- A valid date folder is the lightweight date index. Do not decode JSON
+    -- or stat original images to populate date-filter controls.
     for name in fs.dir(HISTORY_ROOT) do
-        if validDateKey(name) and fs.attributes(historyJSONPath(name)) then
-            dates[#dates+1]=name
-        end
+        if validDateKey(name) then dates[#dates+1]=name end
     end
     table.sort(dates,function(a,b)return a>b end)
     return dates
