@@ -1104,7 +1104,9 @@ let pendingHoverItem = null;
 let lastPointerX = -1;
 let lastPointerY = -1;
 let pointerInsideResults = false;
-let suppressHoverUntilPointerMoves = false;
+// Stay suppressed after panel activation/search/keyboard/scroll until an actual
+// pointer coordinate change proves that the user moved the mouse.
+let suppressHoverUntilPointerMoves = true;
 let resumeHoverAfterScrollTimer = null;
 function hideHoverDetail(item) {
   if (item) {
@@ -1161,12 +1163,11 @@ function scheduleHoverDetail(item) {
 }
 function resumeHoverAfterScrollingSettles() {
   if (resumeHoverAfterScrollTimer !== null) clearTimeout(resumeHoverAfterScrollTimer);
+  // Scrolling can move cards under a stationary pointer. Wait only to settle
+  // preview cleanup; never re-enable hover based on elapsed time alone.
   resumeHoverAfterScrollTimer = setTimeout(() => {
     resumeHoverAfterScrollTimer = null;
-    suppressHoverUntilPointerMoves = false;
-    // Scrolling can move a different card underneath a stationary pointer and
-    // WebKit doesn't always dispatch pointerover/pointermove afterward. Resolve
-    // the current target from the saved pointer coordinates and restart dwell.
+    if (suppressHoverUntilPointerMoves) return;
     if (lastPointerX < 0 || lastPointerY < 0) return;
     const target = document.elementFromPoint(lastPointerX, lastPointerY);
     const item = target && target.closest
@@ -1188,6 +1189,8 @@ document.addEventListener('pointerover', event => {
   if (!item) return;
   if (event.relatedTarget && item.contains(event.relatedTarget)) return;
   pointerInsideResults = true;
+  // pointerover can be emitted by delayed window activation or layout changes.
+  // It must not override suppression; pointermove is the only resume signal.
   scheduleHoverDetail(item);
 });
 document.addEventListener('pointerout', event => {
@@ -1220,11 +1223,12 @@ document.addEventListener('pointermove', event => {
     lastPointerY = event.clientY;
     suppressHoverUntilPointerMoves = false;
     document.body.classList.remove('keyboard-navigation');
-    // Normal pointer movement must not cancel the dwell timer. pointerover/out
-    // handles entering and leaving cards; wheel/scroll handlers dismiss previews.
+    // This is the sole path that resumes hover after open/search/keyboard
+    // navigation. Only deliberate pointer movement may start a new dwell timer.
   }
   const item = event.target.closest && event.target.closest('#clipboard-items .item');
   pointerInsideResults = !!item;
+  if (moved && item) scheduleHoverDetail(item);
 });
 document.addEventListener('scroll', event => {
   if (event.target === resultsPanel || resultsPanel.contains(event.target)) {
@@ -1332,7 +1336,15 @@ function setActiveFilter(button) {
   });
   bridge('filter', 0, committedSearchQuery, currentTypeFilter());
 }
+search.addEventListener('focus', () => {
+  suppressHoverUntilPointerMoves = true;
+  cancelPendingHoverDetail();
+});
 search.addEventListener('input', () => {
+  // Typing/searching is keyboard interaction, not a deliberate hover gesture.
+  // Keep previews disabled until the pointer physically moves again.
+  suppressHoverUntilPointerMoves = true;
+  cancelPendingHoverDetail();
   // Keep normal typing local so searches still run only on Enter. Erasing an
   // active query is the exception: immediately restore the unsearched scope.
   if (search.value.trim() === '' && committedSearchQuery !== '') {
