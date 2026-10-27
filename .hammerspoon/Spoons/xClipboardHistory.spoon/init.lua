@@ -959,21 +959,21 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
   box-shadow: none !important;
 }
 .load-more-wrap { flex:0 0 auto; width:100%; display:flex; justify-content:flex-start; }
-.item { position:relative; cursor:pointer; }
-.item, .item * { cursor:pointer; }
-.item:hover { border-color:var(--accent); background:var(--button-bg); }
-.manual-preview { display:none; position:fixed; z-index:10000; left:50%; top:calc(var(--panel-header-bottom, 190px) + 12px); transform:none; max-width:min(560px, calc(100vw - 32px)); max-height:calc(100vh - var(--panel-header-bottom, 190px) - 28px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); overflow:auto; }
+.item { position:relative; cursor:default; }
+.item, .item * { cursor:default; }
+.item:hover { border-color:var(--card-border); background:var(--card-bg); }
+.manual-preview { display:none; position:fixed; z-index:2147483000; left:50%; top:50%; transform:translate(-50%, -50%); width:min(560px, calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.75); overflow:auto; }
 .item.preview-open .manual-preview { display:block; }
-.manual-preview.text-detail { width:min(560px, calc(100vw - 32px)); left:50%; top:calc(var(--panel-header-bottom, 190px) + 12px); }
+.manual-preview.text-detail { width:min(560px, calc(100vw - 32px)); left:50%; top:50%; }
 .manual-preview-title { color:var(--muted); font-size:11px; margin-bottom:8px; }
 .manual-preview-content { max-height:calc(78vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
-.manual-preview.image-detail { padding:34px 12px 12px; width:min(92vw,1120px); height:auto; max-height:calc(100vh - var(--panel-header-bottom, 190px) - 28px); max-width:calc(100vw - 24px); align-items:center; justify-content:center; overflow:auto; left:50%; top:calc(var(--panel-header-bottom, 190px) + 12px); }
+.manual-preview.image-detail { padding:34px 12px 12px; width:min(92vw,1120px); height:auto; max-height:calc(100vh - 32px); max-width:calc(100vw - 24px); align-items:center; justify-content:center; overflow:auto; left:50%; top:50%; }
 .manual-preview.image-detail img { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; }
-.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:pointer; overflow:hidden; }
+.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:default; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid var(--selected-border); outline-offset:2px; }
 #clipboard-items .item { position:relative; margin:0; }
 #clipboard-items .item.selected { z-index:1; }
-.item:hover { border-color:var(--accent); background:var(--button-bg); }
+.item:hover { border-color:var(--card-border); background:var(--card-bg); }
 .item.selected { border-color:var(--selected-border); outline:2px solid var(--accent); outline-offset:1px; background:var(--selected-bg); }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
@@ -1314,9 +1314,9 @@ window.resetClipboardSelection = () => {
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu';
 contextMenu.innerHTML =
+  '<button type="button" data-context-action="preview">👁️ Preview</button>' +
   '<button type="button" data-context-action="pasteAll">🧴 Paste All the rows above this row in the order from early to late, including this row</button>' +
-  '<button type="button" data-context-action="copy">📋 Copy</button>' +
-  '<button type="button" data-context-action="preview">👁️ Preview</button>';
+  '<button type="button" data-context-action="copy">📋 Copy</button>';
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 contextMenu.querySelectorAll('button').forEach(button => {
   button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
