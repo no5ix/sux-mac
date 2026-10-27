@@ -801,7 +801,7 @@ local function historyItemHTML(entry, index)
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="manual-preview image-detail" role="dialog" aria-label="Image preview"><img class="preview-image" alt="Clipboard image preview" decoding="async"></div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
     local previewText = content
@@ -822,9 +822,7 @@ local function historyItemHTML(entry, index)
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
-        '<div class="manual-preview text-detail" role="dialog" aria-label="Text preview">' ..
-        '<div class="manual-preview-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
-        '<div class="manual-preview-content" data-loaded="false"></div></div></button>'
+        '</button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -962,13 +960,16 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .item { position:relative; cursor:default; }
 .item, .item * { cursor:default; }
 .item:hover { border-color:var(--card-border); background:var(--card-bg); }
-.manual-preview { display:none; position:fixed; z-index:2147483000; left:50%; top:50%; transform:translate(-50%, -50%); width:min(560px, calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.75); overflow:auto; }
-.item.preview-open .manual-preview { display:block; }
-.manual-preview.text-detail { width:min(560px, calc(100vw - 32px)); left:50%; top:50%; }
-.manual-preview-title { color:var(--muted); font-size:11px; margin-bottom:8px; }
-.manual-preview-content { max-height:calc(78vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
-.manual-preview.image-detail { padding:34px 12px 12px; width:min(92vw,1120px); height:auto; max-height:calc(100vh - 32px); max-width:calc(100vw - 24px); align-items:center; justify-content:center; overflow:auto; left:50%; top:50%; }
-.manual-preview.image-detail img { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; }
+/* This overlay lives directly under body, outside the scrolling grid and its
+   stacking contexts. Its z-index intentionally exceeds the fixed header. */
+body > #clipboard-preview-overlay { display:none; position:fixed; inset:0; z-index:2147483647; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.34); box-sizing:border-box; isolation:isolate; }
+body > #clipboard-preview-overlay.open { display:flex; }
+body > #clipboard-preview-overlay .manual-preview { display:none; position:relative; inset:auto; transform:none; margin:auto; width:min(720px, calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); padding:16px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; box-shadow:0 18px 48px rgba(0,0,0,.85); overflow:auto; box-sizing:border-box; flex:none; }
+body > #clipboard-preview-overlay .manual-preview.open { display:block; }
+#clipboard-preview-overlay .manual-preview-title { color:var(--muted); font-size:12px; margin-bottom:10px; }
+#clipboard-preview-overlay .manual-preview-content { max-height:calc(100vh - 96px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:14px; line-height:1.55; user-select:text; }
+body > #clipboard-preview-overlay .manual-preview.image-detail { width:min(1120px, calc(100vw - 32px)); max-height:calc(100vh - 32px); padding:14px; overflow:auto; }
+body > #clipboard-preview-overlay .manual-preview.image-detail img { display:block; max-width:100%; max-height:calc(100vh - 64px); object-fit:contain; border-radius:5px; margin:0 auto; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:default; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid var(--selected-border); outline-offset:2px; }
 #clipboard-items .item { position:relative; margin:0; }
@@ -1087,65 +1088,76 @@ document.addEventListener('click', event => {
   selectRow(rows().indexOf(item));
   bridge('paste', index, '');
 });
-// Preview is explicit: no hover timers, pointer tracking, or scroll-triggered previews.
-function updatePreviewViewport() {
-  const header = document.querySelector('header');
-  if (!header) return;
-  const rect = header.getBoundingClientRect();
-  document.documentElement.style.setProperty('--panel-header-bottom', Math.ceil(rect.bottom) + 'px');
-}
-updatePreviewViewport();
-window.addEventListener('resize', updatePreviewViewport);
-function closeManualPreviews(exceptItem = null) {
-  document.querySelectorAll('#clipboard-items .item.preview-open').forEach(item => {
-    if (item !== exceptItem) item.classList.remove('preview-open', 'preview-loading');
-  });
+// Preview is a single viewport-level overlay so card stacking/overflow and the
+// fixed Clipboard History header cannot cover its top edge.
+const previewOverlay = document.createElement('div');
+previewOverlay.id = 'clipboard-preview-overlay';
+previewOverlay.innerHTML =
+  '<div class="manual-preview text-detail" role="dialog" aria-modal="true" aria-label="Clipboard text preview">' +
+    '<div class="manual-preview-title"></div><div class="manual-preview-content"></div></div>' +
+  '<div class="manual-preview image-detail" role="dialog" aria-modal="true" aria-label="Clipboard image preview">' +
+    '<img alt="Clipboard image preview" decoding="async"></div>';
+document.body.appendChild(previewOverlay);
+previewOverlay.style.zIndex = '2147483647';
+
+function closeManualPreviews() {
+  previewOverlay.classList.remove('open');
+  previewOverlay.querySelectorAll('.manual-preview').forEach(node => node.classList.remove('open'));
 }
 function openManualPreview(item) {
   if (!item) return;
-  closeManualPreviews(item);
-  item.classList.add('preview-open');
-  if (item.dataset.previewLoaded === 'true' || item.dataset.previewLoading === 'true') return;
+  closeManualPreviews();
   const index = Number(item.dataset.index || 0);
+  previewOverlay.classList.add('open');
   if (item.classList.contains('image-item')) {
-    item.dataset.previewLoading = 'true';
-    const image = item.querySelector('.manual-preview.image-detail img');
-    if (image) image.alt = 'Loading clipboard image preview…';
+    const panel = previewOverlay.querySelector('.image-detail');
+    const image = panel.querySelector('img');
+    image.removeAttribute('src');
+    image.alt = 'Loading clipboard image preview…';
+    panel.classList.add('open');
+    panel.dataset.index = String(index);
+    panel.dataset.previewLoaded = 'false';
     bridge('loadImagePreview', index, '', 'image');
   } else {
-    item.dataset.previewLoading = 'true';
-    const fullText = item.querySelector('.manual-preview-content');
-    if (fullText) fullText.textContent = 'Loading preview…';
+    const panel = previewOverlay.querySelector('.text-detail');
+    panel.querySelector('.manual-preview-title').textContent = 'Clipboard text · ' + (item.querySelector('.stamp')?.textContent || '');
+    panel.querySelector('.manual-preview-content').textContent = 'Loading preview…';
+    panel.classList.add('open');
+    panel.dataset.index = String(index);
+    panel.dataset.previewLoaded = 'false';
     bridge('loadTextPreview', index, '', 'text');
   }
 }
 window.setImagePreview = (index, src) => {
-  const item = document.querySelector('.image-item[data-index="' + index + '"]');
-  const image = item && item.querySelector('.manual-preview.image-detail img');
-  if (!item || !image || !src) return;
-  item.dataset.previewLoading = 'false';
-  item.dataset.previewLoaded = 'true';
+  const panel = previewOverlay.querySelector('.image-detail');
+  const image = panel.querySelector('img');
+  if (Number(panel.dataset.index) !== Number(index) || !src) return;
+  panel.dataset.previewLoaded = 'true';
   image.src = src;
   image.alt = 'Clipboard image preview';
 };
 window.setPreviewError = (index, message) => {
-  const item = document.querySelector('.item[data-index="' + index + '"]');
-  if (!item) return;
-  item.dataset.previewLoading = 'false';
-  const target = item.querySelector('.manual-preview-content');
-  if (target) target.textContent = message || 'Preview unavailable';
-  const image = item.querySelector('.manual-preview.image-detail img');
-  if (image) image.alt = message || 'Preview unavailable';
+  const imagePanel = previewOverlay.querySelector('.image-detail');
+  if (Number(imagePanel.dataset.index) === Number(index)) {
+    imagePanel.querySelector('img').alt = message || 'Preview unavailable';
+  }
+  const textPanel = previewOverlay.querySelector('.text-detail');
+  if (Number(textPanel.dataset.index) === Number(index)) {
+    textPanel.querySelector('.manual-preview-content').textContent = message || 'Preview unavailable';
+  }
 };
-window.setTextPreview = (index, content) => {
-  const item = document.querySelector('.item[data-index="' + index + '"]');
-  const preview = item && item.querySelector('.manual-preview-content');
-  if (!item || !preview) return;
-  item.dataset.previewLoading = 'false';
-  item.dataset.previewLoaded = 'true';
-  preview.dataset.loaded = 'true';
-  preview.textContent = content || '';
+window.setTextPreview = (index, value) => {
+  const panel = previewOverlay.querySelector('.text-detail');
+  if (Number(panel.dataset.index) !== Number(index)) return;
+  panel.dataset.previewLoaded = 'true';
+  panel.querySelector('.manual-preview-content').textContent = value || '';
 };
+previewOverlay.addEventListener('click', event => {
+  if (event.target === previewOverlay) closeManualPreviews();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeManualPreviews();
+});
 window.setImageThumbnail = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
   if (!item || !item.isConnected || !src) return;
@@ -1358,12 +1370,9 @@ contextMenu.addEventListener('click', event => {
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
-  if (!event.target.closest('#clipboard-context-menu') && !event.target.closest('.manual-preview')) {
+  if (!event.target.closest('#clipboard-context-menu') && !event.target.closest('#clipboard-preview-overlay')) {
     closeManualPreviews();
   }
-});
-document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') closeManualPreviews();
 });
 const clipboardScrollContainer = document.querySelector('main');
 if (clipboardScrollContainer) {
