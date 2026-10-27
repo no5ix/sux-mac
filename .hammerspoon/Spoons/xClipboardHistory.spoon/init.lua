@@ -814,7 +814,7 @@ local function historyItemHTML(entry, index)
             local ok, offset = pcall(utf8Lib.offset, content, TEXT_CARD_PREVIEW_MAX_CHARS + 1)
             if ok and offset then stop = offset - 1 end
         end
-        previewText = content:sub(1, stop) .. "\n… (preview truncated; hover for more)"
+        previewText = content:sub(1, stop) .. "\n… (preview truncated; use the Preview context-menu action for more)"
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
@@ -1242,12 +1242,7 @@ function selectRow(next, shouldScroll = false) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
 
   if (shouldScroll) {
-    // Keyboard navigation owns the highlight until a real pointer movement.
-    // Also suppress CSS :hover feedback on the card under a stationary pointer,
-    // so only the keyboard-selected row remains visibly highlighted.
     document.body.classList.add('keyboard-navigation');
-    suppressHoverUntilPointerMoves = true;
-    cancelPendingHoverDetail();
   }
 
   // Scroll the actual content viewport only when the highlighted card is not
