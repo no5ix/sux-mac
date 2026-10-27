@@ -667,7 +667,7 @@ local function jsStringLiteral(value)
 end
 
 local TEXT_CARD_PREVIEW_MAX_CHARS = 350
-local TEXT_HOVER_MAX_LINES = 30
+local TEXT_PREVIEW_MAX_LINES = 30
 
 local function persistentHistoryCount(dateFilter,kind)
     if not dateFilter and allHistoryTotalCount then
@@ -1141,31 +1141,6 @@ window.setImageThumbnail = (index, src) => {
   img.src = src;
   placeholder.replaceWith(img);
 };
-window.setImagePreview = (index, src) => {
-  const item = document.querySelector('.image-item[data-index="' + index + '"]');
-  const img = item && item.querySelector('.hover-image');
-  if (!img || img.dataset.requested !== 'true') return;
-  // Load into a detached Image first. The tooltip is not shown until this
-  // request completes, so neither an empty preview window nor alt text flashes.
-  const preloader = new Image();
-  preloader.onload = () => {
-    if (!item.isConnected || pendingHoverItem !== item) return;
-    img.src = src;
-    img.style.visibility = 'visible';
-  };
-  preloader.onerror = () => {
-    if (item.isConnected) item.classList.remove('preview-loading');
-  };
-  preloader.src = src;
-};
-window.setTextPreview = (index, content) => {
-  const item = document.querySelector('.text-item[data-index="' + index + '"]');
-  const fullText = item && item.querySelector('.hover-full-text');
-  if (!item || !fullText || pendingHoverItem !== item) return;
-  fullText.textContent = content;
-  fullText.dataset.loaded = 'true';
-  item.classList.add('detail-open');
-};
 const search = document.getElementById('search');
 const activeTypeFilters = new Set();
 let committedSearchQuery = '';
@@ -1634,12 +1609,12 @@ function handleClipboardPanelMessage(message)
             local content = tostring(entry.data or entry.content or "")
             for line in (content .. "\n"):gmatch("(.-)\n") do
                 lineCount = lineCount + 1
-                if lineCount > TEXT_HOVER_MAX_LINES then break end
+                if lineCount > TEXT_PREVIEW_MAX_LINES then break end
                 excerptLines[#excerptLines + 1] = line
             end
             local excerpt = table.concat(excerptLines, "\n")
-            if lineCount > TEXT_HOVER_MAX_LINES or #content > #excerpt then
-                excerpt = excerpt .. "\n… (preview limited to first " .. TEXT_HOVER_MAX_LINES .. " lines)"
+            if lineCount > TEXT_PREVIEW_MAX_LINES or #content > #excerpt then
+                excerpt = excerpt .. "\n… (preview limited to first " .. TEXT_PREVIEW_MAX_LINES .. " lines)"
             end
             clipboard_webview:evaluateJavaScript(
                 "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(excerpt) .. ");"
