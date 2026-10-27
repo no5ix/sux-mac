@@ -962,6 +962,11 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
+/* Keyboard navigation owns the highlight while the pointer is stationary. */
+body.keyboard-navigation #clipboard-items .item:hover:not(.selected) {
+  border-color:var(--card-border) !important;
+  background:var(--card-bg) !important;
+}
 .hover-detail { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
 .item.detail-open .hover-detail { display:block; }
 .text-detail { width:min(560px, calc(100vw - 32px)); }
@@ -1214,6 +1219,7 @@ document.addEventListener('pointermove', event => {
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
     suppressHoverUntilPointerMoves = false;
+    document.body.classList.remove('keyboard-navigation');
     // Normal pointer movement must not cancel the dwell timer. pointerover/out
     // handles entering and leaving cards; wheel/scroll handlers dismiss previews.
   }
@@ -1376,9 +1382,10 @@ function selectRow(next, shouldScroll = false) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
 
   if (shouldScroll) {
-    // Keyboard navigation moves the cards under a stationary pointer. Suppress
-    // hover previews until the user physically moves the pointer, just as when
-    // the panel first opens; otherwise scroll can preview an unintended card.
+    // Keyboard navigation owns the highlight until a real pointer movement.
+    // Also suppress CSS :hover feedback on the card under a stationary pointer,
+    // so only the keyboard-selected row remains visibly highlighted.
+    document.body.classList.add('keyboard-navigation');
     suppressHoverUntilPointerMoves = true;
     cancelPendingHoverDetail();
   }
