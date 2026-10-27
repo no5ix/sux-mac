@@ -348,13 +348,24 @@ local function metadataEntry(record,dateKey,recordIndex)
     return nil
 end
 
+local transientHydrationRecords = nil
+
 local function hydrateEntry(entry)
     if not entry then return nil end
     -- Live in-memory clipboard entries already contain current content.
     if entry.type=="text" and type(entry.data or entry.content)=="string" then return entry end
     if entry.type=="image" and (entry.imageObject or entry.imageData or entry.dataURL or entry.thumbnailData) then return entry end
     if type(entry.dateKey)~="string" then return entry end
-    local records=readDayHistory(entry.dateKey)
+    local records
+    if transientHydrationRecords then
+        records=transientHydrationRecords[entry.dateKey]
+        if not records then
+            records=readDayHistory(entry.dateKey)
+            transientHydrationRecords[entry.dateKey]=records
+        end
+    else
+        records=readDayHistory(entry.dateKey)
+    end
     local index=tonumber(entry.recordIndex)
     local record=index and records[index] or nil
     -- Record indexes are stable within a day file; validate identity in case a
@@ -416,8 +427,16 @@ local function restorePersistentHistory()
     for _,dateKey in ipairs(dates) do
         local records=readDayHistory(dateKey)
         table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
-        for recordIndex,record in ipairs(records) do
-            local entry=metadataEntry(record,dateKey,recordIndex)
+        for _,record in ipairs(records) do
+            local ts=tonumber(record and record.ts)
+            local entry
+            if ts and record.type=="text" and type(record.content)=="string" then
+                -- Only this bounded startup cache keeps full text payloads.
+                entry={type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
+            elseif ts and record.type=="image" and type(record.imagePath)=="string" then
+                entry={type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=record.imagePath,
+                    thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil}
+            end
             if entry then
                 local target=entry.type=="text" and text_clipboard_history or img_clipboard_history
                 target[#target+1]=entry
@@ -835,14 +854,17 @@ local function searchPersistentHistory(query,kind)
 end
 
 local function historyItemHTML(entry, index)
-    local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    if entry.type == "image" then
-        local imageEntry=entry.historyEntry or entry
+    local fullEntry=hydrateEntry(entry) or entry
+    local stamp = os.date("%Y-%m-%d %H:%M:%S", fullEntry.rowTs or os.time())
+    if fullEntry.type == "image" then
+        local imageEntry=fullEntry.historyEntry or fullEntry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        local html='<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        fullEntry=nil; imageEntry=nil; thumbnail=nil; collectgarbage("step")
+        return html
     end
-    local content = tostring(entry.data or entry.content or "")
+    local content = tostring(fullEntry.data or fullEntry.content or "")
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
@@ -857,11 +879,13 @@ local function historyItemHTML(entry, index)
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
+    local html='<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
         '</button>'
+    fullEntry=nil; content=nil; previewText=nil; collectgarbage("step")
+    return html
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -872,8 +896,10 @@ local function clipboardEntryMatches(entry, query, kind)
     -- the clipboard payload just to decide whether a card matches by type.
     if query == "" then return true end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    local searchableText = entry.type == "image" and "[image]" or tostring(entry.data or entry.content or "")
+    local fullEntry = entry.type == "image" and entry or hydrateEntry(entry)
+    local searchableText = entry.type == "image" and "[image]" or tostring(fullEntry and (fullEntry.data or fullEntry.content) or "")
     local searchable = string.lower(searchableText .. " " .. stamp)
+    fullEntry=nil
     return searchable:find(query, 1, true) ~= nil
 end
 
@@ -895,10 +921,12 @@ local function renderClipboardBatch(query, kind, offset)
     -- Render up to the configured 32-item batch from the currently loaded page.
     local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
     local last = math.min(#matches, offset + batchSize)
+    transientHydrationRecords={}
     for position = offset + 1, last do
         local index = matches[position]
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
+    transientHydrationRecords=nil
     visibleIndices = matches
     return table.concat(cards, "\n"), #matches, last
 end
@@ -1581,11 +1609,13 @@ local function updateClipboardPanel(query,kind,offset,append)
     end
 
     local cards={}
+    transientHydrationRecords={}
     for _,matchedIndex in ipairs(matches) do
         if not append or matchedIndex>previousMenuDataCount then
             cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
         end
     end
+    transientHydrationRecords=nil
     local html=table.concat(cards,"\n")
     local hasMore=query=="" and not clipboardDateFilter
         and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount)
