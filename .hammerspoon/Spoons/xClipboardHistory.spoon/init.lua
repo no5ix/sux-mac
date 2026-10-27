@@ -1375,24 +1375,31 @@ function selectRow(next, shouldScroll = false) {
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
 
-    // Keep keyboard navigation's highlighted card visible inside the actual
-    // scrollable <main>, not only inside the grid (whose own overflow is visible).
-    // The selected card may extend beyond the viewport after an arrow-key move.
-    if (shouldScroll && items[selectedIndex]) {
-      const item = items[selectedIndex];
-      const scrollContainer = item.closest('main');
-      if (scrollContainer) {
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const itemRect = item.getBoundingClientRect();
-        const topInset = 12;
-        const bottomInset = 12;
-        if (itemRect.top < containerRect.top + topInset) {
-          scrollContainer.scrollTop -= (containerRect.top + topInset) - itemRect.top;
-        } else if (itemRect.bottom > containerRect.bottom - bottomInset) {
-          scrollContainer.scrollTop += itemRect.bottom - (containerRect.bottom - bottomInset);
-        }
+  if (shouldScroll) {
+    // Keyboard navigation moves the cards under a stationary pointer. Suppress
+    // hover previews until the user physically moves the pointer, just as when
+    // the panel first opens; otherwise scroll can preview an unintended card.
+    suppressHoverUntilPointerMoves = true;
+    cancelPendingHoverDetail();
+  }
+
+  // Scroll the actual content viewport only when the highlighted card is not
+  // fully visible; the grid itself is not the scrollable element.
+  if (shouldScroll && items[selectedIndex]) {
+    const item = items[selectedIndex];
+    const scrollContainer = item.closest('main');
+    if (scrollContainer) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const topInset = 12;
+      const bottomInset = 12;
+      if (itemRect.top < containerRect.top + topInset) {
+        scrollContainer.scrollTop -= (containerRect.top + topInset) - itemRect.top;
+      } else if (itemRect.bottom > containerRect.bottom - bottomInset) {
+        scrollContainer.scrollTop += itemRect.bottom - (containerRect.bottom - bottomInset);
       }
     }
+  }
 }
 function clearRowSelection() {
   rows().forEach(item => item.classList.remove('selected'));
