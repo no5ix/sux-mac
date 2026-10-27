@@ -328,21 +328,72 @@ local function trimHistoryCache(limit)
     end
 end
 
-local function metadataEntry(record,dateKey)
+local function metadataEntry(record,dateKey,recordIndex)
     local ts=tonumber(record and record.ts); if not ts then return nil end
+    -- Disk-backed caches retain only small indexes and paths. Large text and
+    -- embedded legacy thumbnail payloads are hydrated only for visible/used rows.
     if record.type=="text" and type(record.content)=="string" then
-        return {type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
+        return {
+            type="text", ts=ts, rowTs=ts, dateKey=dateKey,
+            recordIndex=tonumber(recordIndex), textLength=#record.content
+        }
     end
     if record.type=="image" and type(record.imagePath)=="string" then
-        -- Keep ordinary history loading independent of image-file I/O and decoding.
         return {
-            type="image", ts=ts, rowTs=ts, dateKey=dateKey, imagePath=record.imagePath,
-            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil,
-            -- Older records remain readable without a disruptive migration.
-            thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+            type="image", ts=ts, rowTs=ts, dateKey=dateKey,
+            recordIndex=tonumber(recordIndex), imagePath=record.imagePath,
+            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil
         }
     end
     return nil
+end
+
+local function hydrateEntry(entry)
+    if not entry then return nil end
+    -- Live in-memory clipboard entries already contain current content.
+    if entry.type=="text" and type(entry.data or entry.content)=="string" then return entry end
+    if entry.type=="image" and (entry.imageObject or entry.imageData or entry.dataURL or entry.thumbnailData) then return entry end
+    if type(entry.dateKey)~="string" then return entry end
+    local records=readDayHistory(entry.dateKey)
+    local index=tonumber(entry.recordIndex)
+    local record=index and records[index] or nil
+    -- Record indexes are stable within a day file; validate identity in case a
+    -- write/reorder happened between caching the metadata and hydrating it.
+    if not record or tonumber(record.ts)~=tonumber(entry.ts) or record.type~=entry.type then
+        record=nil
+        for _,candidate in ipairs(records) do
+            if tonumber(candidate.ts)==tonumber(entry.ts) and candidate.type==entry.type
+                and (entry.type~="image" or candidate.imagePath==entry.imagePath) then
+                record=candidate
+                break
+            end
+        end
+    end
+    if not record then return entry end
+    if record.type=="text" then
+        return {
+            type="text",ts=entry.ts,rowTs=entry.rowTs or entry.ts,
+            dateKey=entry.dateKey,recordIndex=entry.recordIndex,
+            content=record.content,data=record.content,textLength=#record.content
+        }
+    end
+    return {
+        type="image",ts=entry.ts,rowTs=entry.rowTs or entry.ts,dateKey=entry.dateKey,
+        recordIndex=entry.recordIndex,imagePath=record.imagePath or entry.imagePath,
+        thumbnailPath=record.thumbnailPath or entry.thumbnailPath,
+        thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+    }
+end
+
+local function loadDailyMetadata(dateKey)
+    local records=readDayHistory(dateKey)
+    local entries={}
+    for i,record in ipairs(records) do
+        local entry=metadataEntry(record,dateKey,i)
+        if entry then entries[#entries+1]=entry end
+    end
+    table.sort(entries,function(a,b)return a.ts>b.ts end)
+    return entries
 end
 
 local function insertCacheEntry(entry)
@@ -365,8 +416,8 @@ local function restorePersistentHistory()
     for _,dateKey in ipairs(dates) do
         local records=readDayHistory(dateKey)
         table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
-        for _,record in ipairs(records) do
-            local entry=metadataEntry(record,dateKey)
+        for recordIndex,record in ipairs(records) do
+            local entry=metadataEntry(record,dateKey,recordIndex)
             if entry then
                 local target=entry.type=="text" and text_clipboard_history or img_clipboard_history
                 target[#target+1]=entry
@@ -701,18 +752,13 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
     offset=math.max(0,tonumber(offset) or 0); count=math.max(1,tonumber(count) or CLIPBOARD_RENDER_BATCH_SIZE)
     local out,skipped={},0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
-        local cached=dateHistoryCache[dateKey]
-        local dayEntries=cached
+        local dayEntries=dateHistoryCache[dateKey]
         if not dayEntries then
-            dayEntries={}
-            for _,record in ipairs(readDayHistory(dateKey)) do
-                local entry=metadataEntry(record,dateKey)
-                if entry then
-                    dayEntries[#dayEntries+1]=entry
-                end
+            dayEntries=loadDailyMetadata(dateKey)
+            -- Keep at most the currently viewed date's lightweight index.
+            if clipboardSessionOpen then
+                dateHistoryCache={[dateKey]=dayEntries}
             end
-            table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
-            if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
         end
         for _,entry in ipairs(dayEntries) do
             if not kind or kind=="all" or entry.type==kind then
@@ -756,15 +802,8 @@ local function loadPersistentDateHistory(dateKey,kind)
     local startedAt = hs.timer.secondsSinceEpoch()
     local allEntries=dateHistoryCache[dateKey]
     if not allEntries then
-        allEntries={}
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
-            if entry then
-                allEntries[#allEntries+1]=entry
-            end
-        end
-        table.sort(allEntries,function(a,b)return a.ts>b.ts end)
-        if clipboardSessionOpen then dateHistoryCache[dateKey]=allEntries end
+        allEntries=loadDailyMetadata(dateKey)
+        if clipboardSessionOpen then dateHistoryCache={[dateKey]=allEntries} end
     end
     logger.i(string.format("Clipboard metadata date load %s: %d records in %.3f ms",
         tostring(dateKey), #allEntries, (hs.timer.secondsSinceEpoch() - startedAt) * 1000))
@@ -780,10 +819,10 @@ local function searchPersistentHistory(query,kind)
     local out={}; local needle=string.lower(tostring(query or ""))
     if needle=="" then return out end
     for _,dateKey in ipairs(historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
+        for recordIndex,record in ipairs(readDayHistory(dateKey)) do
+            local entry=metadataEntry(record,dateKey,recordIndex)
             if entry and (not kind or kind=="all" or entry.type==kind) then
-                local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
+                local value=entry.type=="text" and tostring(record.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
                 if string.lower(value.." "..stamp):find(needle,1,true) then
                     out[#out+1]=entry
