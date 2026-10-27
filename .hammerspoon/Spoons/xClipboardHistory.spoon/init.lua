@@ -1156,6 +1156,20 @@ window.setTextPreview = (index, value) => {
 previewOverlay.addEventListener('click', event => {
   if (event.target === previewOverlay) closeManualPreviews();
 });
+
+// Let a wheel/trackpad scroll dismiss the modal and scroll the history list
+// with that same gesture, rather than requiring a second gesture after closing.
+previewOverlay.addEventListener('wheel', event => {
+  if (!previewOverlay.classList.contains('open')) return;
+  const scrollContainer = document.querySelector('main');
+  const deltaY = event.deltaY;
+  closeManualPreviews();
+  if (scrollContainer && deltaY) {
+    scrollContainer.scrollTop += deltaY;
+  }
+  event.preventDefault();
+}, { passive: false });
+
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeManualPreviews();
 });
