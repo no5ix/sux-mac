@@ -528,6 +528,13 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    dateHistoryCache = {}
+    allHistoryCache = {}
+    allHistoryCacheLoaded = 0
+    allHistoryTotalCount = nil
+    searchResultsCache = nil
+    panelCacheKey = nil
+    panelCacheHTML = nil
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -1220,12 +1227,13 @@ window.setImagePreview = (index, src) => {
   image.alt = 'Clipboard image preview';
 };
 window.setPreviewError = (index, message) => {
+  if (!previewOverlay.classList.contains('open')) return;
   const imagePanel = previewOverlay.querySelector('.image-detail');
-  if (Number(imagePanel.dataset.index) === Number(index)) {
+  if (imagePanel.classList.contains('open') && Number(imagePanel.dataset.index) === Number(index)) {
     imagePanel.querySelector('img').alt = message || 'Preview unavailable';
   }
   const textPanel = previewOverlay.querySelector('.text-detail');
-  if (Number(textPanel.dataset.index) === Number(index)) {
+  if (textPanel.classList.contains('open') && Number(textPanel.dataset.index) === Number(index)) {
     textPanel.querySelector('.manual-preview-content').textContent = message || 'Preview unavailable';
   }
 };
@@ -1954,7 +1962,8 @@ closeClipboardPanel = function()
                 entry.imageObject=nil
                 entry.imageData=nil
                 entry.dataURL=nil
-                entry.thumbnailData=entry.thumbnailData or ""
+                entry.thumbnailData=nil
+                entry.historyEntry=nil
             end
         end
     end
@@ -1997,7 +2006,7 @@ local function configureClipboardWebview(view)
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
                     for _,entry in ipairs(list) do
                         if entry.type=="image" then
-                            entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil
+                            entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil; entry.thumbnailData=nil; entry.historyEntry=nil
                         end
                     end
                 end
