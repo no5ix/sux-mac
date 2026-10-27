@@ -1119,7 +1119,15 @@ window.setImagePreview = (index, src) => {
   item.dataset.previewLoaded = 'true';
   image.src = src;
   image.alt = 'Clipboard image preview';
-  item.classList.remove('preview-loading');
+};
+window.setPreviewError = (index, message) => {
+  const item = document.querySelector('.item[data-index="' + index + '"]');
+  if (!item) return;
+  item.dataset.previewLoading = 'false';
+  const target = item.querySelector('.manual-preview-content');
+  if (target) target.textContent = message || 'Preview unavailable';
+  const image = item.querySelector('.manual-preview.image-detail img');
+  if (image) image.alt = message || 'Preview unavailable';
 };
 window.setTextPreview = (index, content) => {
   const item = document.querySelector('.item[data-index="' + index + '"]');
@@ -1626,6 +1634,8 @@ function handleClipboardPanelMessage(message)
             local ok,url=pcall(function()return img:encodeAsURLString()end)
             img=nil; collectgarbage("collect")
             if ok and url then clipboard_webview:evaluateJavaScript("window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(url)..");") end
+        else
+            clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');")
         end
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
