@@ -1170,7 +1170,21 @@ previewOverlay.style.zIndex = '2147483647';
 
 function closeManualPreviews() {
   previewOverlay.classList.remove('open');
-  previewOverlay.querySelectorAll('.manual-preview').forEach(node => node.classList.remove('open'));
+  previewOverlay.querySelectorAll('.manual-preview').forEach(node => {
+    node.classList.remove('open');
+    // A hidden preview must not retain a full-resolution data URL or large text.
+    node.querySelectorAll('img').forEach(img => {
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute('src');
+      img.alt = 'Clipboard image preview';
+    });
+    node.querySelectorAll('.manual-preview-content').forEach(content => { content.textContent = ''; });
+    node.querySelectorAll('.manual-preview-title').forEach(title => { title.textContent = ''; });
+    node.dataset.index = '';
+    node.dataset.previewLoaded = 'false';
+  });
+  collectgarbage('step');
 }
 function openManualPreview(item) {
   if (!item) return;
@@ -1199,7 +1213,8 @@ function openManualPreview(item) {
 window.setImagePreview = (index, src) => {
   const panel = previewOverlay.querySelector('.image-detail');
   const image = panel.querySelector('img');
-  if (Number(panel.dataset.index) !== Number(index) || !src) return;
+  if (!previewOverlay.classList.contains('open') || !panel.classList.contains('open')
+      || Number(panel.dataset.index) !== Number(index) || !src) return;
   panel.dataset.previewLoaded = 'true';
   image.src = src;
   image.alt = 'Clipboard image preview';
@@ -1216,7 +1231,8 @@ window.setPreviewError = (index, message) => {
 };
 window.setTextPreview = (index, value) => {
   const panel = previewOverlay.querySelector('.text-detail');
-  if (Number(panel.dataset.index) !== Number(index)) return;
+  if (!previewOverlay.classList.contains('open') || !panel.classList.contains('open')
+      || Number(panel.dataset.index) !== Number(index)) return;
   panel.dataset.previewLoaded = 'true';
   panel.querySelector('.manual-preview-content').textContent = value || '';
 };
