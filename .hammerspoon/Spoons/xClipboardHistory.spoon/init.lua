@@ -932,7 +932,9 @@ input:focus { border-color:var(--accent); }
 main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
-.actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; position:relative; z-index:6; }
+.date-filter { position:relative; z-index:7; flex:0 0 auto; }
+header { position:relative; z-index:10; isolation:isolate; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
