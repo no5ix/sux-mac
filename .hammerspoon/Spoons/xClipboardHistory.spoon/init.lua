@@ -1522,20 +1522,25 @@ search.focus();
 end
 
 local function pasteHistoryEntry(index)
-    local choice = menuData and menuData[index]
+    local choice = hydrateEntry(menuData and menuData[index])
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
     if choice.type == "text" then
-        pasteboard.setContents(choice.data)
+        pasteboard.setContents(choice.data or choice.content or "")
     else
         local image = decodeImage(choice.historyEntry or choice)
         if not image then
+            choice=nil
+            collectgarbage("step")
             pasteboard_watcher:start()
             hs.alert.show("Unable to restore this clipboard image")
             return
         end
         pasteboard.writeObjects(image)
+        image=nil
     end
+    choice=nil
+    collectgarbage("step")
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
         -- Restore focus to the app that was active before the history panel opened.
@@ -1602,8 +1607,9 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local matches={}
     for i,entry in ipairs(menuData) do
-        if (kind=="all" or entry.type==kind)
-            and (query=="" or clipboardEntryMatches(entry,query,kind)) then
+        -- Non-empty-query menuData comes from searchPersistentHistory (or a
+        -- date-filtered subset of those matches), so don't load full text again.
+        if kind=="all" or entry.type==kind then
             matches[#matches+1]=i
         end
     end
@@ -1705,7 +1711,7 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = hydrateEntry(index and menuData[index])
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
@@ -1722,18 +1728,28 @@ function handleClipboardPanelMessage(message)
             clipboard_webview:evaluateJavaScript(
                 "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(excerpt) .. ");"
             )
+            content=nil; excerpt=nil; excerptLines=nil; entry=nil
+            collectgarbage("step")
         end
     elseif body.action == "loadImagePreview" then
         local index=tonumber(body.index)
-        local entry=index and menuData[index]
+        local entry=hydrateEntry(index and menuData[index])
         local historyEntry=entry and (entry.historyEntry or entry)
         local img=historyEntry and decodeImage(historyEntry)
         if img and clipboard_webview then
             local ok,url=pcall(function()return img:encodeAsURLString()end)
-            img=nil; collectgarbage("collect")
-            if ok and url then clipboard_webview:evaluateJavaScript("window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(url)..");") end
+            img=nil; historyEntry=nil; entry=nil
+            if ok and url then
+                clipboard_webview:evaluateJavaScript("window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(url)..");")
+            else
+                clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to encode image preview');")
+            end
+            url=nil
+            collectgarbage("step")
         else
-            clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');")
+            img=nil; historyEntry=nil; entry=nil
+            if clipboard_webview then clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');") end
+            collectgarbage("step")
         end
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
@@ -1741,7 +1757,7 @@ function handleClipboardPanelMessage(message)
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
-        local choice = index and menuData[index]
+        local choice = hydrateEntry(index and menuData[index])
         if not choice or (choice.type ~= "text" and choice.type ~= "image") then
             hs.alert.show("Unable to copy this clipboard item")
             return
@@ -1759,6 +1775,8 @@ function handleClipboardPanelMessage(message)
             image = nil
             collectgarbage("collect")
         end
+        choice=nil
+        collectgarbage("step")
         pasteboard_watcher:start()
         if copyOK then
             hs.alert.show("Copied to clipboard — press Cmd+V to paste")
