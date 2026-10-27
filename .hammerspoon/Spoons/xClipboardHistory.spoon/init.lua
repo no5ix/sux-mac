@@ -801,7 +801,7 @@ local function historyItemHTML(entry, index)
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="hover-detail image-detail" role="tooltip"><img class="hover-image" alt="Clipboard image preview" aria-hidden="true" decoding="async"></div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div><div class="manual-preview image-detail" role="dialog" aria-label="Image preview"><img class="preview-image" alt="Clipboard image preview" decoding="async"></div></div>'
     end
     local content = tostring(entry.data or entry.content or "")
     local previewText = content
@@ -822,9 +822,9 @@ local function historyItemHTML(entry, index)
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
-        '<div class="hover-detail text-detail" role="tooltip">' ..
-        '<div class="hover-detail-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
-        '<div class="hover-full-text" data-loaded="false">Loading preview…</div></div></button>'
+        '<div class="manual-preview text-detail" role="dialog" aria-label="Text preview">' ..
+        '<div class="manual-preview-title">Clipboard text · ' .. escapeHTML(stamp) .. '</div>' ..
+        '<div class="manual-preview-content" data-loaded="false"></div></div></button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -946,7 +946,7 @@ main:focus { outline:none; }
   .action.danger { color:#dc2626; }
 }
 .image-detail { pointer-events:auto; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:34px 12px 12px; }
-.hover-image { max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; pointer-events:none; }
+
 main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-padding-block:16px; padding:16px 12px; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
 #clipboard-items.item-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); grid-auto-rows:min-content; gap:12px; align-items:start; align-content:start; }
 
@@ -962,22 +962,13 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .item { position:relative; cursor:pointer; }
 .item, .item * { cursor:pointer; }
 .item:hover { border-color:var(--accent); background:var(--button-bg); }
-/* Keyboard navigation owns the highlight while the pointer is stationary. */
-body.keyboard-navigation #clipboard-items .item:hover:not(.selected) {
-  border-color:var(--card-border) !important;
-  background:var(--card-bg) !important;
-}
-.hover-detail { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 640px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); pointer-events:none; overflow:hidden; }
-.item.detail-open .hover-detail { display:block; }
-.text-detail { width:min(560px, calc(100vw - 32px)); }
-.hover-detail-title { color:#aab0bd; font-size:11px; margin-bottom:8px; }
-.hover-full-text { max-height:calc(70vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
-.image-detail { pointer-events:auto; padding:34px 12px 12px; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); display:none; align-items:center; justify-content:center; overflow:hidden; }
-.item.detail-open .image-detail { display:flex; }
-.image-item.preview-loading .image-detail,
-.image-item.preview-loading.detail-open .image-detail { display:none; }
-.hover-image { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; visibility:hidden; }
-.hover-image-placeholder { color:#9ca3af; padding:20px; }
+.manual-preview { display:none; position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%, -50%); max-width:min(560px, calc(100vw - 32px)); max-height:min(78vh, 760px); padding:12px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,.55); overflow:auto; }
+.item.preview-open .manual-preview { display:block; }
+.manual-preview.text-detail { width:min(560px, calc(100vw - 32px)); }
+.manual-preview-title { color:var(--muted); font-size:11px; margin-bottom:8px; }
+.manual-preview-content { max-height:calc(78vh - 58px); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; font-size:13px; line-height:1.5; user-select:text; }
+.manual-preview.image-detail { padding:34px 12px 12px; width:min(92vw,1120px); height:min(86vh,900px); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); align-items:center; justify-content:center; overflow:hidden; }
+.manual-preview.image-detail img { display:block; max-width:calc(92vw - 48px); max-height:calc(86vh - 60px); object-fit:contain; border-radius:5px; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:pointer; overflow:hidden; }
 #clipboard-items .item:focus { outline:2px solid var(--selected-border); outline-offset:2px; }
 #clipboard-items .item { position:relative; margin:0; }
@@ -1096,153 +1087,47 @@ document.addEventListener('click', event => {
   selectRow(rows().indexOf(item));
   bridge('paste', index, '');
 });
-// Show the preview only after a continuous three-second hover, and keep
-// the preview centered in the clipboard-history window. Moving to another card
-// or leaving a card cancels the pending timer so previews don't flicker.
-let hoverDetailTimer = null;
-let pendingHoverItem = null;
-let lastPointerX = -1;
-let lastPointerY = -1;
-let pointerInsideResults = false;
-let suppressHoverUntilPointerMoves = false;
-let resumeHoverAfterScrollTimer = null;
-function hideHoverDetail(item) {
-  if (item) {
-    item.classList.remove('detail-open');
-    item.classList.remove('preview-loading');
-  }
+// Preview is explicit: no hover timers, pointer tracking, or scroll-triggered previews.
+function closeManualPreviews(exceptItem = null) {
+  document.querySelectorAll('#clipboard-items .item.preview-open').forEach(item => {
+    if (item !== exceptItem) item.classList.remove('preview-open', 'preview-loading');
+  });
 }
-function cancelPendingHoverDetail() {
-  if (hoverDetailTimer !== null) {
-    clearTimeout(hoverDetailTimer);
-    hoverDetailTimer = null;
-  }
-  if (pendingHoverItem) hideHoverDetail(pendingHoverItem);
-  pendingHoverItem = null;
-}
-function scheduleHoverDetail(item) {
-  if (!item || !item.querySelector('.hover-detail') || suppressHoverUntilPointerMoves) return;
-  if (pendingHoverItem === item && hoverDetailTimer !== null) return;
-  cancelPendingHoverDetail();
-  pendingHoverItem = item;
-  hoverDetailTimer = setTimeout(() => {
-    hoverDetailTimer = null;
-    if (pendingHoverItem !== item || !item.isConnected) return;
-    if (!pointerInsideResults || !item.matches(':hover')) {
-      cancelPendingHoverDetail();
-      return;
-    }
-    const image = item.querySelector('.hover-image');
-    if (image) {
-      // Keep the entire preview panel hidden until the image itself has loaded.
-      item.classList.add('preview-loading');
-      image.dataset.requested = 'true';
-      image.onload = () => {
-        if (!item.isConnected || pendingHoverItem !== item) return;
-        item.classList.remove('preview-loading');
-        item.classList.add('detail-open');
-        image.style.visibility = 'visible';
-      };
-      image.onerror = () => {
-        item.classList.remove('preview-loading');
-        image.style.visibility = 'hidden';
-      };
-      bridge('loadImagePreview', Number(item.dataset.index || 0), '', 'image');
-    } else {
-      const fullText = item.querySelector('.hover-full-text');
-      if (fullText && fullText.dataset.loaded !== 'true') {
-        fullText.textContent = 'Loading preview…';
-        bridge('loadTextPreview', Number(item.dataset.index || 0), '', 'text');
-        return;
-      }
-      item.classList.add('detail-open');
-    }
-  }, 2000);
-}
-function resumeHoverAfterScrollingSettles() {
-  if (resumeHoverAfterScrollTimer !== null) clearTimeout(resumeHoverAfterScrollTimer);
-  resumeHoverAfterScrollTimer = setTimeout(() => {
-    resumeHoverAfterScrollTimer = null;
-    suppressHoverUntilPointerMoves = false;
-    // Scrolling can move a different card underneath a stationary pointer and
-    // WebKit doesn't always dispatch pointerover/pointermove afterward. Resolve
-    // the current target from the saved pointer coordinates and restart dwell.
-    if (lastPointerX < 0 || lastPointerY < 0) return;
-    const target = document.elementFromPoint(lastPointerX, lastPointerY);
-    const item = target && target.closest
-      ? target.closest('#clipboard-items .item')
-      : null;
-    pointerInsideResults = !!item && resultsPanel.contains(item);
-    if (pointerInsideResults) scheduleHoverDetail(item);
-  }, 350);
-}
-document.addEventListener('wheel', event => {
-  if (resultsPanel && resultsPanel.contains(event.target)) {
-    suppressHoverUntilPointerMoves = true;
-    cancelPendingHoverDetail();
-    resumeHoverAfterScrollingSettles();
-  }
-}, {capture:true, passive:true});
-document.addEventListener('pointerover', event => {
-  const item = event.target.closest && event.target.closest('#clipboard-items .item');
+function openManualPreview(item) {
   if (!item) return;
-  if (event.relatedTarget && item.contains(event.relatedTarget)) return;
-  pointerInsideResults = true;
-  scheduleHoverDetail(item);
-});
-document.addEventListener('pointerout', event => {
-  const item = event.target.closest && event.target.closest('#clipboard-items .item');
-  if (!item) {
-    if (!event.relatedTarget || !resultsPanel.contains(event.relatedTarget)) {
-      pointerInsideResults = false;
-      if (pendingHoverItem) cancelPendingHoverDetail();
-    }
-    return;
+  closeManualPreviews(item);
+  item.classList.add('preview-open');
+  if (item.dataset.previewLoaded === 'true' || item.dataset.previewLoading === 'true') return;
+  const index = Number(item.dataset.index || 0);
+  if (item.classList.contains('image-item')) {
+    item.dataset.previewLoading = 'true';
+    const image = item.querySelector('.manual-preview.image-detail img');
+    if (image) image.alt = 'Loading clipboard image preview…';
+    bridge('loadImagePreview', index, '', 'image');
+  } else {
+    item.dataset.previewLoading = 'true';
+    const fullText = item.querySelector('.manual-preview-content');
+    if (fullText) fullText.textContent = 'Loading preview…';
+    bridge('loadTextPreview', index, '', 'text');
   }
-  if (event.relatedTarget && item.contains(event.relatedTarget)) return;
-  if (pendingHoverItem === item) cancelPendingHoverDetail();
-  else hideHoverDetail(item);
-  const nextItem = event.relatedTarget && event.relatedTarget.closest
-    ? event.relatedTarget.closest('#clipboard-items .item')
-    : null;
-  pointerInsideResults = !!nextItem;
-  if (nextItem) scheduleHoverDetail(nextItem);
-});
-document.addEventListener('focusin', event => {
-  const item = event.target.closest && event.target.closest('#clipboard-items .item');
-  if (!item) return;
-  // Keyboard focus should not open details; previews are pointer-hover only.
-});
-document.addEventListener('pointermove', event => {
-  const moved = event.clientX !== lastPointerX || event.clientY !== lastPointerY;
-  if (moved) {
-    lastPointerX = event.clientX;
-    lastPointerY = event.clientY;
-    suppressHoverUntilPointerMoves = false;
-    document.body.classList.remove('keyboard-navigation');
-    // Normal pointer movement must not cancel the dwell timer. pointerover/out
-    // handles entering and leaving cards; wheel/scroll handlers dismiss previews.
-  }
-  const item = event.target.closest && event.target.closest('#clipboard-items .item');
-  pointerInsideResults = !!item;
-});
-document.addEventListener('scroll', event => {
-  if (event.target === resultsPanel || resultsPanel.contains(event.target)) {
-    suppressHoverUntilPointerMoves = true;
-    pointerInsideResults = false;
-    cancelPendingHoverDetail();
-    resumeHoverAfterScrollingSettles();
-  }
-}, true);
-window.addEventListener('blur', () => {
-  pointerInsideResults = false;
-  suppressHoverUntilPointerMoves = true;
-  cancelPendingHoverDetail();
-});
-window.addEventListener('resize', () => {
-  suppressHoverUntilPointerMoves = true;
-  cancelPendingHoverDetail();
-});
+}
+window.setImagePreview = (index, src) => {
+  const item = document.querySelector('.image-item[data-index="' + index + '"]');
+  const image = item && item.querySelector('.manual-preview.image-detail img');
+  if (!item || !image || !src) return;
+  item.dataset.previewLoading = 'false';
+  item.dataset.previewLoaded = 'true';
+  image.src = src;
+  image.alt = 'Clipboard image preview';
+};
+window.setTextPreview = (index, content) => {
+  const item = document.querySelector('.item[data-index="' + index + '"]');
+  const preview = item && item.querySelector('.manual-preview-content');
+  if (!item || !preview) return;
+  item.dataset.previewLoading = 'false';
+  item.dataset.previewLoaded = 'true';
+  preview.textContent = content || '';
+};
 window.setImageThumbnail = (index, src) => {
   const item = document.querySelector('.image-item[data-index="' + index + '"]');
   if (!item || !item.isConnected || !src) return;
@@ -1442,7 +1327,8 @@ const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu';
 contextMenu.innerHTML =
   '<button type="button" data-context-action="pasteAll">Paste All the rows above this row in the order from early to late, including this row</button>' +
-  '<button type="button" data-context-action="copy">Copy</button>';
+  '<button type="button" data-context-action="copy">Copy</button>' +
+  '<button type="button" data-context-action="preview">Preview</button>';
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 contextMenu.querySelectorAll('button').forEach(button => {
   button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
@@ -1483,10 +1369,20 @@ contextMenu.addEventListener('click', event => {
     bridge('pasteAllFrom', rowIndex, '');
   } else if (action === 'copy') {
     bridge('copyHistoryEntry', rowIndex, '');
+  } else if (action === 'preview') {
+    const items = rows();
+    const item = items.find(node => Number(node.dataset.index || 0) === rowIndex);
+    openManualPreview(item);
   }
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
+  if (!event.target.closest('#clipboard-context-menu') && !event.target.closest('.manual-preview')) {
+    closeManualPreviews();
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeManualPreviews();
 });
 
 document.addEventListener('keydown', event => {
@@ -1953,11 +1849,10 @@ closeClipboardPanel = function()
         pcall(function()
             view:evaluateJavaScript([[
                 if (window.resetClipboardSelection) window.resetClipboardSelection();
-                if (window.cancelPendingHoverDetail) window.cancelPendingHoverDetail();
                 document.querySelectorAll('img').forEach(function(img) {
                     img.onload=null; img.onerror=null; img.removeAttribute('src');
                 });
-                document.querySelectorAll('.hover-detail').forEach(function(node) { node.remove(); });
+                document.querySelectorAll('.manual-preview').forEach(function(node) { node.remove(); });
                 document.getElementById('clipboard-items')?.replaceChildren();
             ]])
         end)
