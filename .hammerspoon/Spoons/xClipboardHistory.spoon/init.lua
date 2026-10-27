@@ -1119,6 +1119,7 @@ window.setImagePreview = (index, src) => {
   item.dataset.previewLoaded = 'true';
   image.src = src;
   image.alt = 'Clipboard image preview';
+  item.classList.remove('preview-loading');
 };
 window.setTextPreview = (index, content) => {
   const item = document.querySelector('.item[data-index="' + index + '"]');
@@ -1126,6 +1127,7 @@ window.setTextPreview = (index, content) => {
   if (!item || !preview) return;
   item.dataset.previewLoading = 'false';
   item.dataset.previewLoaded = 'true';
+  preview.dataset.loaded = 'true';
   preview.textContent = content || '';
 };
 window.setImageThumbnail = (index, src) => {
@@ -1242,7 +1244,7 @@ function selectRow(next, shouldScroll = false) {
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
 
   if (shouldScroll) {
-    document.body.classList.add('keyboard-navigation');
+    
   }
 
   // Scroll the actual content viewport only when the highlighted card is not
