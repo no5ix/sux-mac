@@ -990,7 +990,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); border-top:1px solid var(--border); font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
-<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
+<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
@@ -1070,6 +1070,10 @@ document.addEventListener('click', event => {
     }
     if (action === 'clearAll') {
       bridge('clearAll', index, '');
+      return;
+    }
+    if (action === 'reloadSoftware') {
+      bridge('reloadSoftware', index, '');
       return;
     }
     bridge(action, index, '');
@@ -1420,6 +1424,14 @@ contextMenu.innerHTML =
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 contextMenu.querySelectorAll('button').forEach(button => {
   button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+  if (button.dataset.contextAction === 'copy') {
+    button.style.borderTop = '1px solid rgba(255,255,255,.16)';
+    button.style.marginTop = '4px';
+    button.style.paddingTop = '12px';
+    button.style.borderRadius = '0 0 5px 5px';
+  } else {
+    button.style.borderRadius = '5px 5px 0 0';
+  }
   button.addEventListener('mouseenter', () => { button.style.background = '#3a4250'; });
   button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
 });
@@ -1764,6 +1776,13 @@ function handleClipboardPanelMessage(message)
         end
         pasteboard_watcher:start()
         hs.alert.show("Clipboard history cleared")
+    elseif body.action == "reloadSoftware" then
+        hs.alert.show("Reloading Hammerspoon configuration…")
+        -- Reload after the WebView callback returns to the main run loop.
+        -- This re-executes init.lua and reloads every configured Spoon.
+        hs.timer.doAfter(0.15, function()
+            hs.reload()
+        end)
     end
 end
 
