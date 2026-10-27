@@ -1374,21 +1374,25 @@ function selectRow(next, shouldScroll = false) {
   if (!items.length) { selectedIndex = 0; return; }
   selectedIndex = Math.max(0, Math.min(items.length - 1, next));
   items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
-  // Keep cards clear of the fixed header and footer when navigating.
-  // Scroll only the results grid (never the whole document/window).
-  if (shouldScroll && items[selectedIndex]) {
-    const container = resultsPanel;
-    const item = items[selectedIndex];
-    const containerRect = container.getBoundingClientRect();
-    const itemRect = item.getBoundingClientRect();
-    const topInset = 16;
-    const bottomInset = 16;
-    if (itemRect.top < containerRect.top + topInset) {
-      container.scrollTop -= (containerRect.top + topInset) - itemRect.top;
-    } else if (itemRect.bottom > containerRect.bottom - bottomInset) {
-      container.scrollTop += itemRect.bottom - (containerRect.bottom - bottomInset);
+
+    // Keep keyboard navigation's highlighted card visible inside the actual
+    // scrollable <main>, not only inside the grid (whose own overflow is visible).
+    // The selected card may extend beyond the viewport after an arrow-key move.
+    if (shouldScroll && items[selectedIndex]) {
+      const item = items[selectedIndex];
+      const scrollContainer = item.closest('main');
+      if (scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        const topInset = 12;
+        const bottomInset = 12;
+        if (itemRect.top < containerRect.top + topInset) {
+          scrollContainer.scrollTop -= (containerRect.top + topInset) - itemRect.top;
+        } else if (itemRect.bottom > containerRect.bottom - bottomInset) {
+          scrollContainer.scrollTop += itemRect.bottom - (containerRect.bottom - bottomInset);
+        }
+      }
     }
-  }
 }
 function clearRowSelection() {
   rows().forEach(item => item.classList.remove('selected'));
