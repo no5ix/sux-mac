@@ -33,6 +33,10 @@ local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
 local previousApplication = nil
+local previousApplicationPid = nil
+local panelClosePending = false
+local previousApplicationRestoreTimer = nil
+local previousApplicationRestoreGeneration = 0
 -- Declared before panel callbacks so window-close and dismissal handlers can
 -- stop the global click monitor safely.
 local outsideClickMonitor = nil
@@ -1810,8 +1814,82 @@ end
 -- Destroy the native window on dismissal. A hidden hs.webview can remain tied
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
+local function activatePreviousApplication()
+    local app = previousApplication
+    local pid = previousApplicationPid
+    if not app or not app:isRunning() then
+        previousApplication = nil
+        previousApplicationPid = nil
+        return false
+    end
+
+    -- Capture identity, then clear the stored target so each panel session has
+    -- one restoration request. Retry after the native window has actually had
+    -- time to close; a too-early activate() can be immediately undone by AppKit.
+    local targetPid = app:pid()
+    if not targetPid or (pid and targetPid ~= pid)
+        or app:bundleID() == "org.hammerspoon.Hammerspoon" then
+        previousApplication = nil
+        previousApplicationPid = nil
+        logger.w("Skipped invalid previous application restoration target")
+        return false
+    end
+    previousApplication = nil
+    previousApplicationPid = nil
+
+    previousApplicationRestoreGeneration = previousApplicationRestoreGeneration + 1
+    local generation = previousApplicationRestoreGeneration
+    if previousApplicationRestoreTimer then
+        previousApplicationRestoreTimer:stop()
+        previousApplicationRestoreTimer = nil
+    end
+
+    local attempts = 0
+    local maxAttempts = 4
+    local function restoreAttempt()
+        if generation ~= previousApplicationRestoreGeneration then return end
+        if not app:isRunning() or app:pid() ~= targetPid then
+            previousApplicationRestoreTimer = nil
+            logger.w("Previous app exited before focus restoration")
+            return
+        end
+
+        local frontApp = application.frontmostApplication()
+        if frontApp and frontApp:pid() == targetPid then
+            previousApplicationRestoreTimer = nil
+            logger.d("Previous application restored: " .. tostring(app:name()))
+            return
+        end
+
+        attempts = attempts + 1
+        local ok, activated = pcall(function() return app:activate(true) end)
+        logger.d("Restore previous app attempt " .. attempts
+            .. ": app=" .. tostring(app:name())
+            .. ", activateOK=" .. tostring(ok)
+            .. ", activateResult=" .. tostring(activated))
+
+        if attempts < maxAttempts then
+            previousApplicationRestoreTimer = hs.timer.doAfter(0.12, restoreAttempt)
+        else
+            previousApplicationRestoreTimer = nil
+            local finalFrontApp = application.frontmostApplication()
+            if not finalFrontApp or finalFrontApp:pid() ~= targetPid then
+                logger.e("Could not restore previous application after "
+                    .. maxAttempts .. " attempts: " .. tostring(app:name()))
+            end
+        end
+    end
+
+    -- Allow the native close/Space transition to complete before activating.
+    previousApplicationRestoreTimer = hs.timer.doAfter(0.18, restoreAttempt)
+    return true
+end
+
 closeClipboardPanel = function()
-    -- Stop global monitoring before destroying the panel.
+    if panelClosePending then return end
+    panelClosePending = true
+
+    -- Capture the target before destroying the panel and stop dismissal events.
     stopOutsideClickMonitor()
     -- Invalidate the view first so any delayed callbacks become no-ops.
     local view=clipboard_webview
@@ -1868,6 +1946,8 @@ closeClipboardPanel = function()
         pcall(function() view:delete() end)
     end
     collectgarbage("collect")
+    panelClosePending = false
+    activatePreviousApplication()
 end
 
 local function configureClipboardWebview(view)
@@ -1878,6 +1958,8 @@ local function configureClipboardWebview(view)
     view:windowCallback(function(action, _, focused)
         if action == "closing" then
             stopOutsideClickMonitor()
+            -- The red close button follows this native callback, unlike the
+            -- Escape/outside-click path. Share the same one-shot cleanup.
             if clipboard_webview == view then
                 clipboard_webview = nil
                 clipboard_usercontent = nil
@@ -1894,6 +1976,13 @@ local function configureClipboardWebview(view)
                 end
                 trimHistoryCache(CLIPBOARD_CACHE_SIZE)
                 collectgarbage("collect")
+                if not panelClosePending then
+                    panelClosePending = true
+                    hs.timer.doAfter(0.12, function()
+                        panelClosePending = false
+                        activatePreviousApplication()
+                    end)
+                end
             end
         end
         -- Deliberately ignore focusChange. Outside mouse clicks are handled
@@ -2078,8 +2167,11 @@ function showClipboardHistory()
     local frontApp = application.frontmostApplication()
     if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
         previousApplication = frontApp
-    elseif not (previousApplication and previousApplication:isRunning()) then
+        previousApplicationPid = frontApp:pid()
+    elseif not (previousApplication and previousApplication:isRunning()
+        and previousApplicationPid == previousApplication:pid()) then
         previousApplication = nil
+        previousApplicationPid = nil
     end
 
     -- Keep the existing native window/WebView alive for fast repeat opens.
