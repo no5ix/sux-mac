@@ -455,16 +455,13 @@ end
 
 local function readImageAtPath(path)
     if type(path)~="string" or path=="" then return nil end
-    local ok,result=pcall(function()
-        local file=io.open(path,"rb"); if not file then return nil end
-        local bytes=file:read("*a"); file:close()
-        if not bytes or #bytes==0 then return nil end
-        local ext=string.lower(path:match("%.([%w]+)$") or "png")
-        local mime=({png="image/png",jpg="image/jpeg",jpeg="image/jpeg",gif="image/gif",webp="image/webp",tiff="image/tiff",bmp="image/bmp"})[ext] or "image/png"
-        return hs.image.imageFromURL("data:"..mime..";base64,"..hs.base64.encode(bytes))
-    end)
+    -- Decode straight from disk instead of reading the entire original file,
+    -- making a base64 copy, and decoding that data URL again. This avoids a
+    -- large transient allocation for high-resolution clipboard screenshots.
+    local ok,result=pcall(image.imageFromPath,path)
     if ok then return result end
-    logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
+    logger.w("Unable to decode clipboard image "..path..": "..tostring(result))
+    return nil
 end
 
 local function makeThumbnailImage(original)
@@ -594,15 +591,18 @@ function pasteboardToClipboard(item_type,item)
         local thumbnailImage = makeThumbnailImage(item)
         local thumbnailPath = thumbnailImage and saveThumbnailFile(dateKey, imagePath, thumbnailImage, ts) or nil
         thumbnailImage = nil
+        collectgarbage("step")
 
         local records=readDayHistory(dateKey)
         records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailPath=thumbnailPath}
         if not writeDayHistory(dateKey,records) then
+            records=nil
             if thumbnailPath then os.remove(thumbnailPath) end
             os.remove(imagePath)
             logger.e("Clipboard image record could not be persisted")
             return
         end
+        records=nil
         insertCacheEntry({
             type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,
             thumbnailPath=thumbnailPath,thumbnailData=""
@@ -2081,25 +2081,30 @@ local function pasteAllRowsStep(row)
         return
     end
 
-    local entry = menuData[row]
+    local entry = hydrateEntry(menuData[row])
     if not entry or (entry.type ~= "text" and entry.type ~= "image") then
+        entry=nil
         hs.timer.doAfter(0.05, function()
             pasteAllRowsStep(row - 1)
         end)
         return
     end
 
+    local entryType = entry.type
     local wroteContent = false
-    if entry.type == "text" then
-        wroteContent = pasteboard.setContents(entry.data .. "\n") ~= false
+    if entryType == "text" then
+        wroteContent = pasteboard.setContents(tostring(entry.data or entry.content or "") .. "\n") ~= false
     else
-        local image = decodeImage(entry.historyEntry or entry)
-        if image then
-            wroteContent = pasteboard.writeObjects(image) ~= false
+        local imageObject = decodeImage(entry.historyEntry or entry)
+        if imageObject then
+            wroteContent = pasteboard.writeObjects(imageObject) ~= false
         else
             hs.alert.show("Skipped an image that could not be decoded.")
         end
+        imageObject=nil
     end
+    entry=nil
+    collectgarbage("step")
 
     if not wroteContent then
         hs.timer.doAfter(0.05, function()
@@ -2113,7 +2118,7 @@ local function pasteAllRowsStep(row)
     hs.timer.doAfter(0.15, function()
         hs.eventtap.keyStroke({"cmd"}, "v", 0)
         hs.timer.doAfter(0.4, function()
-            if entry.type == "image" then
+            if entryType == "image" then
                 -- Preserve the existing behavior of separating images with a newline.
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
