@@ -600,19 +600,17 @@ function handleClipboardChange(content)
     else
         runDailyCleanupIfNeeded()
     end
-    -- The selection toolbar sets this marker only for its temporary Cmd+C.
-    -- Consume only a clipboard notification that occurs inside that short window;
-    -- never suppress unrelated clipboard changes indefinitely.
-    local syntheticUntil = tonumber(_G.xSelectionToolbarSyntheticCopyUntil) or 0
-    if syntheticUntil > 0 and hs.timer.secondsSinceEpoch() <= syntheticUntil then
+    -- Clipboard history is content-driven, not event-origin-driven.
+    -- Never return early for selection-toolbar synthetic-copy markers: inspect the
+    -- observable pasteboard state just like every other clipboard notification.
+    -- Clear the legacy marker for diagnostics/compatibility only; it must not suppress
+    -- a possibly legitimate text or image capture.
+    if _G.xSelectionToolbarSyntheticCopyUntil ~= nil then
         _G.xSelectionToolbarSyntheticCopyUntil = nil
-        return
     end
-    _G.xSelectionToolbarSyntheticCopyUntil = nil
-    if ignoreNextPasteboardChange then
-        ignoreNextPasteboardChange = false
-        return
-    end
+    -- Do not consume a one-shot ignore flag here: it could discard a genuine event
+    -- that arrives while another clipboard operation is in progress.
+    ignoreNextPasteboardChange = false
 
     pasteboard_watcher:start()
 
