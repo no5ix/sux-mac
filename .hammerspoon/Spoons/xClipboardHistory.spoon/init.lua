@@ -27,6 +27,16 @@ local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
 local imageProcessingCount = 0
 
+-- Timestamped diagnostics for investigating screenshot/clipboard timing.
+local function clipboardDiagTimestamp()
+    return os.date("%Y-%m-%d %H:%M:%S") .. string.format(".%03d", math.floor((hs.timer.secondsSinceEpoch() % 1) * 1000))
+end
+
+local function clipboardDiag(message, ...)
+    local ok, formatted = pcall(string.format, message, ...)
+    logger.i("[CLIPBOARD-DIAG " .. clipboardDiagTimestamp() .. "] " .. (ok and formatted or tostring(message)))
+end
+
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
 local menuData = {}  -- Clipboard history data
@@ -143,6 +153,7 @@ local function saveImageFile(dateKey, item, timestamp)
         logger.w(string.format("Refusing clipboard image with extreme dimensions (%dx%d)", width, height))
         return nil
     end
+    clipboardDiag("saveImageFile dimensions=%dx%d date=%s timestamp=%s", width, height, tostring(dateKey), tostring(timestamp))
     local directory = historyImageDirectory(dateKey)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
         return nil
@@ -537,6 +548,7 @@ end
 -- Add the given string to the history
 function pasteboardToClipboard(item_type,item)
     local ts=os.time()
+    clipboardDiag("persist begin type=%s timestamp=%s processing=%s", tostring(item_type), tostring(ts), tostring(imageCaptureInProgress))
     if item_type=="text" then
         local ok=persistClipboardEntry("text",item,ts)
         if ok then insertCacheEntry({type="text",ts=ts,rowTs=ts,content=item,data=item}) end
@@ -546,6 +558,7 @@ function pasteboardToClipboard(item_type,item)
     -- Hammerspoon may deliver rapid duplicate callbacks for one screenshot.
     -- Ignore re-entry while the current image is being saved and thumbnailed.
     if imageCaptureInProgress then
+        clipboardDiag("image persistence skipped: another image capture is in progress")
         logger.i("Skipping overlapping clipboard image capture while processing is in progress")
         item = nil
         collectgarbage("collect")
@@ -557,7 +570,12 @@ function pasteboardToClipboard(item_type,item)
     local ok,err=pcall(function()
         local dateKey=localDateKey(ts)
         local imagePath=saveImageFile(dateKey,item,ts)
-        if not imagePath then logger.e("Clipboard image could not be saved"); return end
+        if not imagePath then
+            clipboardDiag("image file save FAILED timestamp=%s", tostring(ts))
+            logger.e("Clipboard image could not be saved")
+            return
+        end
+        clipboardDiag("image file saved path=%s timestamp=%s", tostring(imagePath), tostring(ts))
 
         -- Persist only a small thumbnail. Drop intermediate native bitmap
         -- references immediately so the autorelease/GC cycle can reclaim them.
@@ -568,11 +586,13 @@ function pasteboardToClipboard(item_type,item)
         local records=readDayHistory(dateKey)
         records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailPath=thumbnailPath}
         if not writeDayHistory(dateKey,records) then
+            clipboardDiag("history JSON write FAILED date=%s image=%s", tostring(dateKey), tostring(imagePath))
             if thumbnailPath then os.remove(thumbnailPath) end
             os.remove(imagePath)
             logger.e("Clipboard image record could not be persisted")
             return
         end
+        clipboardDiag("history JSON record persisted date=%s image=%s; inserting image cache entry", tostring(dateKey), tostring(imagePath))
         insertCacheEntry({
             type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,
             thumbnailPath=thumbnailPath,thumbnailData=""
@@ -586,11 +606,22 @@ function pasteboardToClipboard(item_type,item)
     imageCaptureInProgress = false
     imageProcessingCount = math.max(0,imageProcessingCount-1)
     collectgarbage("collect")
-    if not ok then logger.e("Clipboard image processing failed: "..tostring(err)) end
+    if not ok then
+        clipboardDiag("image processing ERROR: %s", tostring(err))
+        logger.e("Clipboard image processing failed: "..tostring(err))
+    else
+        clipboardDiag("image persistence flow completed timestamp=%s", tostring(ts))
+    end
 end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
+    local callbackCount = pasteboard.changeCount()
+    local contentType = type(content)
+    local contentLength = contentType == "string" and #content or -1
+    local imageReadOK, detectedImage = pcall(function() return pasteboard.readImage() end)
+    clipboardDiag("watcher callback count=%s callbackContentType=%s contentLength=%d readImageOK=%s imageDetected=%s imageProcessing=%s", tostring(callbackCount), contentType, contentLength, tostring(imageReadOK), tostring(imageReadOK and detectedImage ~= nil), tostring(imageCaptureInProgress))
+    detectedImage = nil
     -- Startup cleanup alone is not enough: users may create an expired folder
     -- after reloading. Force one more scan on the first clipboard notification
     -- after startup; future notifications only scan when the date changes.
