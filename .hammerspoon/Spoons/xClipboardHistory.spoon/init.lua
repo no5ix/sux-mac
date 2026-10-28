@@ -627,8 +627,31 @@ function handleClipboardChange(content)
             if pasteboardImg ~= nil then
                 content = nil
             else
-                -- Ignore image-encoded clipboard payloads rather than recording them as text.
-                return
+                -- Try the pasteboard's other exposed representations before
+                -- treating this image payload as unreadable. Some small
+                -- screenshots advertise encoded bytes through the text flavor
+                -- even though readImage() returns nil for that notification.
+                local okObjects, objects = pcall(function()
+                    return pasteboard.readAllData()
+                end)
+                if okObjects and type(objects) == "table" then
+                    for _, value in pairs(objects) do
+                        if type(value) == "userdata" then
+                            local okSize, size = pcall(function() return value:size() end)
+                            local width = tonumber(size and size.w) or 0
+                            local height = tonumber(size and size.h) or 0
+                            if okSize and width > 0 and height > 0 then
+                                pasteboardImg = value
+                                break
+                            end
+                        end
+                    end
+                end
+                if pasteboardImg == nil then
+                    logger.w("Ignoring image-encoded clipboard payload because no readable image object was exposed")
+                    return
+                end
+                content = nil
             end
         end
         if (content == nil) and (pasteboardImg ~= nil) then
