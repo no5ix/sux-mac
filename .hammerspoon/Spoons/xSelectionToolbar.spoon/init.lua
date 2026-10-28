@@ -1031,9 +1031,6 @@ function obj:start()
                 _G.xSelectionToolbarSyntheticCopyUntil = nil
             end
             pendingCapture = false
-            local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
-                and not copied:match("^file://")
-                and not copied:match("^/[^%s]+$")
             if newCount ~= oldCount and isPlainText then
                 local axValue = selectionFromAccessibility()
                 local selection = trim(axValue ~= "" and axValue or copied)
