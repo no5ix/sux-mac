@@ -979,8 +979,17 @@ function obj:start()
         -- eventtap's mouse-up callback below records whether the pointer moved while down.
     end
 
+    local function selectionDiag(message, ...)
+        local ok, formatted = pcall(string.format, message, ...)
+        local stamp = os.date("%Y-%m-%d %H:%M:%S") .. string.format(".%03d", math.floor((hs.timer.secondsSinceEpoch() % 1) * 1000))
+        logger.i("[SELECTION-DIAG " .. stamp .. "] " .. (ok and formatted or tostring(message)))
+    end
+
     local function captureSelectionFromClipboardFallback()
-        if pendingCapture then return end
+        if pendingCapture then
+            selectionDiag("synthetic Cmd+C skipped: capture already pending")
+            return
+        end
         local fallbackApp = hs.application.frontmostApplication()
         if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
         local appName = string.lower(fallbackApp:name() or "")
@@ -990,13 +999,42 @@ function obj:start()
         pendingCapture = true
         local oldClipboard = pasteboard.getContents()
         local oldCount = pasteboard.changeCount()
+        local beforeImageOK, beforeImage = pcall(function() return pasteboard.readImage() end)
+        local beforeImageSize = nil
+        if beforeImageOK and beforeImage then
+            local sizeOK, size = pcall(function() return beforeImage:size() end)
+            if sizeOK and size then beforeImageSize = string.format("%sx%s", tostring(size.w), tostring(size.h)) end
+        end
+        local appNow = hs.application.frontmostApplication()
+        selectionDiag("before Cmd+C app=%s bundleID=%s changeCount=%s hasText=%s textLength=%d readImageOK=%s hasImage=%s imageSize=%s", tostring(appNow and appNow:name()), tostring(appNow and appNow:bundleID()), tostring(oldCount), tostring(oldClipboard ~= nil), type(oldClipboard) == "string" and #oldClipboard or -1, tostring(beforeImageOK), tostring(beforeImageOK and beforeImage ~= nil), tostring(beforeImageSize))
+        beforeImage = nil
         _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
-        hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
+        local keyStart = hs.timer.secondsSinceEpoch()
+        local keyOK, keyErr = pcall(function() hs.eventtap.keyStroke({"cmd"}, "c", 0.02) end)
+        local afterKeyCount = pasteboard.changeCount()
+        local afterKeyText = pasteboard.getContents()
+        local afterKeyImageOK, afterKeyImage = pcall(function() return pasteboard.readImage() end)
+        local afterKeyImageSize = nil
+        if afterKeyImageOK and afterKeyImage then
+            local sizeOK, size = pcall(function() return afterKeyImage:size() end)
+            if sizeOK and size then afterKeyImageSize = string.format("%sx%s", tostring(size.w), tostring(size.h)) end
+        end
+        selectionDiag("after Cmd+C keyStrokeOK=%s error=%s elapsedMs=%.1f changeCount=%s textLength=%d readImageOK=%s hasImage=%s imageSize=%s", tostring(keyOK), tostring(keyErr), (hs.timer.secondsSinceEpoch() - keyStart) * 1000, tostring(afterKeyCount), type(afterKeyText) == "string" and #afterKeyText or -1, tostring(afterKeyImageOK), tostring(afterKeyImageOK and afterKeyImage ~= nil), tostring(afterKeyImageSize))
+        afterKeyImage = nil
         timer.doAfter(0.22, function()
             local newCount = pasteboard.changeCount()
             local copied = trim(pasteboard.getContents())
+            local verifyImageOK, verifyImage = pcall(function() return pasteboard.readImage() end)
+            local verifyImageSize = nil
+            if verifyImageOK and verifyImage then
+                local sizeOK, size = pcall(function() return verifyImage:size() end)
+                if sizeOK and size then verifyImageSize = string.format("%sx%s", tostring(size.w), tostring(size.h)) end
+            end
+            selectionDiag("clipboard verification oldCount=%s newCount=%s copiedLength=%d imageReadOK=%s hasImage=%s imageSize=%s", tostring(oldCount), tostring(newCount), #copied, tostring(verifyImageOK), tostring(verifyImageOK and verifyImage ~= nil), tostring(verifyImageSize))
+            verifyImage = nil
             if oldClipboard ~= nil and newCount ~= oldCount then
-                pasteboard.setContents(oldClipboard)
+                local restoreOK, restoreResult = pcall(function() return pasteboard.setContents(oldClipboard) end)
+                selectionDiag("clipboard restore result ok=%s result=%s postRestoreCount=%s", tostring(restoreOK), tostring(restoreResult), tostring(pasteboard.changeCount()))
             end
             pendingCapture = false
 
@@ -1025,6 +1063,8 @@ function obj:start()
             local p = hs.mouse.absolutePosition()
             mouseDownPoint = {x=p.x, y=p.y}
             mouseDragDistance = 0
+            local app = hs.application.frontmostApplication()
+            selectionDiag("mouse-down x=%.1f y=%.1f app=%s bundleID=%s", p.x, p.y, tostring(app and app:name()), tostring(app and app:bundleID()))
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseDragged then
             if mouseDownPoint then
@@ -1035,6 +1075,8 @@ function obj:start()
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseUp then
             local didDrag = mouseDragDistance >= 4
+            local mouseUpPoint = hs.mouse.absolutePosition()
+            selectionDiag("mouse-up x=%.1f y=%.1f didDrag=%s measuredDragDistance=%.1f threshold=4", mouseUpPoint.x, mouseUpPoint.y, tostring(didDrag), mouseDragDistance)
             mouseDownPoint = nil
             mouseDragDistance = 0
 
