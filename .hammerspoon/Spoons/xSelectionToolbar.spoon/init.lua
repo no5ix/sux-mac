@@ -928,16 +928,32 @@ function obj:start()
                 end
                 return nil
             end
-            local system = hs.axuielement.systemElement()
+            -- Hammerspoon exposes systemWideElement(), not systemElement().
+            -- Read the focused app/element through the supported system-wide AX object.
+            local ax = hs.axuielement
+            if not ax or type(ax.systemWideElement) ~= "function" then
+                error("hs.axuielement.systemWideElement() is unavailable")
+            end
+            local system = ax.systemWideElement()
             local focused = system and system:attributeValue("AXFocusedUIElement")
             local selected = walk(focused)
             if selected then return selected end
 
-            -- In some applications, AXFocusedUIElement is not the element carrying
-            -- the selection. Probe the focused window's selected text as a fallback.
+            -- The focused element is not always the element carrying the selection.
             local appElement = system and system:attributeValue("AXFocusedApplication")
             local focusedWindow = appElement and appElement:attributeValue("AXFocusedWindow")
-            return walk(focusedWindow)
+            selected = walk(focusedWindow)
+            if selected then return selected end
+
+            -- Also try the currently active application's AX root, which is useful
+            -- on releases where the system-wide element omits focused-window data.
+            local app = hs.application.frontmostApplication()
+            if app and type(ax.applicationElement) == "function" then
+                local appAX = ax.applicationElement(app)
+                selected = walk(appAX)
+                if selected then return selected end
+            end
+            return nil
         end)
         if not ok then
             logger.d("Accessibility selection query failed: " .. tostring(value))
