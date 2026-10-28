@@ -227,7 +227,75 @@ local translationWindowPinned = false
 
 local TRANSLATION_API_BASE = "http://127.0.0.1:8000/v1"
 local TRANSLATION_MODEL = "Qwen3-4B-Instruct-2507-4bit"
-local TRANSLATION_PROVIDER_CHOICE = "local" -- local oMLX+Qwen or ChatGPT
+local TRANSLATION_PROVIDER_CHOICE = "local" -- local or chatgpt
+
+-- User-local settings file, following xSpotifyAdMuter's known-ads Lua-file pattern.
+-- This file is outside the repository so credentials won't be committed.
+local LOCAL_AI_SETTINGS_FILE =
+    os.getenv("HOME") .. "/.hammerspoon/Spoons/xSelectionToolbar.spoon/local_ai_settings.lua"
+
+local DEFAULT_LOCAL_AI_SETTINGS = {
+    baseURL = TRANSLATION_API_BASE,
+    apiKey = "",
+    model = TRANSLATION_MODEL,
+}
+
+local function luaQuote(value)
+    return string.format("%q", tostring(value or ""))
+end
+
+local function defaultLocalAISettings()
+    return {
+        baseURL = DEFAULT_LOCAL_AI_SETTINGS.baseURL,
+        apiKey = "",
+        model = DEFAULT_LOCAL_AI_SETTINGS.model,
+    }
+end
+
+local function loadLocalAISettings()
+    local file = io.open(LOCAL_AI_SETTINGS_FILE, "r")
+    if not file then return defaultLocalAISettings() end
+
+    local source = file:read("*all")
+    file:close()
+    local chunk, err = load(source, "local_ai_settings", "t", {})
+    if not chunk then
+        logger.e("Could not parse local AI settings file: " .. tostring(err))
+        return defaultLocalAISettings()
+    end
+    local ok, settings = pcall(chunk)
+    if not ok or type(settings) ~= "table" then
+        logger.e("Invalid local AI settings file; using defaults")
+        return defaultLocalAISettings()
+    end
+
+    return {
+        baseURL = trim(settings.baseURL or DEFAULT_LOCAL_AI_SETTINGS.baseURL),
+        apiKey = tostring(settings.apiKey or ""),
+        model = trim(settings.model or DEFAULT_LOCAL_AI_SETTINGS.model),
+    }
+end
+
+local function saveLocalAISettings(settings)
+    local directory = os.getenv("HOME") .. "/.hammerspoon/Spoons/xSelectionToolbar.spoon"
+    hs.fs.mkdir(directory)
+    local file, err = io.open(LOCAL_AI_SETTINGS_FILE, "w")
+    if not file then
+        logger.e("Unable to save local AI settings: " .. tostring(err))
+        return false, err
+    end
+
+    file:write("return {\n")
+    file:write("    baseURL = " .. luaQuote(settings.baseURL) .. ",\n")
+    file:write("    apiKey = " .. luaQuote(settings.apiKey) .. ",\n")
+    file:write("    model = " .. luaQuote(settings.model) .. ",\n")
+    file:write("}\n")
+    file:close()
+    os.execute("/bin/chmod 600 " .. string.format("%q", LOCAL_AI_SETTINGS_FILE))
+    return true
+end
+
+local localAISettings = loadLocalAISettings()
 
 -- Add custom local-AI actions here. Each entry creates a toolbar button and
 -- uses its prompt template with the selected text. Use {{text}} where the
@@ -458,6 +526,9 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
     end
     translationRequestId = translationRequestId + 1
     local requestId = translationRequestId
+    localAISettings = loadLocalAISettings()
+    TRANSLATION_API_BASE = trim(localAISettings.baseURL or DEFAULT_LOCAL_AI_SETTINGS.baseURL):gsub("/+$", "")
+    TRANSLATION_MODEL = trim(localAISettings.model or DEFAULT_LOCAL_AI_SETTINGS.model)
     local prompt = tostring(promptTemplate or ""):gsub("{{text}}", function() return sourceText end)
     local body = {
         model = TRANSLATION_MODEL,
@@ -475,6 +546,17 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
         return
     end
     translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Working locally…"))
+    local apiKey = tostring(localAISettings.apiKey or "")
+    local curlArgs = {
+        "-sS", "--max-time", "120", "-X", "POST",
+        TRANSLATION_API_BASE .. "/chat/completions",
+        "-H", "Content-Type: application/json",
+        "--data-binary", encodedBody
+    }
+    if trim(apiKey) ~= "" then
+        table.insert(curlArgs, 6, "Authorization: Bearer " .. apiKey)
+        table.insert(curlArgs, 6, "-H")
+    end
     local task = hs.task.new("/usr/bin/curl", function(exitCode, stdOut, stdErr)
         if requestId ~= translationRequestId or not translationWindow then return end
         translationRequestTask = nil
@@ -502,12 +584,7 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
             translationJSCall("translationResult", lastTranslationResult) ..
             translationJSCall("translationStatus", windowTitle .. " · local AI")
         )
-    end, {
-        "-sS", "--max-time", "120", "-X", "POST",
-        TRANSLATION_API_BASE .. "/chat/completions",
-        "-H", "Content-Type: application/json",
-        "--data-binary", encodedBody
-    })
+    end, curlArgs
     if not task then
         translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not start local AI request."))
         return
@@ -641,19 +718,124 @@ local function openSafariURL(url)
     hs.task.new("/usr/bin/open", nil, { "-a", "Safari", url }):start()
 end
 
+local settingsWindow = nil
+
+local function showLocalAISettingsWindow()
+    if settingsWindow then
+        settingsWindow:delete()
+        settingsWindow = nil
+    end
+
+    local html = [=[
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}body{margin:0;padding:20px;background:#1d1f24;color:#f5f6f8;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+h1{font-size:17px;margin:0 0 8px}p{color:#a4acba;margin:0 0 18px;line-height:1.45}
+label{display:block;font-weight:600;margin:12px 0 6px}
+input{width:100%;border:1px solid #414650;border-radius:8px;background:#272a31;color:#f5f6f8;padding:10px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+button{padding:9px 14px;border:1px solid #414650;border-radius:8px;background:#272a31;color:#f5f6f8;font:inherit}
+button.primary{background:#2563eb;border-color:#2563eb}#status{margin-top:12px;min-height:18px;color:#a4acba}
+</style></head><body>
+<h1>Local AI settings</h1><p>Configure your OpenAI-compatible server. Settings are saved locally on this Mac.</p>
+<label for="baseURL">Server URL</label><input id="baseURL" type="url" placeholder="http://127.0.0.1:8000/v1">
+<label for="apiKey">API key</label><input id="apiKey" type="password" placeholder="Optional if the server doesn't require authentication" autocomplete="off">
+<label for="model">Model name</label><input id="model" type="text" placeholder="Qwen3-4B-Instruct-2507-4bit" autocomplete="off">
+<div class="actions"><button id="cancel">Cancel</button><button id="save" class="primary">Save settings</button></div><div id="status" role="status"></div>
+<script>
+const bridge=(action,settings)=>{try{window.webkit.messageHandlers.localAISettings.postMessage({action,settings})}catch(e){}};
+const $=id=>document.getElementById(id);
+$('save').addEventListener('click',()=>{
+ const settings={baseURL:$('baseURL').value.trim().replace(/\/+$/,''),apiKey:$('apiKey').value,model:$('model').value.trim()};
+ if(!settings.baseURL){$('status').textContent='Enter a server URL.';return}
+ if(!/^https?:\/\//i.test(settings.baseURL)){$('status').textContent='URL must start with http:// or https://';return}
+ if(!settings.model){$('status').textContent='Enter a model name.';return}
+ bridge('save',settings);
+});
+$('cancel').addEventListener('click',()=>bridge('cancel'));
+window.setSettings=value=>{$('baseURL').value=value.baseURL||'';$('apiKey').value=value.apiKey||'';$('model').value=value.model||''};
+window.showStatus=value=>$('status').textContent=value||'';
+</script></body></html>
+]=]
+
+    local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    local frame = screen:frame()
+    local width, height = 520, math.min(420, frame.h - 40)
+    local x, y = frame.x + (frame.w - width) / 2, frame.y + (frame.h - height) / 2
+    local usercontent = webview.usercontent.new("localAISettings")
+    usercontent:setCallback(function(message)
+        message = normalizeMessage(message)
+        if type(message) ~= "table" then return end
+        local body = message.body or message
+        if type(body) ~= "table" then return end
+
+        if body.action == "cancel" then
+            if settingsWindow then settingsWindow:delete(); settingsWindow = nil end
+        elseif body.action == "save" and type(body.settings) == "table" then
+            local values = body.settings
+            local settings = {
+                baseURL = trim(values.baseURL):gsub("/+$", ""),
+                apiKey = tostring(values.apiKey or ""),
+                model = trim(values.model),
+            }
+            if settings.baseURL == "" or settings.model == "" then
+                if settingsWindow then settingsWindow:evaluateJavaScript("window.showStatus('Server URL and model name are required.')") end
+                return
+            end
+            if not settings.baseURL:match("^https?://") then
+                if settingsWindow then settingsWindow:evaluateJavaScript("window.showStatus('URL must start with http:// or https://')") end
+                return
+            end
+
+            local ok, err = saveLocalAISettings(settings)
+            if not ok then
+                if settingsWindow then
+                    settingsWindow:evaluateJavaScript(translationJSCall("showStatus", "Unable to save settings: " .. tostring(err)))
+                end
+                return
+            end
+            localAISettings = settings
+            TRANSLATION_API_BASE = settings.baseURL
+            TRANSLATION_MODEL = settings.model
+            if settingsWindow then settingsWindow:delete(); settingsWindow = nil end
+            hs.alert.show("Local AI settings saved")
+        end
+    end)
+
+    settingsWindow = webview.new({x=x,y=y,w=width,h=height},{
+        developerExtrasEnabled=false, javaScriptCanOpenWindowsAutomatically=false,
+        transparent=false, shadow=true, opaque=true
+    }, usercontent)
+    settingsWindow:windowStyle({"titled","closable"})
+    settingsWindow:windowTitle("Local AI Settings")
+    settingsWindow:level(hs.drawing.windowLevels.normal)
+    settingsWindow:html(html, "file:///")
+    settingsWindow:show()
+
+    local encoded = json.encode({localAISettings})
+    local literal = type(encoded) == "table" and encoded[1] or encoded or "[{}]"
+    timer.doAfter(0.15, function()
+        if settingsWindow then settingsWindow:evaluateJavaScript("window.setSettings(" .. literal .. "[0]);") end
+    end)
+end
+
 local function showTranslationProviderChooser()
     local chooser = hs.chooser.new(function(selected)
         if not selected then return end
-        if selected.id == "provider-label" then return end
-        TRANSLATION_PROVIDER_CHOICE = selected.id
-        hs.alert.show(selected.id == "local" and "Provider: Local oMLX + Qwen" or "Provider: ChatGPT")
+        if selected.id == "local" then
+            TRANSLATION_PROVIDER_CHOICE = "local"
+            showLocalAISettingsWindow()
+        elseif selected.id == "chatgpt" then
+            TRANSLATION_PROVIDER_CHOICE = "chatgpt"
+            hs.alert.show("Provider: ChatGPT")
+        end
     end)
     chooser:choices({
-        {id="local", text="1. Local AI", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "🔀 Current Provider" or "Switch to Local AI"},
-        {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "🔀 Current Provider" or "Switch to ChatGPT"}
+        {id="local", text="1. Local AI", subText=TRANSLATION_PROVIDER_CHOICE == "local" and "Current provider · Configure settings" or "Switch to Local AI · Configure settings"},
+        {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Current Provider" or "Switch to ChatGPT"}
     })
     chooser:show()
-end
+}
 
 local function runChatGPTWorkflow(text, promptTemplate)
     local prompt = tostring(promptTemplate or CHATGPT_PROMPT) .. "\n\n" .. text
