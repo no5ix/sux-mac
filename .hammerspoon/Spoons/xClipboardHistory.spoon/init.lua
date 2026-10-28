@@ -26,6 +26,7 @@ local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
 local imageProcessingCount = 0
+local lastClipboardChangeCountSeen = pasteboard.changeCount()
 
 local text_clipboard_history = {}  -- Array to store the clipboard history for text
 local img_clipboard_history = {}  -- Array to store the clipboard history for img
@@ -591,6 +592,7 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
+    lastClipboardChangeCountSeen = pasteboard.changeCount()
     -- Startup cleanup alone is not enough: users may create an expired folder
     -- after reloading. Force one more scan on the first clipboard notification
     -- after startup; future notifications only scan when the date changes.
@@ -668,6 +670,27 @@ function handleClipboardChange(content)
             -- print("[handleClipboardChange] text")
         end
     -- end
+end
+
+-- Before the selection toolbar synthesizes Cmd+C, synchronously preserve an image
+-- that the watcher has not observed yet. The synthetic copy can replace the system
+-- pasteboard before the 100ms watcher poll sees the screenshot.
+function pkg:captureCurrentClipboardBeforeSyntheticCopy()
+    local ok, err = pcall(function()
+        local currentCount = pasteboard.changeCount()
+        if currentCount == lastClipboardChangeCountSeen then return end
+
+        local currentImage = pasteboard.readImage()
+        if currentImage then
+            logger.i("Capturing an unobserved clipboard image before selection-toolbar Cmd+C")
+            pasteboardToClipboard("image", currentImage)
+            currentImage = nil
+        end
+        lastClipboardChangeCountSeen = currentCount
+    end)
+    if not ok then
+        logger.e("Unable to preserve clipboard image before synthetic Cmd+C: " .. tostring(err))
+    end
 end
 
 -- restore the newest clipboard content
