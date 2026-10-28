@@ -1020,21 +1020,28 @@ function obj:start()
         hs.eventtap.event.types.leftMouseDragged,
         hs.eventtap.event.types.leftMouseUp
     }, function(event)
-        local eventType = event:getType()
-        if eventType == hs.eventtap.event.types.leftMouseDown then
-            local p = hs.mouse.absolutePosition()
-            mouseDownPoint = {x=p.x, y=p.y}
-            mouseDragDistance = 0
-            return false
-        elseif eventType == hs.eventtap.event.types.leftMouseDragged then
-            if mouseDownPoint then
+        -- Guard the event-tap callback so an Accessibility or Hammerspoon API
+        -- exception is logged instead of silently breaking future selection handling.
+        local callbackOK, callbackError = xpcall(function()
+            local eventType = event:getType()
+            if eventType == hs.eventtap.event.types.leftMouseDown then
                 local p = hs.mouse.absolutePosition()
-                local dx, dy = p.x - mouseDownPoint.x, p.y - mouseDownPoint.y
-                mouseDragDistance = math.max(mouseDragDistance, math.sqrt(dx * dx + dy * dy))
+                mouseDownPoint = {x=p.x, y=p.y}
+                mouseDragDistance = 0
+                return
+            elseif eventType == hs.eventtap.event.types.leftMouseDragged then
+                if mouseDownPoint then
+                    local p = hs.mouse.absolutePosition()
+                    local dx, dy = p.x - mouseDownPoint.x, p.y - mouseDownPoint.y
+                    mouseDragDistance = math.max(mouseDragDistance, math.sqrt(dx * dx + dy * dy))
+                end
+                return
+            elseif eventType ~= hs.eventtap.event.types.leftMouseUp then
+                return
             end
-            return false
-        elseif eventType == hs.eventtap.event.types.leftMouseUp then
+
             local didDrag = mouseDragDistance >= 4
+            logger.d(string.format("Mouse selection ended: didDrag=%s, distance=%.1f", tostring(didDrag), mouseDragDistance))
             mouseDownPoint = nil
             mouseDragDistance = 0
 
@@ -1045,37 +1052,47 @@ function obj:start()
                     and point.x >= visibleToolbarFrame.x and point.x <= visibleToolbarFrame.x + visibleToolbarFrame.w
                     and point.y >= visibleToolbarFrame.y and point.y <= visibleToolbarFrame.y + visibleToolbarFrame.h
 
-                -- Only ignore mouse-up events that end over the toolbar itself.
-                -- A new drag elsewhere must still be allowed to produce a new selection.
-                if pointerInsideToolbar then return end
+                if pointerInsideToolbar then
+                    logger.d("Ignoring mouse-up inside selection toolbar")
+                    return
+                end
 
                 if toolbar and toolbar:isVisible() then hideToolbar() end
                 local app = hs.application.frontmostApplication()
-                if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then
+                    logger.d("Skipping selection read because no external frontmost app is available")
+                    return
+                end
 
                 local attempts = 0
                 local function retrySelectionRead()
-                    -- Do not abort merely because an older toolbar was visible:
-                    -- this callback owns a mouse-up that happened outside that toolbar.
                     local currentApp = hs.application.frontmostApplication()
-                    if not currentApp or currentApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                    if not currentApp or currentApp:bundleID() == "org.hammerspoon.Hammerspoon" then
+                        logger.d("Selection read stopped because Hammerspoon is frontmost")
+                        return
+                    end
 
                     attempts = attempts + 1
                     local value = selectionFromAccessibility()
+                    if value ~= "" then
+                        logger.d(string.format("Accessibility selection read succeeded: attempt=%d, length=%d", attempts, #value))
+                    end
                     if showIfSelection(value) then return end
 
-                    -- AXSelectedText can lag behind mouse-up in browsers and other
-                    -- apps. Retry for ~320 ms; only then use clipboard fallback
-                    -- for an actual drag so normal clicks never synthesize Cmd+C.
                     if attempts < 4 then
                         timer.doAfter(0.08, retrySelectionRead)
                     elseif didDrag then
+                        logger.d("Accessibility selection unavailable after retries; trying copy fallback")
                         captureSelectionFromClipboardFallback()
+                    else
+                        logger.d("No selected text found after mouse click; fallback skipped")
                     end
                 end
                 retrySelectionRead()
             end)
-            return false
+        end, debug.traceback)
+        if not callbackOK then
+            logger.e("Selection mouse event callback failed: " .. tostring(callbackError))
         end
         return false
     end)
