@@ -7,6 +7,19 @@ local timer = require("hs.timer")
 local json = require("hs.json")
 local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
+
+// Coordinated with xGlobalVim's Caps+Q WeChat screenshot shortcut.
+// A timestamp deadline makes the guard self-expiring even if the cleanup timer is missed.
+local function weChatScreenshotInProgress()
+    local deadline = rawget(_G, "xWeChatScreenshotGuardUntil")
+    if type(deadline) ~= "number" then return false end
+    if hs.timer.secondsSinceEpoch() >= deadline then
+        _G.xWeChatScreenshotGuardUntil = nil
+        return false
+    end
+    return true
+end
+
 local mouseSelectionTap = nil
 local hoverWatcher = nil
 local appearancePoll = nil
@@ -847,6 +860,31 @@ function obj:start()
     local toolbarExpiryTimer = nil
     local pendingCapture = false
     local eventTapHealthTimer = nil
+    local screenshotGuardCleanupTimer = nil
+    local screenshotEscapeTap = nil
+
+    local function releaseWeChatScreenshotGuard(reason)
+        local deadline = rawget(_G, "xWeChatScreenshotGuardUntil")
+        if type(deadline) ~= "number" then return end
+        _G.xWeChatScreenshotGuardUntil = nil
+        if screenshotGuardCleanupTimer then
+            screenshotGuardCleanupTimer:stop()
+            screenshotGuardCleanupTimer = nil
+        end
+        logger.d("Released WeChat screenshot guard: " .. tostring(reason))
+    end
+
+    local function scheduleScreenshotGuardSafetyCleanup()
+        if screenshotGuardCleanupTimer then
+            screenshotGuardCleanupTimer:stop()
+            screenshotGuardCleanupTimer = nil
+        end
+        screenshotGuardCleanupTimer = timer.doAfter(30, function()
+            screenshotGuardCleanupTimer = nil
+            releaseWeChatScreenshotGuard("30-second safety timeout")
+        end)
+    end
+
 
     -- Hide the selection toolbar three seconds after showing it. Duplicate
     -- selection detections must not keep extending the toolbar's lifetime.
@@ -1021,6 +1059,18 @@ function obj:start()
         hs.eventtap.event.types.leftMouseUp
     }, function(event)
         local eventType = event:getType()
+        -- During a WeChat screenshot, do not interpret the region-selection drag as
+        -- text selection and never synthesize Cmd+C. The finishing left click must
+        -- reach WeChat; release the guard just after this event is delivered.
+        if weChatScreenshotInProgress() then
+            if eventType == hs.eventtap.event.types.leftMouseUp then
+                timer.doAfter(0.18, function()
+                    releaseWeChatScreenshotGuard("left mouse up")
+                end)
+            end
+            return false
+        end
+
         if eventType == hs.eventtap.event.types.leftMouseDown then
             local p = hs.mouse.absolutePosition()
             mouseDownPoint = {x=p.x, y=p.y}
@@ -1076,6 +1126,24 @@ function obj:start()
     mouseSelectionTap:start()
     reportEventTapState("after-start")
 
+    -- Escape commonly cancels WeChat's region screenshot. Observe it only while
+    -- our screenshot guard is active; do not swallow or modify the key event.
+    screenshotEscapeTap = eventtap.new({eventtap.event.types.keyDown}, function(event)
+        if not weChatScreenshotInProgress() then return false end
+        local keyCode = event:getKeyCode()
+        if keyCode == hs.keycodes.map.escape then
+            timer.doAfter(0.05, function()
+                releaseWeChatScreenshotGuard("Escape cancellation")
+            end)
+        end
+        return false
+    end)
+    screenshotEscapeTap:start()
+
+    if weChatScreenshotInProgress() then
+        scheduleScreenshotGuardSafetyCleanup()
+    end
+
     -- Recover if macOS disables the event tap temporarily. This timer also emits
     -- a diagnostic only when it observes a disabled tap, avoiding noisy logs.
     eventTapHealthTimer = timer.doEvery(5, function()
@@ -1095,6 +1163,8 @@ function obj:stop()
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if toolbarExpiryTimer then toolbarExpiryTimer:stop(); toolbarExpiryTimer = nil end
     if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
+    if screenshotGuardCleanupTimer then screenshotGuardCleanupTimer:stop(); screenshotGuardCleanupTimer = nil end
+    if screenshotEscapeTap then screenshotEscapeTap:stop(); screenshotEscapeTap = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
     return self
