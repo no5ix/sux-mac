@@ -592,7 +592,12 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
-    lastClipboardChangeCountSeen = pasteboard.changeCount()
+    local currentChangeCount = pasteboard.changeCount()
+    if currentChangeCount == lastClipboardChangeCountSeen then
+        logger.d("Ignoring duplicate clipboard watcher callback for already-processed change count " .. tostring(currentChangeCount))
+        return
+    end
+    lastClipboardChangeCountSeen = currentChangeCount
     -- Startup cleanup alone is not enough: users may create an expired folder
     -- after reloading. Force one more scan on the first clipboard notification
     -- after startup; future notifications only scan when the date changes.
@@ -675,6 +680,12 @@ end
 -- Before the selection toolbar synthesizes Cmd+C, synchronously preserve an image
 -- that the watcher has not observed yet. The synthetic copy can replace the system
 -- pasteboard before the 100ms watcher poll sees the screenshot.
+-- The selection toolbar restores the user's original clipboard after its synthetic Cmd+C.
+-- Mark that restoration as observed so the watcher does not persist the same item again.
+function pkg:markCurrentClipboardAsAlreadySeen()
+    lastClipboardChangeCountSeen = pasteboard.changeCount()
+end
+
 function pkg:captureCurrentClipboardBeforeSyntheticCopy()
     local ok, err = pcall(function()
         local currentCount = pasteboard.changeCount()
@@ -685,8 +696,8 @@ function pkg:captureCurrentClipboardBeforeSyntheticCopy()
             logger.i("Capturing an unobserved clipboard image before selection-toolbar Cmd+C")
             pasteboardToClipboard("image", currentImage)
             currentImage = nil
+            lastClipboardChangeCountSeen = currentCount
         end
-        lastClipboardChangeCountSeen = currentCount
     end)
     if not ok then
         logger.e("Unable to preserve clipboard image before synthetic Cmd+C: " .. tostring(err))
