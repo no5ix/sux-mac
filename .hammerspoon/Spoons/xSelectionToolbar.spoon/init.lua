@@ -1100,7 +1100,10 @@ function obj:start()
                 retrySelectionRead()
             end)
             return false
-
+        end
+        return false
+    end)
+    mouseSelectionTap:start()
     reportEventTapState("after-start")
 
     -- Recover if macOS disables the event tap temporarily. This timer also emits
