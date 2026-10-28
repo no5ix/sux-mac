@@ -610,33 +610,35 @@ function handleClipboardChange(content)
         runDailyCleanupIfNeeded()
     end
 
-    -- Suppress only the exact pasteboard change created by the selection toolbar's
-    -- synthetic Cmd+C. A time-only window can swallow an unrelated screenshot
-    -- taken shortly afterward, even though its image is the user's real clipboard.
+    -- The selection toolbar only needs its synthetic Cmd+C suppressed while its
+    -- fallback copy is being inspected/restored. Do not use a time-only marker:
+    -- it can accidentally swallow a real screenshot copied moments later.
     local syntheticMarker = _G.xSelectionToolbarSyntheticCopyUntil
     if type(syntheticMarker) == "table" then
+        local beforeChangeCount = tonumber(syntheticMarker.beforeChangeCount)
         local expectedChangeCount = tonumber(syntheticMarker.changeCount)
-        if expectedChangeCount and callbackCount == expectedChangeCount then
+        local currentCount = tonumber(callbackCount)
+        if expectedChangeCount and currentCount == expectedChangeCount then
             _G.xSelectionToolbarSyntheticCopyUntil = nil
             logger.i("Clipboard watcher event suppressed: matching synthetic selection-toolbar copy")
             return
-        elseif expectedChangeCount and callbackCount and callbackCount > expectedChangeCount then
-            -- The watcher has moved beyond the expected synthetic event; let this
-            -- change through instead of suppressing it based on elapsed time.
-            _G.xSelectionToolbarSyntheticCopyUntil = nil
-        elseif not expectedChangeCount and tonumber(syntheticMarker.beforeChangeCount)
-            and callbackCount and callbackCount > tonumber(syntheticMarker.beforeChangeCount) then
-            -- The synthetic Cmd+C has not changed the count by the time this
-            -- callback arrived. This is a different clipboard event (for example,
-            -- a screenshot), so do not suppress it.
+        elseif currentCount and beforeChangeCount and currentCount > beforeChangeCount then
+            -- A pasteboard change occurred, but it is not the observed synthetic
+            -- copy (or the synthetic copy count has not been recorded yet).
+            -- Process it normally and clear the marker so it cannot eat a later event.
             _G.xSelectionToolbarSyntheticCopyUntil = nil
         elseif tonumber(syntheticMarker.expiresAt)
             and hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker.expiresAt) then
             _G.xSelectionToolbarSyntheticCopyUntil = nil
         end
-    elseif tonumber(syntheticMarker) and hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker) then
-        -- Backward compatibility with an older toolbar Spoon still in memory.
-        _G.xSelectionToolbarSyntheticCopyUntil = nil
+    elseif tonumber(syntheticMarker) then
+        -- A previously loaded version used a numeric time-window marker. Expire
+        -- stale markers without suppressing any event based on that broad window.
+        if hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker) then
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+        else
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+        end
     end
     if ignoreNextPasteboardChange then
         ignoreNextPasteboardChange = false
