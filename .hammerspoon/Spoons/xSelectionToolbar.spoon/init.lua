@@ -1039,20 +1039,26 @@ function obj:start()
             mouseDragDistance = 0
 
             timer.doAfter(0.12, function()
-                if toolbar and toolbar:isVisible() then
-                    local p = hs.mouse.absolutePosition()
-                    local f = toolbar:frame()
-                    if p.x < f.x or p.x > f.x + f.w or p.y < f.y or p.y > f.y + f.h then
-                        hideToolbar()
-                    end
-                    return
-                end
+                local point = hs.mouse.absolutePosition()
+                local visibleToolbarFrame = toolbar and toolbar:isVisible() and toolbar:frame() or nil
+                local pointerInsideToolbar = visibleToolbarFrame
+                    and point.x >= visibleToolbarFrame.x and point.x <= visibleToolbarFrame.x + visibleToolbarFrame.w
+                    and point.y >= visibleToolbarFrame.y and point.y <= visibleToolbarFrame.y + visibleToolbarFrame.h
+
+                -- Only ignore mouse-up events that end over the toolbar itself.
+                -- A new drag elsewhere must still be allowed to produce a new selection.
+                if pointerInsideToolbar then return end
+
+                if toolbar and toolbar:isVisible() then hideToolbar() end
+                local app = hs.application.frontmostApplication()
+                if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
 
                 local attempts = 0
                 local function retrySelectionRead()
-                    if toolbar and toolbar:isVisible() then return end
-                    local app = hs.application.frontmostApplication()
-                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                    -- Do not abort merely because an older toolbar was visible:
+                    -- this callback owns a mouse-up that happened outside that toolbar.
+                    local currentApp = hs.application.frontmostApplication()
+                    if not currentApp or currentApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
 
                     attempts = attempts + 1
                     local value = selectionFromAccessibility()
