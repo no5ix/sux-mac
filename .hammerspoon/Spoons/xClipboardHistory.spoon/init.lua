@@ -1489,10 +1489,9 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (event.code === 'Space' || event.key === ' ') {
-    // Use the current mouse position, not the keyboard-selected row.
-    // Space over an image toggles native Quick Look and never pastes.
-    const hovered = document.elementFromPoint(event.clientX || 0, event.clientY || 0);
-    const pointerItem = hovered && hovered.closest('.image-item[data-action="paste"]');
+    // Web key events do not expose the mouse position. Sample it from the
+    // pointer move handler and target the image card currently under it.
+    const pointerItem = window.clipboardHoveredImageItem;
     if (pointerItem) {
       event.preventDefault();
       event.stopPropagation();
