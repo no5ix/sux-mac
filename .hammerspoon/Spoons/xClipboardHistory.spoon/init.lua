@@ -1762,6 +1762,7 @@ local function activatePreviousApplication(onRestored)
 
     if not app or not app:isRunning() then
         clearTarget()
+        if onRestored then pcall(onRestored, false) end
         return false
     end
 
@@ -1772,6 +1773,7 @@ local function activatePreviousApplication(onRestored)
         or app:bundleID() == "org.hammerspoon.Hammerspoon" then
         clearTarget()
         logger.w("Skipped invalid previous application restoration target")
+        if onRestored then pcall(onRestored, false) end
         return false
     end
     clearTarget()
@@ -2136,7 +2138,9 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     -- dismissal, and only begin pasting once that restoration has settled.
     local started = activatePreviousApplication(function(restored)
         if not restored then
-            logger.w("Paste-all proceeding after window restore could not be confirmed")
+            logger.e("Paste-all cancelled because the original destination window could not be restored safely")
+            hs.alert.show("Could not restore the original window. Paste task cancelled.")
+            return
         end
         hs.timer.doAfter(0.12, function()
             -- The web panel lists newest-first; the recursive routine walks
@@ -2145,9 +2149,8 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
         end)
     end)
     if not started then
-        hs.timer.doAfter(0.35, function()
-            pasteAllWithDelimiterRecursionVersion(startRow)
-        end)
+        logger.e("Paste-all cancelled because no valid destination application was captured")
+        hs.alert.show("Could not restore the original window. Paste task cancelled.")
     end
 end
 
