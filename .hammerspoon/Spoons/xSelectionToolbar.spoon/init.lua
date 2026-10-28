@@ -927,35 +927,87 @@ function obj:start()
     end
 
     local function captureSelectionFromClipboardFallback()
-        if pendingCapture then return end
+        if pendingCapture then
+            logger.d("Cmd+C capture skipped: another capture is already pending")
+            return
+        end
+
         local fallbackApp = hs.application.frontmostApplication()
-        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+        if not fallbackApp then
+            logger.w("Cmd+C capture skipped: no frontmost application")
+            return
+        end
+        local bundleID = fallbackApp:bundleID() or ""
         local appName = string.lower(fallbackApp:name() or "")
-        local bundleID = string.lower(fallbackApp:bundleID() or "")
-        if bundleID == "com.apple.finder" or appName == "finder" then return end
+        if bundleID == "org.hammerspoon.Hammerspoon" then
+            logger.w("Cmd+C capture skipped: Hammerspoon is frontmost")
+            return
+        end
+        if bundleID == "com.apple.finder" or appName == "finder" then
+            logger.d("Cmd+C capture skipped: Finder is frontmost")
+            return
+        end
 
         pendingCapture = true
         local oldClipboard = pasteboard.getContents()
         local oldCount = pasteboard.changeCount()
-        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
-        hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
-        timer.doAfter(0.22, function()
-            local newCount = pasteboard.changeCount()
-            local copied = trim(pasteboard.getContents())
-            if oldClipboard ~= nil and newCount ~= oldCount then
-                pasteboard.setContents(oldClipboard)
-            end
-            pendingCapture = false
+        logger.d(string.format(
+            "Starting Cmd+C capture: app=%s, bundleID=%s, clipboardChangeCount=%s",
+            tostring(fallbackApp:name()), tostring(bundleID), tostring(oldCount)
+        ))
 
+        -- Keep the synthetic-copy marker for downstream diagnostics, but do not use
+        -- Accessibility APIs: the clipboard is the sole source of selected text.
+        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 1.0
+        local copyOK, copyError = pcall(function()
+            hs.eventtap.keyStroke({"cmd"}, "c", 0.05)
+        end)
+        if not copyOK then
+            pendingCapture = false
+            logger.e("Failed to send synthetic Cmd+C: " .. tostring(copyError))
+            return
+        end
+
+        timer.doAfter(0.35, function()
+            local checkOK, newCount, copied = pcall(function()
+                return pasteboard.changeCount(), trim(pasteboard.getContents())
+            end)
+            pendingCapture = false
+            if not checkOK then
+                logger.e("Failed to read clipboard after Cmd+C: " .. tostring(newCount))
+                return
+            end
+
+            local changed = newCount ~= oldCount
             local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
                 and not copied:match("^file://")
                 and not copied:match("^/[^%s]+$")
-            if newCount ~= oldCount and isPlainText then
-                local selection = copied
-                if selection ~= "" and not looksLikeImagePayload(selection) then
-                    showIfSelection(selection)
+            logger.d(string.format(
+                "Cmd+C capture result: clipboardChanged=%s, oldCount=%s, newCount=%s, textLength=%d, plainText=%s",
+                tostring(changed), tostring(oldCount), tostring(newCount), #copied, tostring(isPlainText)
+            ))
+
+            -- Restore the user's prior clipboard after reading the copied text.
+            if oldClipboard ~= nil and changed then
+                local restoreOK, restoreError = pcall(function()
+                    pasteboard.setContents(oldClipboard)
+                end)
+                if not restoreOK then
+                    logger.e("Failed to restore previous clipboard contents: " .. tostring(restoreError))
                 end
             end
+
+            if not changed then
+                logger.w("Cmd+C did not change the clipboard; selected text was not captured")
+                return
+            end
+            if not isPlainText then
+                logger.d("Cmd+C clipboard content is empty or not plain text; toolbar will not be shown")
+                return
+            end
+
+            local shown = showIfSelection(copied)
+            logger.d(string.format("Selection toolbar display request completed: shown=%s", tostring(shown)))
         end)
     end
 
