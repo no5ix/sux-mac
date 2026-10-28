@@ -950,11 +950,33 @@ function obj:start()
         end
 
         pendingCapture = true
-        local oldClipboard = pasteboard.getContents()
+
+        -- Let clipboard history synchronously save a just-copied image if its
+        -- 100ms watcher has not observed it yet; Cmd+C would otherwise replace it.
+        local historySpoon = spoon and spoon.xClipboardHistory
+        if historySpoon and type(historySpoon.captureCurrentClipboardBeforeSyntheticCopy) == "function" then
+            local historyOK, historyError = pcall(function()
+                historySpoon:captureCurrentClipboardBeforeSyntheticCopy()
+            end)
+            if not historyOK then
+                logger.e("Clipboard history pre-capture failed: " .. tostring(historyError))
+            end
+        end
+
+        -- Save every clipboard flavor, not only text. Screenshots commonly have
+        -- no string representation, so getContents() alone cannot preserve them.
+        local backupOK, oldClipboardData = pcall(function()
+            return pasteboard.readAllData()
+        end)
+        if not backupOK or type(oldClipboardData) ~= "table" then
+            oldClipboardData = nil
+            logger.w("Unable to back up all clipboard data before synthetic Cmd+C")
+        end
         local oldCount = pasteboard.changeCount()
         logger.d(string.format(
-            "Starting Cmd+C capture: app=%s, bundleID=%s, clipboardChangeCount=%s",
-            tostring(fallbackApp:name()), tostring(bundleID), tostring(oldCount)
+            "Starting Cmd+C capture: app=%s, bundleID=%s, clipboardChangeCount=%s, backupTypes=%d",
+            tostring(fallbackApp:name()), tostring(bundleID), tostring(oldCount),
+            oldClipboardData and (function() local n=0; for _ in pairs(oldClipboardData) do n=n+1 end; return n end)() or 0
         ))
 
         -- Keep the synthetic-copy marker for downstream diagnostics, but do not use
@@ -998,13 +1020,16 @@ function obj:start()
                 tostring(changed), tostring(oldCount), tostring(newCount), #copied, tostring(isPlainText)
             ))
 
-            -- Restore the user's prior clipboard after reading the copied text.
-            if oldClipboard ~= nil and changed then
-                local restoreOK, restoreError = pcall(function()
-                    pasteboard.setContents(oldClipboard)
+            -- Restore all original clipboard flavors after reading the selected text.
+            -- This preserves screenshots/images as well as text and other formats.
+            if oldClipboardData and changed then
+                local restoreOK, restoreResult = pcall(function()
+                    return pasteboard.writeAllData(oldClipboardData)
                 end)
-                if not restoreOK then
-                    logger.e("Failed to restore previous clipboard contents: " .. tostring(restoreError))
+                if not restoreOK or restoreResult == false then
+                    logger.e("Failed to restore previous clipboard data: " .. tostring(restoreResult))
+                else
+                    logger.d("Restored previous clipboard data and all original flavors")
                 end
             end
 
