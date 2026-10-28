@@ -29,6 +29,10 @@ local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
+-- Track the native macOS Quick Look preview opened from the clipboard panel.
+local nativeImagePreviewOpen = false
+local nativeImagePreviewEntryPath = nil
+local nativeImagePreviewTask = nil
 local panelCacheKey = nil
 local panelCacheHTML = nil
 local ignoreNextPasteboardChange = false
@@ -443,6 +447,54 @@ local function decodeImage(entry)
     if entry.imageObject then return entry.imageObject end
     if type(entry.imagePath)=="string" then return readImageAtPath(entry.imagePath) end
     return nil
+end
+
+-- Launch macOS Quick Look for a stored clipboard image. qlmanage -p opens the
+-- system preview UI rather than creating another in-panel image viewer.
+local function closeNativeImagePreview()
+    if nativeImagePreviewTask then
+        pcall(function() nativeImagePreviewTask:terminate() end)
+        nativeImagePreviewTask = nil
+    end
+    nativeImagePreviewOpen = false
+    nativeImagePreviewEntryPath = nil
+end
+
+local function openNativeImagePreview(entry)
+    local historyEntry = entry and (entry.historyEntry or entry)
+    local path = historyEntry and historyEntry.imagePath
+    if type(path) ~= "string" or path == "" or not fs.attributes(path) then
+        hs.alert.show("Image file is no longer available")
+        return false
+    end
+
+    closeNativeImagePreview()
+    local escapedPath = path:gsub("'", "'\\''")
+    local task = hs.task.new("/usr/bin/qlmanage", function(exitCode, stdOut, stdErr)
+        nativeImagePreviewTask = nil
+        if exitCode ~= 0 then
+            nativeImagePreviewOpen = false
+            nativeImagePreviewEntryPath = nil
+            logger.w("Quick Look preview exited with code " .. tostring(exitCode)
+                .. ": " .. tostring(stdErr or ""))
+        end
+    end, {"-p", path})
+    if not task then
+        hs.alert.show("Unable to start macOS Quick Look")
+        return false
+    end
+
+    nativeImagePreviewOpen = true
+    nativeImagePreviewEntryPath = path
+    nativeImagePreviewTask = task
+    if not task:start() then
+        nativeImagePreviewTask = nil
+        nativeImagePreviewOpen = false
+        nativeImagePreviewEntryPath = nil
+        hs.alert.show("Unable to start macOS Quick Look")
+        return false
+    end
+    return true
 end
 
 local function isImageDataURL(value)
@@ -1438,6 +1490,18 @@ document.addEventListener('keydown', event => {
     if (selected) selected.focus({preventScroll:true});
     return;
   }
+  if (event.code === 'Space' || event.key === ' ') {
+    // Space previews the image card directly beneath the pointer. It does not
+    // rely on keyboard selection, and it never pastes the selected item.
+    const hovered = document.elementFromPoint(event.clientX || 0, event.clientY || 0);
+    const pointerItem = hovered && hovered.closest('.image-item[data-action="paste"]');
+    if (pointerItem) {
+      event.preventDefault();
+      event.stopPropagation();
+      bridge('toggleNativeImagePreview', Number(pointerItem.dataset.index || 0), '');
+      return;
+    }
+  }
   if (event.key === 'Enter') {
     // Do not let Enter submit a search fall through to paste a selected result.
     if (event.target === search) return;
@@ -1666,6 +1730,17 @@ function handleClipboardPanelMessage(message)
         else
             clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');")
         end
+    elseif body.action == "toggleNativeImagePreview" then
+        local index = tonumber(body.index)
+        local entry = index and menuData[index]
+        if not entry or entry.type ~= "image" then return end
+        local historyEntry = entry.historyEntry or entry
+        local path = historyEntry.imagePath
+        if nativeImagePreviewOpen and nativeImagePreviewEntryPath == path then
+            closeNativeImagePreview()
+        else
+            openNativeImagePreview(entry)
+        end
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
@@ -1813,6 +1888,7 @@ end
 closeClipboardPanel = function()
     if panelClosePending then return end
     panelClosePending = true
+    closeNativeImagePreview()
 
     -- Capture the target before destroying the panel and stop dismissal events.
     stopOutsideClickMonitor()
