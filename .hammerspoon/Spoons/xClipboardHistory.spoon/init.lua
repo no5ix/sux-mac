@@ -627,28 +627,29 @@ function handleClipboardChange(content)
             if pasteboardImg ~= nil then
                 content = nil
             else
-                -- Try the pasteboard's other exposed representations before
-                -- treating this image payload as unreadable. Some small
-                -- screenshots advertise encoded bytes through the text flavor
-                -- even though readImage() returns nil for that notification.
-                local okObjects, objects = pcall(function()
-                    return pasteboard.readAllData()
-                end)
-                if okObjects and type(objects) == "table" then
-                    for _, value in pairs(objects) do
-                        if type(value) == "userdata" then
-                            local okSize, size = pcall(function() return value:size() end)
-                            local width = tonumber(size and size.w) or 0
-                            local height = tonumber(size and size.h) or 0
-                            if okSize and width > 0 and height > 0 then
-                                pasteboardImg = value
-                                break
-                            end
-                        end
-                    end
+                -- Image data can arrive as a PNG/JPEG data URL or base64
+                -- payload in the watcher callback even when readImage() is nil.
+                -- Decode that payload directly so small screenshots aren't lost.
+                local encoded = content
+                local mime, payload = encoded:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
+                if not payload then
+                    mime = encoded:match("^iVBORw0KGgo") and "image/png"
+                        or encoded:match("^/9j/") and "image/jpeg"
+                        or encoded:match("^R0lGOD") and "image/gif"
+                    payload = encoded
                 end
-                if pasteboardImg == nil then
-                    logger.w("Ignoring image-encoded clipboard payload because no readable image object was exposed")
+                local okDecode, decodedImage = pcall(function()
+                    if not mime or not payload then return nil end
+                    local bytes = hs.base64.decode(payload)
+                    if type(bytes) ~= "string" or #bytes == 0 then return nil end
+                    return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
+                end)
+                if okDecode and decodedImage then
+                    pasteboardImg = decodedImage
+                else
+                    -- Don't let raw image bytes get stored as an ordinary text
+                    -- clipboard record. Log the failed conversion for debugging.
+                    logger.w("Unable to decode image-encoded clipboard payload")
                     return
                 end
                 content = nil
