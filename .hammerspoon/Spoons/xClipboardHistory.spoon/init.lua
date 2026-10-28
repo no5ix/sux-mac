@@ -621,12 +621,7 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
-        -- Raw bitmap fallback below reads supported image UTIs directly.
-        -- Some apps expose image bytes or a data URL through the text flavor.
-        -- Never treat recognized image payloads as a user-entered text item.
-        -- Some image providers expose raw bitmap data without a type that
-        -- readImage() recognizes. Inspect all known bitmap UTIs before falling
-        -- back to the watcher callback's encoded image payload.
+        -- Some apps provide bitmap bytes through a raw image UTI.
         if pasteboardImg == nil then
             local okData, rawData = pcall(function() return pasteboard.readAllData() end)
             if okData and type(rawData) == "table" then
@@ -654,28 +649,65 @@ function handleClipboardChange(content)
         end
 
         if looksLikeImagePayload(content) then
-            -- Some clipboard writers expose base64 data as a string instead of
-            -- a raw image UTI. Decode that recognized image form as a last resort.
+            -- Some image providers expose encoded image bytes through the
+            -- watcher callback even if native image conversion fails.
+            -- Decode raw representations first, then the payload itself.
+            -- Recognized image bytes must never be stored as ordinary text.
             local encodedPayload = content
             content = nil
+
             if pasteboardImg == nil then
-                local mime, payload = encodedPayload:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
-                if not payload then
-                    mime = encodedPayload:match("^iVBORw0KGgo") and "image/png"
-                        or encodedPayload:match("^/9j/") and "image/jpeg"
-                        or encodedPayload:match("^R0lGOD") and "image/gif"
-                    payload = encodedPayload
-                end
-                if mime and payload then
+                local okData, representations = pcall(function()
+                    return pasteboard.readAllData()
+                end)
+
+                local function decodeImageBytes(bytes, mime)
+                    if type(bytes) ~= "string" or #bytes == 0 then return nil end
                     local okDecode, decoded = pcall(function()
-                        local dataURL = encodedPayload:match("^data:image/")
-                            and encodedPayload
-                            or ("data:" .. mime .. ";base64," .. payload)
-                        return hs.image.imageFromURL(dataURL)
+                        return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
                     end)
-                    if okDecode then pasteboardImg = decoded end
+                    if okDecode then return decoded end
+                    return nil
+                end
+
+                if okData and type(representations) == "table" then
+                    local typeMimes = {
+                        ["public.png"] = "image/png",
+                        ["public.jpeg"] = "image/jpeg",
+                        ["public.jpg"] = "image/jpeg",
+                        ["public.gif"] = "image/gif",
+                        ["public.tiff"] = "image/tiff",
+                        ["public.bmp"] = "image/bmp"
+                    }
+                    for uti, bytes in pairs(representations) do
+                        local mime = typeMimes[string.lower(tostring(uti))]
+                        if mime then
+                            pasteboardImg = decodeImageBytes(bytes, mime)
+                            if pasteboardImg then break end
+                        end
+                    end
+                end
+
+                if pasteboardImg == nil then
+                    local mime, payload = encodedPayload:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
+                    if not payload then
+                        mime = encodedPayload:match("^iVBORw0KGgo") and "image/png"
+                            or encodedPayload:match("^/9j/") and "image/jpeg"
+                            or encodedPayload:match("^R0lGOD") and "image/gif"
+                        payload = encodedPayload
+                    end
+                    if mime and payload then
+                        local okDecode, decoded = pcall(function()
+                            local dataURL = encodedPayload:match("^data:image/")
+                                and encodedPayload
+                                or ("data:" .. mime .. ";base64," .. payload)
+                            return hs.image.imageFromURL(dataURL)
+                        end)
+                        if okDecode then pasteboardImg = decoded end
+                    end
                 end
             end
+
             if pasteboardImg == nil then
                 logger.w("Unable to decode image-encoded clipboard payload; skipping history entry")
                 return
