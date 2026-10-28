@@ -328,21 +328,83 @@ local function trimHistoryCache(limit)
     end
 end
 
-local function metadataEntry(record,dateKey)
+local function metadataEntry(record,dateKey,recordIndex)
     local ts=tonumber(record and record.ts); if not ts then return nil end
+    -- Disk-backed caches retain only small indexes and paths. Large text and
+    -- embedded legacy thumbnail payloads are hydrated only for visible/used rows.
     if record.type=="text" and type(record.content)=="string" then
-        return {type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
+        return {
+            type="text", ts=ts, rowTs=ts, dateKey=dateKey,
+            recordIndex=tonumber(recordIndex), textLength=#record.content
+        }
     end
     if record.type=="image" and type(record.imagePath)=="string" then
-        -- Keep ordinary history loading independent of image-file I/O and decoding.
         return {
-            type="image", ts=ts, rowTs=ts, dateKey=dateKey, imagePath=record.imagePath,
-            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil,
-            -- Older records remain readable without a disruptive migration.
-            thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+            type="image", ts=ts, rowTs=ts, dateKey=dateKey,
+            recordIndex=tonumber(recordIndex), imagePath=record.imagePath,
+            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil
         }
     end
     return nil
+end
+
+local transientHydrationRecords = nil
+
+local function hydrateEntry(entry)
+    if not entry then return nil end
+    -- Live in-memory clipboard entries already contain current content.
+    if entry.type=="text" and type(entry.data or entry.content)=="string" then return entry end
+    if entry.type=="image" and (entry.imageObject or entry.imageData or entry.dataURL or entry.thumbnailData) then return entry end
+    if type(entry.dateKey)~="string" then return entry end
+    local records
+    if transientHydrationRecords then
+        records=transientHydrationRecords[entry.dateKey]
+        if not records then
+            records=readDayHistory(entry.dateKey)
+            transientHydrationRecords[entry.dateKey]=records
+        end
+    else
+        records=readDayHistory(entry.dateKey)
+    end
+    local index=tonumber(entry.recordIndex)
+    local record=index and records[index] or nil
+    -- Record indexes are stable within a day file; validate identity in case a
+    -- write/reorder happened between caching the metadata and hydrating it.
+    if not record or tonumber(record.ts)~=tonumber(entry.ts) or record.type~=entry.type then
+        record=nil
+        for _,candidate in ipairs(records) do
+            if tonumber(candidate.ts)==tonumber(entry.ts) and candidate.type==entry.type
+                and (entry.type~="image" or candidate.imagePath==entry.imagePath) then
+                record=candidate
+                break
+            end
+        end
+    end
+    if not record then return entry end
+    if record.type=="text" then
+        return {
+            type="text",ts=entry.ts,rowTs=entry.rowTs or entry.ts,
+            dateKey=entry.dateKey,recordIndex=entry.recordIndex,
+            content=record.content,data=record.content,textLength=#record.content
+        }
+    end
+    return {
+        type="image",ts=entry.ts,rowTs=entry.rowTs or entry.ts,dateKey=entry.dateKey,
+        recordIndex=entry.recordIndex,imagePath=record.imagePath or entry.imagePath,
+        thumbnailPath=record.thumbnailPath or entry.thumbnailPath,
+        thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+    }
+end
+
+local function loadDailyMetadata(dateKey)
+    local records=readDayHistory(dateKey)
+    local entries={}
+    for i,record in ipairs(records) do
+        local entry=metadataEntry(record,dateKey,i)
+        if entry then entries[#entries+1]=entry end
+    end
+    table.sort(entries,function(a,b)return a.ts>b.ts end)
+    return entries
 end
 
 local function insertCacheEntry(entry)
@@ -366,7 +428,15 @@ local function restorePersistentHistory()
         local records=readDayHistory(dateKey)
         table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
         for _,record in ipairs(records) do
-            local entry=metadataEntry(record,dateKey)
+            local ts=tonumber(record and record.ts)
+            local entry
+            if ts and record.type=="text" and type(record.content)=="string" then
+                -- Only this bounded startup cache keeps full text payloads.
+                entry={type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
+            elseif ts and record.type=="image" and type(record.imagePath)=="string" then
+                entry={type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=record.imagePath,
+                    thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil}
+            end
             if entry then
                 local target=entry.type=="text" and text_clipboard_history or img_clipboard_history
                 target[#target+1]=entry
@@ -385,16 +455,37 @@ end
 
 local function readImageAtPath(path)
     if type(path)~="string" or path=="" then return nil end
-    local ok,result=pcall(function()
-        local file=io.open(path,"rb"); if not file then return nil end
-        local bytes=file:read("*a"); file:close()
+
+    -- Prefer direct file decoding to avoid duplicate large allocations.
+    local ok,result=pcall(function() return image.imageFromPath(path) end)
+    if ok and result then return result end
+
+    -- Compatibility fallback: this was the previous, working path for image
+    -- previews. Some Hammerspoon/image-format combinations may not support
+    -- imageFromPath consistently. Build the data URL only for the single image
+    -- currently requested, and let the caller release it immediately afterward.
+    local fallbackOK,fallbackResult=pcall(function()
+        local file=io.open(path,"rb")
+        if not file then return nil end
+        local bytes=file:read("*a")
+        file:close()
         if not bytes or #bytes==0 then return nil end
         local ext=string.lower(path:match("%.([%w]+)$") or "png")
-        local mime=({png="image/png",jpg="image/jpeg",jpeg="image/jpeg",gif="image/gif",webp="image/webp",tiff="image/tiff",bmp="image/bmp"})[ext] or "image/png"
-        return hs.image.imageFromURL("data:"..mime..";base64,"..hs.base64.encode(bytes))
+        local mime=({
+            png="image/png", jpg="image/jpeg", jpeg="image/jpeg",
+            gif="image/gif", webp="image/webp", tiff="image/tiff",
+            tif="image/tiff", bmp="image/bmp", heic="image/heic"
+        })[ext] or "image/png"
+        local dataURL="data:"..mime..";base64,"..hs.base64.encode(bytes)
+        bytes=nil
+        local decoded=image.imageFromURL(dataURL)
+        dataURL=nil
+        return decoded
     end)
-    if ok then return result end
-    logger.w("Unable to decode clipboard image "..path..": "..tostring(result)); return nil
+    if fallbackOK and fallbackResult then return fallbackResult end
+    logger.w("Unable to decode clipboard image "..path..": "
+        ..tostring(result).."; fallback: "..tostring(fallbackResult))
+    return nil
 end
 
 local function makeThumbnailImage(original)
@@ -461,6 +552,13 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    dateHistoryCache = {}
+    allHistoryCache = {}
+    allHistoryCacheLoaded = 0
+    allHistoryTotalCount = nil
+    searchResultsCache = nil
+    panelCacheKey = nil
+    panelCacheHTML = nil
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -524,15 +622,18 @@ function pasteboardToClipboard(item_type,item)
         local thumbnailImage = makeThumbnailImage(item)
         local thumbnailPath = thumbnailImage and saveThumbnailFile(dateKey, imagePath, thumbnailImage, ts) or nil
         thumbnailImage = nil
+        collectgarbage("step")
 
         local records=readDayHistory(dateKey)
         records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailPath=thumbnailPath}
         if not writeDayHistory(dateKey,records) then
+            records=nil
             if thumbnailPath then os.remove(thumbnailPath) end
             os.remove(imagePath)
             logger.e("Clipboard image record could not be persisted")
             return
         end
+        records=nil
         insertCacheEntry({
             type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,
             thumbnailPath=thumbnailPath,thumbnailData=""
@@ -701,18 +802,13 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
     offset=math.max(0,tonumber(offset) or 0); count=math.max(1,tonumber(count) or CLIPBOARD_RENDER_BATCH_SIZE)
     local out,skipped={},0
     for _,dateKey in ipairs(dateFilter and {dateFilter} or historyDateDirectories()) do
-        local cached=dateHistoryCache[dateKey]
-        local dayEntries=cached
+        local dayEntries=dateHistoryCache[dateKey]
         if not dayEntries then
-            dayEntries={}
-            for _,record in ipairs(readDayHistory(dateKey)) do
-                local entry=metadataEntry(record,dateKey)
-                if entry then
-                    dayEntries[#dayEntries+1]=entry
-                end
+            dayEntries=loadDailyMetadata(dateKey)
+            -- Keep at most the currently viewed date's lightweight index.
+            if clipboardSessionOpen then
+                dateHistoryCache={[dateKey]=dayEntries}
             end
-            table.sort(dayEntries,function(a,b)return a.ts>b.ts end)
-            if clipboardSessionOpen then dateHistoryCache[dateKey]=dayEntries end
         end
         for _,entry in ipairs(dayEntries) do
             if not kind or kind=="all" or entry.type==kind then
@@ -756,15 +852,8 @@ local function loadPersistentDateHistory(dateKey,kind)
     local startedAt = hs.timer.secondsSinceEpoch()
     local allEntries=dateHistoryCache[dateKey]
     if not allEntries then
-        allEntries={}
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
-            if entry then
-                allEntries[#allEntries+1]=entry
-            end
-        end
-        table.sort(allEntries,function(a,b)return a.ts>b.ts end)
-        if clipboardSessionOpen then dateHistoryCache[dateKey]=allEntries end
+        allEntries=loadDailyMetadata(dateKey)
+        if clipboardSessionOpen then dateHistoryCache={[dateKey]=allEntries} end
     end
     logger.i(string.format("Clipboard metadata date load %s: %d records in %.3f ms",
         tostring(dateKey), #allEntries, (hs.timer.secondsSinceEpoch() - startedAt) * 1000))
@@ -780,10 +869,10 @@ local function searchPersistentHistory(query,kind)
     local out={}; local needle=string.lower(tostring(query or ""))
     if needle=="" then return out end
     for _,dateKey in ipairs(historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
+        for recordIndex,record in ipairs(readDayHistory(dateKey)) do
+            local entry=metadataEntry(record,dateKey,recordIndex)
             if entry and (not kind or kind=="all" or entry.type==kind) then
-                local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
+                local value=entry.type=="text" and tostring(record.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
                 if string.lower(value.." "..stamp):find(needle,1,true) then
                     out[#out+1]=entry
@@ -796,14 +885,17 @@ local function searchPersistentHistory(query,kind)
 end
 
 local function historyItemHTML(entry, index)
-    local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    if entry.type == "image" then
-        local imageEntry=entry.historyEntry or entry
+    local fullEntry=hydrateEntry(entry) or entry
+    local stamp = os.date("%Y-%m-%d %H:%M:%S", fullEntry.rowTs or os.time())
+    if fullEntry.type == "image" then
+        local imageEntry=fullEntry.historyEntry or fullEntry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        local html='<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        fullEntry=nil; imageEntry=nil; thumbnail=nil; collectgarbage("step")
+        return html
     end
-    local content = tostring(entry.data or entry.content or "")
+    local content = tostring(fullEntry.data or fullEntry.content or "")
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
@@ -818,11 +910,13 @@ local function historyItemHTML(entry, index)
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
+    local html='<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
         '</button>'
+    fullEntry=nil; content=nil; previewText=nil; collectgarbage("step")
+    return html
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -833,8 +927,10 @@ local function clipboardEntryMatches(entry, query, kind)
     -- the clipboard payload just to decide whether a card matches by type.
     if query == "" then return true end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    local searchableText = entry.type == "image" and "[image]" or tostring(entry.data or entry.content or "")
+    local fullEntry = entry.type == "image" and entry or hydrateEntry(entry)
+    local searchableText = entry.type == "image" and "[image]" or tostring(fullEntry and (fullEntry.data or fullEntry.content) or "")
     local searchable = string.lower(searchableText .. " " .. stamp)
+    fullEntry=nil
     return searchable:find(query, 1, true) ~= nil
 end
 
@@ -856,10 +952,12 @@ local function renderClipboardBatch(query, kind, offset)
     -- Render up to the configured 32-item batch from the currently loaded page.
     local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
     local last = math.min(#matches, offset + batchSize)
+    transientHydrationRecords={}
     for position = offset + 1, last do
         local index = matches[position]
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
+    transientHydrationRecords=nil
     visibleIndices = matches
     return table.concat(cards, "\n"), #matches, last
 end
@@ -1103,7 +1201,21 @@ previewOverlay.style.zIndex = '2147483647';
 
 function closeManualPreviews() {
   previewOverlay.classList.remove('open');
-  previewOverlay.querySelectorAll('.manual-preview').forEach(node => node.classList.remove('open'));
+  previewOverlay.querySelectorAll('.manual-preview').forEach(node => {
+    node.classList.remove('open');
+    // A hidden preview must not retain a full-resolution data URL or large text.
+    node.querySelectorAll('img').forEach(img => {
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute('src');
+      img.alt = 'Clipboard image preview';
+    });
+    node.querySelectorAll('.manual-preview-content').forEach(content => { content.textContent = ''; });
+    node.querySelectorAll('.manual-preview-title').forEach(title => { title.textContent = ''; });
+    node.dataset.index = '';
+    node.dataset.previewLoaded = 'false';
+  });
+  collectgarbage('step');
 }
 function openManualPreview(item) {
   if (!item) return;
@@ -1132,24 +1244,27 @@ function openManualPreview(item) {
 window.setImagePreview = (index, src) => {
   const panel = previewOverlay.querySelector('.image-detail');
   const image = panel.querySelector('img');
-  if (Number(panel.dataset.index) !== Number(index) || !src) return;
+  if (!previewOverlay.classList.contains('open') || !panel.classList.contains('open')
+      || Number(panel.dataset.index) !== Number(index) || !src) return;
   panel.dataset.previewLoaded = 'true';
   image.src = src;
   image.alt = 'Clipboard image preview';
 };
 window.setPreviewError = (index, message) => {
+  if (!previewOverlay.classList.contains('open')) return;
   const imagePanel = previewOverlay.querySelector('.image-detail');
-  if (Number(imagePanel.dataset.index) === Number(index)) {
+  if (imagePanel.classList.contains('open') && Number(imagePanel.dataset.index) === Number(index)) {
     imagePanel.querySelector('img').alt = message || 'Preview unavailable';
   }
   const textPanel = previewOverlay.querySelector('.text-detail');
-  if (Number(textPanel.dataset.index) === Number(index)) {
+  if (textPanel.classList.contains('open') && Number(textPanel.dataset.index) === Number(index)) {
     textPanel.querySelector('.manual-preview-content').textContent = message || 'Preview unavailable';
   }
 };
 window.setTextPreview = (index, value) => {
   const panel = previewOverlay.querySelector('.text-detail');
-  if (Number(panel.dataset.index) !== Number(index)) return;
+  if (!previewOverlay.classList.contains('open') || !panel.classList.contains('open')
+      || Number(panel.dataset.index) !== Number(index)) return;
   panel.dataset.previewLoaded = 'true';
   panel.querySelector('.manual-preview-content').textContent = value || '';
 };
@@ -1455,20 +1570,25 @@ search.focus();
 end
 
 local function pasteHistoryEntry(index)
-    local choice = menuData and menuData[index]
+    local choice = hydrateEntry(menuData and menuData[index])
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
     if choice.type == "text" then
-        pasteboard.setContents(choice.data)
+        pasteboard.setContents(choice.data or choice.content or "")
     else
         local image = decodeImage(choice.historyEntry or choice)
         if not image then
+            choice=nil
+            collectgarbage("step")
             pasteboard_watcher:start()
             hs.alert.show("Unable to restore this clipboard image")
             return
         end
         pasteboard.writeObjects(image)
+        image=nil
     end
+    choice=nil
+    collectgarbage("step")
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
         -- Restore focus to the app that was active before the history panel opened.
@@ -1535,18 +1655,21 @@ local function updateClipboardPanel(query,kind,offset,append)
 
     local matches={}
     for i,entry in ipairs(menuData) do
-        if (kind=="all" or entry.type==kind)
-            and (query=="" or clipboardEntryMatches(entry,query,kind)) then
+        -- Non-empty-query menuData comes from searchPersistentHistory (or a
+        -- date-filtered subset of those matches), so don't load full text again.
+        if kind=="all" or entry.type==kind then
             matches[#matches+1]=i
         end
     end
 
     local cards={}
+    transientHydrationRecords={}
     for _,matchedIndex in ipairs(matches) do
         if not append or matchedIndex>previousMenuDataCount then
             cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
         end
     end
+    transientHydrationRecords=nil
     local html=table.concat(cards,"\n")
     local hasMore=query=="" and not clipboardDateFilter
         and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount)
@@ -1636,7 +1759,7 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or clipboard_search or "",body.kind or clipboard_type_filter or "all",tonumber(body.index) or browseCursor or 0,true)
     elseif body.action == "loadTextPreview" then
         local index = tonumber(body.index)
-        local entry = index and menuData[index]
+        local entry = hydrateEntry(index and menuData[index])
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
@@ -1653,26 +1776,50 @@ function handleClipboardPanelMessage(message)
             clipboard_webview:evaluateJavaScript(
                 "window.setTextPreview && window.setTextPreview(" .. tostring(index) .. "," .. jsStringLiteral(excerpt) .. ");"
             )
+            content=nil; excerpt=nil; excerptLines=nil; entry=nil
+            collectgarbage("step")
         end
     elseif body.action == "loadImagePreview" then
         local index=tonumber(body.index)
         local entry=index and menuData[index]
-        local historyEntry=entry and (entry.historyEntry or entry)
-        local img=historyEntry and decodeImage(historyEntry)
-        if img and clipboard_webview then
-            local ok,url=pcall(function()return img:encodeAsURLString()end)
-            img=nil; collectgarbage("collect")
-            if ok and url then clipboard_webview:evaluateJavaScript("window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(url)..");") end
+        local imageEntry=hydrateEntry(entry)
+        local imageObject=imageEntry and decodeImage(imageEntry)
+        local encodedURL=nil
+        local failureReason=nil
+        if imageObject then
+            local ok,value=pcall(function() return imageObject:encodeAsURLString() end)
+            if ok and type(value)=="string" and value~="" then
+                encodedURL=value
+            else
+                failureReason=tostring(value or "image URL encoding returned no data")
+            end
         else
-            clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');")
+            failureReason="image file could not be decoded"
         end
+        imageObject=nil; imageEntry=nil; entry=nil
+        collectgarbage("step")
+        if encodedURL and clipboard_webview then
+            local ok,err=pcall(function()
+                clipboard_webview:evaluateJavaScript(
+                    "window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(encodedURL)..");"
+                )
+            end)
+            if not ok then logger.w("Unable to send clipboard image preview to WebView: "..tostring(err)) end
+        elseif clipboard_webview then
+            logger.w("Clipboard image preview failed for item "..tostring(index)..": "..tostring(failureReason))
+            clipboard_webview:evaluateJavaScript(
+                "window.setPreviewError && window.setPreviewError("..tostring(index)..","..jsStringLiteral("Unable to load clipboard image preview")..");"
+            )
+        end
+        encodedURL=nil
+        collectgarbage("step")
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
-        local choice = index and menuData[index]
+        local choice = hydrateEntry(index and menuData[index])
         if not choice or (choice.type ~= "text" and choice.type ~= "image") then
             hs.alert.show("Unable to copy this clipboard item")
             return
@@ -1690,6 +1837,8 @@ function handleClipboardPanelMessage(message)
             image = nil
             collectgarbage("collect")
         end
+        choice=nil
+        collectgarbage("step")
         pasteboard_watcher:start()
         if copyOK then
             hs.alert.show("Copied to clipboard — press Cmd+V to paste")
@@ -1842,16 +1991,19 @@ closeClipboardPanel = function()
     visibleIndices={}
     selectedVisibleIndex=1
 
-    -- Drop large transient payloads from the retained base cache too; the
-    -- entries are lightweight metadata/path records, but older watcher paths
-    -- may have attached full image objects or data URLs.
+    -- Drop every payload-bearing reference in the retained base cache.
+    -- In particular, never keep legacy base64 thumbnailData on an item.
     for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
         for _,entry in ipairs(list) do
             if entry.type=="image" then
                 entry.imageObject=nil
                 entry.imageData=nil
                 entry.dataURL=nil
-                entry.thumbnailData=entry.thumbnailData or ""
+                entry.thumbnailData=nil
+                entry.historyEntry=nil
+            elseif entry.type=="text" then
+                entry.data=nil
+                entry.content=nil
             end
         end
     end
@@ -1894,7 +2046,9 @@ local function configureClipboardWebview(view)
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
                     for _,entry in ipairs(list) do
                         if entry.type=="image" then
-                            entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil
+                            entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil; entry.thumbnailData=nil; entry.historyEntry=nil
+                        elseif entry.type=="text" then
+                            entry.data=nil; entry.content=nil
                         end
                     end
                 end
@@ -1994,25 +2148,30 @@ local function pasteAllRowsStep(row)
         return
     end
 
-    local entry = menuData[row]
+    local entry = hydrateEntry(menuData[row])
     if not entry or (entry.type ~= "text" and entry.type ~= "image") then
+        entry=nil
         hs.timer.doAfter(0.05, function()
             pasteAllRowsStep(row - 1)
         end)
         return
     end
 
+    local entryType = entry.type
     local wroteContent = false
-    if entry.type == "text" then
-        wroteContent = pasteboard.setContents(entry.data .. "\n") ~= false
+    if entryType == "text" then
+        wroteContent = pasteboard.setContents(tostring(entry.data or entry.content or "") .. "\n") ~= false
     else
-        local image = decodeImage(entry.historyEntry or entry)
-        if image then
-            wroteContent = pasteboard.writeObjects(image) ~= false
+        local imageObject = decodeImage(entry.historyEntry or entry)
+        if imageObject then
+            wroteContent = pasteboard.writeObjects(imageObject) ~= false
         else
             hs.alert.show("Skipped an image that could not be decoded.")
         end
+        imageObject=nil
     end
+    entry=nil
+    collectgarbage("step")
 
     if not wroteContent then
         hs.timer.doAfter(0.05, function()
@@ -2026,7 +2185,7 @@ local function pasteAllRowsStep(row)
     hs.timer.doAfter(0.15, function()
         hs.eventtap.keyStroke({"cmd"}, "v", 0)
         hs.timer.doAfter(0.4, function()
-            if entry.type == "image" then
+            if entryType == "image" then
                 -- Preserve the existing behavior of separating images with a newline.
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
