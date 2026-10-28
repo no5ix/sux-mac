@@ -632,13 +632,9 @@ function handleClipboardChange(content)
             _G.xSelectionToolbarSyntheticCopyUntil = nil
         end
     elseif tonumber(syntheticMarker) then
-        -- A previously loaded version used a numeric time-window marker. Expire
-        -- stale markers without suppressing any event based on that broad window.
-        if hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker) then
-            _G.xSelectionToolbarSyntheticCopyUntil = nil
-        else
-            _G.xSelectionToolbarSyntheticCopyUntil = nil
-        end
+        -- A previously loaded version used a numeric time-window marker. Never
+        -- suppress an event based on that legacy time-only marker.
+        _G.xSelectionToolbarSyntheticCopyUntil = nil
     end
     if ignoreNextPasteboardChange then
         ignoreNextPasteboardChange = false
