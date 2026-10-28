@@ -1760,21 +1760,24 @@ function handleClipboardPanelMessage(message)
         local entry=hydrateEntry(index and menuData[index])
         local historyEntry=entry and (entry.historyEntry or entry)
         local img=historyEntry and decodeImage(historyEntry)
-        if img and clipboard_webview then
-            local ok,url=pcall(function()return img:encodeAsURLString()end)
-            img=nil; historyEntry=nil; entry=nil
-            if ok and url then
-                clipboard_webview:evaluateJavaScript("window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(url)..");")
-            else
-                clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to encode image preview');")
-            end
-            url=nil
-            collectgarbage("step")
-        else
-            img=nil; historyEntry=nil; entry=nil
-            if clipboard_webview then clipboard_webview:evaluateJavaScript("window.setPreviewError && window.setPreviewError("..tostring(index)..", 'Unable to load image preview');") end
-            collectgarbage("step")
+        local encodedURL=nil
+        if img then
+            local ok,value=pcall(function() return img:encodeAsURLString() end)
+            if ok then encodedURL=value end
         end
+        img=nil; historyEntry=nil; entry=nil
+        collectgarbage("step")
+        if encodedURL and clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(encodedURL)..");"
+            )
+        elseif clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "window.setPreviewError && window.setPreviewError("..tostring(index)..",'Unable to load clipboard image preview');"
+            )
+        end
+        encodedURL=nil
+        collectgarbage("step")
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
