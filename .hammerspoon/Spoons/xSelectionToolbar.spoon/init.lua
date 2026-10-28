@@ -1013,6 +1013,25 @@ function obj:start()
         end)
     end
 
+
+    local WECHAT_BUNDLE_ID = "com.tencent.xinWeChat"
+    local function getWeChatScreenshotState()
+        local app = hs.application.get(WECHAT_BUNDLE_ID)
+        if not app then
+            return "unknown", 0
+        end
+
+        local windows = app:allWindows()
+        local count = #windows
+
+        if count > 1 then -- WeChat is running and in screenshot mode
+            return "active", count
+        else -- WeChat is running or not,  but not in screenshot mode
+            return "inactive", count
+        end
+    end
+
+
     local mouseDownPoint = nil
     local mouseDragDistance = 0
     mouseSelectionTap = hs.eventtap.new({
@@ -1037,6 +1056,18 @@ function obj:start()
             local didDrag = mouseDragDistance >= 4
             mouseDownPoint = nil
             mouseDragDistance = 0
+
+            local state, wxCount = getWeChatScreenshotState()
+            if state == "active" then
+                -- Avoid text-selection detection while WeChat is
+                -- potentially entering, using, or leaving screenshot mode.
+                print(string.format(
+                    "WeChat screenshot state: %s (window count: %d)",
+                    state,
+                    wxCount
+                ))
+                return false
+            end
 
             timer.doAfter(0.12, function()
                 if toolbar and toolbar:isVisible() then
