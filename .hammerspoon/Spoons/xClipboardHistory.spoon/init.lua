@@ -2019,6 +2019,9 @@ local function createClipboardWebview()
         clipboard_usercontent
     ):windowStyle({"titled", "closable", "resizable"})
     configureClipboardWebview(clipboard_webview)
+    -- This Spoon is loaded from Hammerspoon's accessory/menu-bar app.
+    -- Use a normal window level; activation is explicitly requested when shown.
+    clipboard_webview:level(hs.drawing.windowLevels.normal)
 end
 createClipboardWebview()
 
@@ -2174,20 +2177,63 @@ function showClipboardHistory()
         positionPanelOnCurrentScreen()
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
-        hs.timer.doAfter(0.05, function()
-            if clipboard_webview ~= view then return end
-            local nativeWindow = view:hswindow()
-            if nativeWindow then
-                -- Explicitly raise and focus the panel. WebView focus alone
-                -- isn't sufficient when another app is already frontmost.
-                nativeWindow:raise()
-                nativeWindow:focus()
-                view:bringToFront(true)
-            else
-                logger.w("Clipboard History window unavailable after show")
+
+        -- Raising/focusing an hs.webview's native window does not reliably
+        -- activate Hammerspoon when it is running as an accessory application.
+        -- Switch Hammerspoon to regular activation policy before showing the
+        -- panel, then explicitly activate the app and focus this window.
+        local nativeWindow = view:hswindow()
+        if not nativeWindow then
+            logger.w("Clipboard History window unavailable after show")
+        else
+            view:level(hs.drawing.windowLevels.floating)
+            view:bringToFront(true)
+            view:orderAbove()
+            nativeWindow:raise()
+
+            -- hs.osascript.applescript() does not make AppleScriptObjC
+            -- framework calls reliable across Hammerspoon/macOS versions.
+            -- Use JXA via the documented osascript JavaScript runner to call
+            -- AppKit directly and check whether the policy change succeeded.
+            local policyOK, policyResult, policyError = hs.osascript.javascript([[
+                ObjC.import('AppKit');
+                var app = $.NSApplication.sharedApplication;
+                var ok = app.setActivationPolicy($.NSApplicationActivationPolicyRegular);
+                if (ok) app.activateIgnoringOtherApps(true);
+                ObjC.unwrap(ok);
+            ]])
+            if not policyOK or policyResult ~= true then
+                logger.w("Could not switch Hammerspoon activation policy: "
+                    .. tostring(policyResult) .. "; " .. tostring(policyError))
             end
-            startOutsideClickMonitor()
-        end)
+
+            local app = nativeWindow:application()
+            local activated = false
+            if app then
+                activated = app:setFrontmost(true)
+                if not activated then activated = app:activate(true) end
+            end
+            nativeWindow:becomeMain()
+            nativeWindow:focus()
+            nativeWindow:raise()
+
+            hs.timer.doAfter(0.05, function()
+                if clipboard_webview ~= view or not view:isVisible() then return end
+                local currentWindow = view:hswindow()
+                local currentApp = currentWindow and currentWindow:application()
+                if currentApp and not currentApp:isFrontmost() then
+                    currentApp:setFrontmost(true)
+                end
+                if currentWindow then
+                    currentWindow:becomeMain()
+                    currentWindow:focus()
+                end
+            end)
+
+            logger.d("Clipboard History activation requested: " .. tostring(activated)
+                .. "; activation policy succeeded: " .. tostring(policyOK and policyResult == true))
+        end
+        startOutsideClickMonitor()
     end
 
     -- On the first open (or after the native window was recreated), load HTML
