@@ -1781,23 +1781,34 @@ function handleClipboardPanelMessage(message)
         end
     elseif body.action == "loadImagePreview" then
         local index=tonumber(body.index)
-        local entry=hydrateEntry(index and menuData[index])
-        local historyEntry=entry and (entry.historyEntry or entry)
-        local img=historyEntry and decodeImage(historyEntry)
+        local entry=index and menuData[index]
+        local imageEntry=hydrateEntry(entry)
+        local imageObject=imageEntry and decodeImage(imageEntry)
         local encodedURL=nil
-        if img then
-            local ok,value=pcall(function() return img:encodeAsURLString() end)
-            if ok then encodedURL=value end
+        local failureReason=nil
+        if imageObject then
+            local ok,value=pcall(function() return imageObject:encodeAsURLString() end)
+            if ok and type(value)=="string" and value~="" then
+                encodedURL=value
+            else
+                failureReason=tostring(value or "image URL encoding returned no data")
+            end
+        else
+            failureReason="image file could not be decoded"
         end
-        img=nil; historyEntry=nil; entry=nil
+        imageObject=nil; imageEntry=nil; entry=nil
         collectgarbage("step")
         if encodedURL and clipboard_webview then
-            clipboard_webview:evaluateJavaScript(
-                "window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(encodedURL)..");"
-            )
+            local ok,err=pcall(function()
+                clipboard_webview:evaluateJavaScript(
+                    "window.setImagePreview && window.setImagePreview("..tostring(index)..","..jsStringLiteral(encodedURL)..");"
+                )
+            end)
+            if not ok then logger.w("Unable to send clipboard image preview to WebView: "..tostring(err)) end
         elseif clipboard_webview then
+            logger.w("Clipboard image preview failed for item "..tostring(index)..": "..tostring(failureReason))
             clipboard_webview:evaluateJavaScript(
-                "window.setPreviewError && window.setPreviewError("..tostring(index)..",'Unable to load clipboard image preview');"
+                "window.setPreviewError && window.setPreviewError("..tostring(index)..","..jsStringLiteral("Unable to load clipboard image preview")..");"
             )
         end
         encodedURL=nil
