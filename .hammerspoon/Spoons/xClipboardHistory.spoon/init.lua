@@ -610,13 +610,28 @@ function handleClipboardChange(content)
         runDailyCleanupIfNeeded()
     end
 
-    local syntheticUntil = tonumber(_G.xSelectionToolbarSyntheticCopyUntil) or 0
-    if syntheticUntil > 0 and hs.timer.secondsSinceEpoch() <= syntheticUntil then
+    -- Suppress only the exact pasteboard change created by the selection toolbar's
+    -- synthetic Cmd+C. A time-only window can swallow an unrelated screenshot
+    -- taken shortly afterward, even though its image is the user's real clipboard.
+    local syntheticMarker = _G.xSelectionToolbarSyntheticCopyUntil
+    if type(syntheticMarker) == "table" then
+        local expectedChangeCount = tonumber(syntheticMarker.changeCount)
+        if expectedChangeCount and callbackCount == expectedChangeCount then
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+            logger.i("Clipboard watcher event suppressed: matching synthetic selection-toolbar copy")
+            return
+        elseif expectedChangeCount and callbackCount and callbackCount > expectedChangeCount then
+            -- The watcher has moved beyond the expected synthetic event; let this
+            -- change through instead of suppressing it based on elapsed time.
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+        elseif tonumber(syntheticMarker.expiresAt)
+            and hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker.expiresAt) then
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+        end
+    elseif tonumber(syntheticMarker) and hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker) then
+        -- Backward compatibility with an older toolbar Spoon still in memory.
         _G.xSelectionToolbarSyntheticCopyUntil = nil
-        logger.i("Clipboard watcher event suppressed: synthetic selection-toolbar copy")
-        return
     end
-    _G.xSelectionToolbarSyntheticCopyUntil = nil
     if ignoreNextPasteboardChange then
         ignoreNextPasteboardChange = false
         logger.i("Clipboard watcher event suppressed: ignoreNextPasteboardChange")
