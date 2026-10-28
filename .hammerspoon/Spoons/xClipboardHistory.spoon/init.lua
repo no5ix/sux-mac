@@ -43,6 +43,8 @@ local previousWindowFrame = nil
 local panelClosePending = false
 local previousApplicationRestoreTimer = nil
 local previousApplicationRestoreGeneration = 0
+-- Forward declaration: paste handlers are defined before this helper's body.
+local activatePreviousApplication
 -- Declared before panel callbacks so window-close and dismissal handlers can
 -- stop the global click monitor safely.
 local outsideClickMonitor = nil
@@ -1758,7 +1760,7 @@ end
 -- Destroy the native window on dismissal. A hidden hs.webview can remain tied
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
-local function activatePreviousApplication(onRestored)
+activatePreviousApplication = function(onRestored)
     local app = previousApplication
     local pid = previousApplicationPid
     local targetWindow = previousWindow
