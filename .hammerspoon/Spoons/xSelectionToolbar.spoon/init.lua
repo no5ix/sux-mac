@@ -999,6 +999,13 @@ function obj:start()
         }
         _G.xSelectionToolbarSyntheticCopyUntil = marker
         hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
+
+        -- Capture the count immediately after Cmd+C so the clipboard watcher
+        -- cannot race ahead of the delayed callback and misclassify this copy.
+        local immediateCount = pasteboard.changeCount()
+        if immediateCount ~= oldCount then
+            marker.changeCount = immediateCount
+        end
         timer.doAfter(0.05, function()
             local afterSyntheticCopyCount = pasteboard.changeCount()
             if _G.xSelectionToolbarSyntheticCopyUntil == marker then
@@ -1048,6 +1055,9 @@ function obj:start()
         hs.eventtap.event.types.leftMouseDragged,
         hs.eventtap.event.types.leftMouseUp
     }, function(event)
+        -- Keep unexpected Lua/API errors from silently killing selection
+        -- detection; log them so the next failure is diagnosable.
+        local callbackOK, callbackError = xpcall(function()
         local eventType = event:getType()
         if eventType == hs.eventtap.event.types.leftMouseDown then
             local p = hs.mouse.absolutePosition()
@@ -1100,6 +1110,11 @@ function obj:start()
                 retrySelectionRead()
             end)
             return false
+        end
+        return false
+        end, debug.traceback)
+        if not callbackOK then
+            logger.e("Selection mouse event callback failed: " .. tostring(callbackError))
         end
         return false
     end)
