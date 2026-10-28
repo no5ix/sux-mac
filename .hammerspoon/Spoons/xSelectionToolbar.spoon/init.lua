@@ -867,8 +867,8 @@ function obj:start()
     end
     local captureSelectionFromClipboardFallback
 
-    -- WeChat's screenshot overlay creates multiple windows on this setup.
-    -- Treat zero windows as unknown because WeChat briefly reports zero during transitions.
+    -- On this Mac, WeChat creates multiple windows while its screenshot overlay is active.
+    -- Zero windows is a transition/unknown state, not proof that the tool is inactive.
     local WECHAT_BUNDLE_ID = "com.tencent.xinWeChat"
     local function getWeChatScreenshotState()
         local app = hs.application.get(WECHAT_BUNDLE_ID)
@@ -878,11 +878,8 @@ function obj:start()
         if not ok or type(windows) ~= "table" then return "unknown", 0 end
 
         local count = #windows
-        if count > 1 then
-            return "active", count
-        elseif count == 1 then
-            return "inactive", count
-        end
+        if count > 1 then return "active", count end
+        if count == 1 then return "inactive", count end
         return "unknown", 0
     end
 
@@ -898,17 +895,128 @@ function obj:start()
         return true
     end
 
+    local function reportEventTapState(reason)
+        local enabled = false
+        if mouseSelectionTap then
+            local ok, value = pcall(function() return mouseSelectionTap:isEnabled() end)
+            enabled = ok and value == true
+        end
+        logger.w(string.format(
+            "Selection mouse event tap %s (enabled=%s, reason=%s)",
+            enabled and "healthy" or "disabled",
+            tostring(enabled),
+            tostring(reason or "health-check")
+        ))
+        return enabled
+    end
+
+    local function ensureMouseSelectionTap()
+        if not mouseSelectionTap then return false end
+        local enabled = false
+        local ok, value = pcall(function() return mouseSelectionTap:isEnabled() end)
+        enabled = ok and value == true
+        if enabled then return true end
+
+        logger.w("Selection mouse event tap is disabled; attempting to restart it")
+        pcall(function() mouseSelectionTap:stop() end)
+        local started, err = pcall(function() mouseSelectionTap:start() end)
+        if not started then
+            logger.e("Failed to restart selection mouse event tap: " .. tostring(err))
+            return false
+        end
+        local checkOk, checkEnabled = pcall(function() return mouseSelectionTap:isEnabled() end)
+        if not checkOk or not checkEnabled then
+            logger.e("Selection mouse event tap is still disabled after restart")
+            return false
+        end
+        logger.i("Selection mouse event tap recovered")
+        return true
+    end
+
+    local function selectionFromAccessibility()
+        local ok, value = pcall(function()
+            local function walk(element)
+                local depth = 0
+                while element and depth < 10 do
+                    -- Only accept actual selected text from text-capable controls.
+                    -- Finder file selections and generic AXSelectedText-like values
+                    -- must not trigger the floating text toolbar.
+                    local role = element:attributeValue("AXRole")
+                    local subrole = element:attributeValue("AXSubrole")
+                    local selected = element:attributeValue("AXSelectedText")
+                    local textRole = role == "AXTextField" or role == "AXTextArea"
+                        or role == "AXTextView" or role == "AXComboBox"
+                        or role == "AXWebArea" or role == "AXSearchField"
+                    local textSubrole = subrole == "AXSearchField"
+                    if textRole or textSubrole then
+                        if type(selected) == "string" and trim(selected) ~= "" then return selected end
+                    end
+                    element = element:attributeValue("AXParent")
+                    depth = depth + 1
+                end
+                return nil
+            end
+            local system = hs.axuielement.systemElement()
+            local focused = system and system:attributeValue("AXFocusedUIElement")
+            return walk(focused)
+        end)
+        return ok and trim(value) or ""
+    end
+
+    local function showIfSelection(value)
+        value = trim(value)
+        if value == "" then return false end
+        local now = hs.timer.secondsSinceEpoch()
+        -- Suppress duplicate detections from the same gesture, but don't suppress
+        -- later selections just because the selected text matches the previous one.
+        if toolbar and toolbar:isVisible() and selectedText == value then
+            -- Treat this as a duplicate event from the same selection gesture,
+            -- not a new show request: do not reset the three-second countdown.
+            return true
+        end
+        -- A hidden toolbar must never suppress a genuine new selection, even if
+        -- the user selects the same text again quickly.
+        selectedText = value
+        lastText = value
+        lastShownAt = now
+        buildToolbar(value)
+        scheduleToolbarExpiry()
+        return true
+    end
+
+    local function captureAfterMouseSelection()
+        if pendingCapture then return end
+        if toolbar and toolbar:isVisible() then
+            local point = hs.mouse.absolutePosition()
+            local frame = toolbar:frame()
+            local inside = point.x >= frame.x and point.x <= frame.x + frame.w
+                and point.y >= frame.y and point.y <= frame.y + frame.h
+            if not inside then hideToolbar() end
+            return
+        end
+
+        local app = hs.application.frontmostApplication()
+        if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+
+        -- First use native Accessibility selection, which does not touch the clipboard.
+        local value = selectionFromAccessibility()
+        if showIfSelection(value) then return end
+
+        -- Fallback only on a mouse-up following a real drag. Ordinary clicks and menu
+        -- clicks should never synthesize Cmd+C or open the toolbar.
+        -- eventtap's mouse-up callback below records whether the pointer moved while down.
+    end
+
     local function captureSelectionFromClipboardFallback()
         if pendingCapture or not screenshotStateAllowsSelection() then return end
-
         local fallbackApp = hs.application.frontmostApplication()
         if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
         local appName = string.lower(fallbackApp:name() or "")
         local bundleID = string.lower(fallbackApp:bundleID() or "")
         if bundleID == "com.apple.finder" or appName == "finder" then return end
 
-        -- Check immediately before sending Cmd+C as the screenshot state can change
-        -- between the original mouse-up and this delayed fallback.
+        -- Recheck immediately before synthesizing Cmd+C; the state may have changed
+        -- during the delayed Accessibility retries.
         if not screenshotStateAllowsSelection() then return end
 
         pendingCapture = true
@@ -924,8 +1032,8 @@ function obj:start()
             end
             pendingCapture = false
 
-            -- Do not display a toolbar if WeChat entered screenshot mode while
-            -- the synthetic copy was in flight.
+            -- Don't show a toolbar if WeChat entered screenshot mode while the
+            -- synthetic copy was in flight. The clipboard restoration above still runs.
             if not screenshotStateAllowsSelection() then return end
 
             local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
@@ -962,7 +1070,7 @@ function obj:start()
             end
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseUp then
-            local state, count = getWeChatScreenshotState()
+            local state, windowCount = getWeChatScreenshotState()
             local didDrag = mouseDragDistance >= 4
             mouseDownPoint = nil
             mouseDragDistance = 0
@@ -970,14 +1078,13 @@ function obj:start()
             if state ~= "inactive" then
                 logger.d(string.format(
                     "Skipping mouse-up selection detection: WeChat state=%s, windows=%d",
-                    state, count
+                    state, windowCount
                 ))
                 return false
             end
 
             timer.doAfter(0.12, function()
                 if not screenshotStateAllowsSelection() then return end
-
                 if toolbar and toolbar:isVisible() then
                     local p = hs.mouse.absolutePosition()
                     local f = toolbar:frame()
@@ -991,7 +1098,6 @@ function obj:start()
                 local function retrySelectionRead()
                     if toolbar and toolbar:isVisible() then return end
                     if not screenshotStateAllowsSelection() then return end
-
                     local app = hs.application.frontmostApplication()
                     if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
 
