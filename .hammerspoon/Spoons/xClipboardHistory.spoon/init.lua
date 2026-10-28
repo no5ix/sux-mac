@@ -17,6 +17,11 @@ local logger = hs.logger.new("xClipboardHistory", "info")
 local HISTORY_ROOT = (os.getenv("HOME") .. "/Documents/github/sux-mac/clipboard-history")
 local RETENTION_DAYS = 7
 local THUMBNAIL_MAX_DIMENSION = 112
+-- Large screenshots can temporarily exist as several decoded NSImage/bitmap
+-- buffers. Keep processing serialized and bound thumbnail dimensions so one
+-- capture cannot trigger overlapping full-size conversions.
+local MAX_IMAGE_DIMENSION = 32768
+local imageCaptureInProgress = false
 local cleanupLastRunDate = nil
 local cleanupOnNextClipboardChange = false
 local lastPersistedEntryKey = nil
@@ -403,6 +408,13 @@ local function makeThumbnailImage(original)
         local size = original:size()
         local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
         if width <= 0 or height <= 0 then return nil end
+        -- Reject unreasonable dimensions before asking AppKit for another
+        -- bitmap. A retina screenshot may be large, but should not allocate
+        -- an unbounded secondary buffer.
+        if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION then
+            logger.w(string.format("Skipping thumbnail for unusually large image (%dx%d)", width, height))
+            return nil
+        end
         local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
         return original:bitmapRepresentation({
             w = math.max(1, math.floor(width * scale + 0.5)),
@@ -515,12 +527,25 @@ function pasteboardToClipboard(item_type,item)
         if ok then insertCacheEntry({type="text",ts=ts,rowTs=ts,content=item,data=item}) end
         return
     end
-    imageProcessingCount=imageProcessingCount+1
+
+    -- Ignore overlapping image callbacks. Screen captures may be large, and
+    -- processing a second bitmap before releasing the first doubles the peak
+    -- allocation. The pasteboard watcher will notify us again if the clipboard
+    -- changes after the current capture has been handled.
+    if imageCaptureInProgress then
+        logger.i("Skipping overlapping clipboard image capture while processing is in progress")
+        return
+    end
+    imageCaptureInProgress = true
+    imageProcessingCount = imageProcessingCount + 1
+
     local ok,err=pcall(function()
         local dateKey=localDateKey(ts)
         local imagePath=saveImageFile(dateKey,item,ts)
         if not imagePath then logger.e("Clipboard image could not be saved"); return end
-        -- Generate a thumbnail immediately on copy and persist it as a small file.
+
+        -- Persist only a small thumbnail. Drop intermediate native bitmap
+        -- references immediately so the autorelease/GC cycle can reclaim them.
         local thumbnailImage = makeThumbnailImage(item)
         local thumbnailPath = thumbnailImage and saveThumbnailFile(dateKey, imagePath, thumbnailImage, ts) or nil
         thumbnailImage = nil
@@ -538,8 +563,14 @@ function pasteboardToClipboard(item_type,item)
             thumbnailPath=thumbnailPath,thumbnailData=""
         })
     end)
-    imageProcessingCount=math.max(0,imageProcessingCount-1)
-    item=nil; collectgarbage("collect")
+
+    -- Do not retain the full-resolution NSImage on any Lua table. The history
+    -- stores only file paths and a disk-backed thumbnail. Release the callback
+    -- reference and force Lua collection after leaving the protected block.
+    item = nil
+    imageCaptureInProgress = false
+    imageProcessingCount = math.max(0,imageProcessingCount-1)
+    collectgarbage("collect")
     if not ok then logger.e("Clipboard image processing failed: "..tostring(err)) end
 end
 
