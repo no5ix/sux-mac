@@ -1067,18 +1067,21 @@ function obj:start()
             mouseDragDistance = 0
 
             timer.doAfter(0.12, function()
+                -- A completed drag may represent a new selection even if the
+                -- previous toolbar is visible. Keep its content current instead
+                -- of treating visibility alone as proof of a duplicate gesture.
+                local point = hs.mouse.absolutePosition()
                 if toolbar and toolbar:isVisible() then
-                    local p = hs.mouse.absolutePosition()
-                    local f = toolbar:frame()
-                    if p.x < f.x or p.x > f.x + f.w or p.y < f.y or p.y > f.y + f.h then
-                        hideToolbar()
-                    end
-                    return
+                    local frame = toolbar:frame()
+                    local pointerInside = frame
+                        and point.x >= frame.x and point.x <= frame.x + frame.w
+                        and point.y >= frame.y and point.y <= frame.y + frame.h
+                    if pointerInside then return end
+                    hideToolbar()
                 end
 
                 local attempts = 0
                 local function retrySelectionRead()
-                    if toolbar and toolbar:isVisible() then return end
                     local app = hs.application.frontmostApplication()
                     if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
 
@@ -1086,10 +1089,9 @@ function obj:start()
                     local value = selectionFromAccessibility()
                     if showIfSelection(value) then return end
 
-                    -- AXSelectedText can lag behind mouse-up in browsers and other
-                    -- apps. Retry for ~320 ms; only then use clipboard fallback
-                    -- for an actual drag so normal clicks never synthesize Cmd+C.
-                    if attempts < 4 then
+                    -- Accessibility selection often lags behind mouse-up. Retry
+                    -- briefly, then fall back to synthetic Cmd+C only for a drag.
+                    if attempts < 6 then
                         timer.doAfter(0.08, retrySelectionRead)
                     elseif didDrag then
                         captureSelectionFromClipboardFallback()
@@ -1098,10 +1100,7 @@ function obj:start()
                 retrySelectionRead()
             end)
             return false
-        end
-        return false
-    end)
-    mouseSelectionTap:start()
+
     reportEventTapState("after-start")
 
     -- Recover if macOS disables the event tap temporarily. This timer also emits
