@@ -621,8 +621,8 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
-        -- Read raw bitmap flavors only when the convenience converter fails.
-        if pasteboardImg == nil then pasteboardImg = imageFromRawPasteboardData() end
+        -- Raw clipboard fallback is implemented below using readAllData().
+        -- Do not call a nonexistent helper here: that would abort every watcher callback.
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
         -- Some image providers expose raw bitmap data without a type that
