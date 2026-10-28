@@ -625,10 +625,10 @@ function handleClipboardChange(content)
         if pasteboardImg == nil then pasteboardImg = imageFromRawPasteboardData() end
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
+        -- Some image providers expose raw bitmap data without a type that
+        -- readImage() recognizes. Inspect all known bitmap UTIs before falling
+        -- back to the watcher callback's encoded image payload.
         if pasteboardImg == nil then
-            -- readImage() can fail to materialize small clipboard images on
-            -- some pasteboard flavor combinations. Decode only known raw image
-            -- UTIs as a fallback, rather than relying on the watcher's text flavor.
             local okData, rawData = pcall(function() return pasteboard.readAllData() end)
             if okData and type(rawData) == "table" then
                 local rawMimes = {
