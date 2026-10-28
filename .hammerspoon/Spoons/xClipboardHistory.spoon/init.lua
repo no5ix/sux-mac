@@ -624,13 +624,11 @@ function handleClipboardChange(content)
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
         if looksLikeImagePayload(content) then
-            if pasteboardImg ~= nil then
-                content = nil
-            else
-                -- Image data can arrive as a PNG/JPEG data URL or base64
-                -- payload in the watcher callback even when readImage() is nil.
-                -- Decode that payload directly so small screenshots aren't lost.
-                local encoded = content
+            -- This text flavor is image payload, not user-entered text.
+            -- Preserve it only long enough to attempt a native image decode.
+            local encoded = content
+            content = nil
+            if pasteboardImg == nil then
                 local mime, payload = encoded:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
                 if not payload then
                     mime = encoded:match("^iVBORw0KGgo") and "image/png"
@@ -640,23 +638,19 @@ function handleClipboardChange(content)
                 end
                 local okDecode, decodedImage = pcall(function()
                     if not mime or not payload then return nil end
-                    local bytes = hs.base64.decode(payload)
-                    if type(bytes) ~= "string" or #bytes == 0 then return nil end
-                    local decoded = hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
-                    if not decoded then return nil end
-                    -- Keep the temporary decoded image in the same native-image
-                    -- path as pasteboard.readImage(), then clear it after save.
-                    return decoded
+                    local dataURL
+                    if encoded:match("^data:image/") then
+                        dataURL = encoded
+                    else
+                        dataURL = "data:" .. mime .. ";base64," .. payload
+                    end
+                    return hs.image.imageFromURL(dataURL)
                 end)
-                if okDecode and decodedImage then
-                    pasteboardImg = decodedImage
-                else
-                    -- Don't let raw image bytes get stored as an ordinary text
-                    -- clipboard record. Log the failed conversion for debugging.
-                    logger.w("Unable to decode image-encoded clipboard payload")
-                    return
-                end
-                content = nil
+                if okDecode then pasteboardImg = decodedImage end
+            end
+            if pasteboardImg == nil then
+                logger.w("Unable to decode image-encoded clipboard payload; skipping history entry")
+                return
             end
         end
         if (content == nil) and (pasteboardImg ~= nil) then
