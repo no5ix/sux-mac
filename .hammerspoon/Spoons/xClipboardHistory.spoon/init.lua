@@ -621,6 +621,33 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
+        -- If the image converter returns nil, inspect the first item's raw
+        -- bitmap flavors before classifying this clipboard change as text.
+        if pasteboardImg == nil then
+            local okData, rawData = pcall(function() return pasteboard.readAllData() end)
+            if okData and type(rawData) == "table" then
+                local rawMimes = {
+                    ["public.png"] = "image/png",
+                    ["public.jpeg"] = "image/jpeg",
+                    ["public.jpg"] = "image/jpeg",
+                    ["public.gif"] = "image/gif",
+                    ["public.tiff"] = "image/tiff",
+                    ["public.bmp"] = "image/bmp"
+                }
+                for uti, bytes in pairs(rawData) do
+                    local mime = rawMimes[string.lower(tostring(uti))]
+                    if mime and type(bytes) == "string" and #bytes > 0 then
+                        local okDecode, decoded = pcall(function()
+                            return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
+                        end)
+                        if okDecode and decoded then
+                            pasteboardImg = decoded
+                            break
+                        end
+                    end
+                end
+            end
+        end
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
         if looksLikeImagePayload(content) then
