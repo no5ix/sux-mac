@@ -1956,9 +1956,8 @@ closeClipboardPanel = function()
     visibleIndices={}
     selectedVisibleIndex=1
 
-    -- Drop large transient payloads from the retained base cache too; the
-    -- entries are lightweight metadata/path records, but older watcher paths
-    -- may have attached full image objects or data URLs.
+    -- Drop every payload-bearing reference in the retained base cache.
+    -- In particular, never keep legacy base64 thumbnailData on an item.
     for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
         for _,entry in ipairs(list) do
             if entry.type=="image" then
@@ -1967,6 +1966,9 @@ closeClipboardPanel = function()
                 entry.dataURL=nil
                 entry.thumbnailData=nil
                 entry.historyEntry=nil
+            elseif entry.type=="text" then
+                entry.data=nil
+                entry.content=nil
             end
         end
     end
@@ -2010,6 +2012,8 @@ local function configureClipboardWebview(view)
                     for _,entry in ipairs(list) do
                         if entry.type=="image" then
                             entry.imageObject=nil; entry.imageData=nil; entry.dataURL=nil; entry.thumbnailData=nil; entry.historyEntry=nil
+                        elseif entry.type=="text" then
+                            entry.data=nil; entry.content=nil
                         end
                     end
                 end
