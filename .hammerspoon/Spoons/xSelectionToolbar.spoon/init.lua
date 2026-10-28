@@ -1094,11 +1094,18 @@ function obj:start()
                 local function retrySelectionRead()
                     if toolbar and toolbar:isVisible() then return end
                     local app = hs.application.frontmostApplication()
-                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then
+                        selectionDiag("selection-read attempt=%d skipped: no external frontmost app", attempts + 1)
+                        return
+                    end
 
                     attempts = attempts + 1
                     local value = selectionFromAccessibility()
-                    if showIfSelection(value) then return end
+                    selectionDiag("selection-read attempt=%d app=%s bundleID=%s accessibilityTextLength=%d", attempts, tostring(app:name()), tostring(app:bundleID()), type(value) == "string" and #value or -1)
+                    if showIfSelection(value) then
+                        selectionDiag("selection-read attempt=%d displayed toolbar via accessibility text", attempts)
+                        return
+                    end
 
                     -- AXSelectedText can lag behind mouse-up in browsers and other
                     -- apps. Retry for ~320 ms; only then use clipboard fallback
@@ -1106,7 +1113,10 @@ function obj:start()
                     if attempts < 4 then
                         timer.doAfter(0.08, retrySelectionRead)
                     elseif didDrag then
+                        selectionDiag("no accessibility selection after retries; invoking synthetic Cmd+C fallback")
                         captureSelectionFromClipboardFallback()
+                    else
+                        selectionDiag("no accessibility selection after retries; fallback skipped because didDrag=false")
                     end
                 end
                 retrySelectionRead()
