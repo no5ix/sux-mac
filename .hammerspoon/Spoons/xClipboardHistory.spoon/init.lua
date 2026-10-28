@@ -416,22 +416,25 @@ end
 
 local function makeThumbnailImage(original)
     if not original then return nil end
+
+    -- Avoid keeping the source NSImage, its bitmap, and its thumbnail alive
+    -- through nested closure scopes. The thumbnail returned here is at most
+    -- 112 px on its longest side.
     local ok, result = pcall(function()
         local size = original:size()
-        local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
+        local width = tonumber(size and size.w) or 0
+        local height = tonumber(size and size.h) or 0
         if width <= 0 or height <= 0 then return nil end
-        -- Reject unreasonable dimensions before asking AppKit for another
-        -- bitmap. A retina screenshot may be large, but should not allocate
-        -- an unbounded secondary buffer.
         if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION then
             logger.w(string.format("Skipping thumbnail for unusually large image (%dx%d)", width, height))
             return nil
         end
         local scale = math.min(1, THUMBNAIL_MAX_DIMENSION / width, THUMBNAIL_MAX_DIMENSION / height)
-        return original:bitmapRepresentation({
+        local thumbnail = original:bitmapRepresentation({
             w = math.max(1, math.floor(width * scale + 0.5)),
             h = math.max(1, math.floor(height * scale + 0.5))
         })
+        return thumbnail
     end)
     if not ok then
         logger.w("Unable to generate clipboard thumbnail: " .. tostring(result))
