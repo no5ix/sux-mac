@@ -591,167 +591,156 @@ end
 
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
-    -- Startup cleanup alone is not enough: users may create an expired folder
-    -- after reloading. Force one more scan on the first clipboard notification
-    -- after startup; future notifications only scan when the date changes.
+    -- Capture diagnostic metadata before any clipboard reads so missed image
+    -- events can be distinguished from image decode/save failures.
+    local callbackCount = nil
+    pcall(function() callbackCount = pasteboard.changeCount() end)
+    logger.i(string.format(
+        "Clipboard watcher event: contentType=%s, contentLength=%s, changeCount=%s, imageProcessingInProgress=%s",
+        type(content),
+        type(content) == "string" and tostring(#content) or "n/a",
+        tostring(callbackCount),
+        tostring(imageCaptureInProgress)
+    ))
+
     if cleanupOnNextClipboardChange then
         cleanupOnNextClipboardChange = false
         runDailyCleanupIfNeeded(true)
     else
         runDailyCleanupIfNeeded()
     end
-    -- The selection toolbar sets this marker only for its temporary Cmd+C.
-    -- Consume only a clipboard notification that occurs inside that short window;
-    -- never suppress unrelated clipboard changes indefinitely.
+
     local syntheticUntil = tonumber(_G.xSelectionToolbarSyntheticCopyUntil) or 0
     if syntheticUntil > 0 and hs.timer.secondsSinceEpoch() <= syntheticUntil then
         _G.xSelectionToolbarSyntheticCopyUntil = nil
+        logger.i("Clipboard watcher event suppressed: synthetic selection-toolbar copy")
         return
     end
     _G.xSelectionToolbarSyntheticCopyUntil = nil
     if ignoreNextPasteboardChange then
         ignoreNextPasteboardChange = false
+        logger.i("Clipboard watcher event suppressed: ignoreNextPasteboardChange")
         return
     end
 
     pasteboard_watcher:start()
 
-    -- cur_change_cnt = pasteboard.changeCount()
-    -- print("[handleClipboardChange] start, cur_change_cnt = " .. tostring(cur_change_cnt) .. ", last_change = " .. tostring(last_change))
-    -- if (cur_change_cnt > last_change) then
-        -- last_change = cur_change_cnt
-        local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
-        -- Some apps provide bitmap bytes through a raw image UTI.
-        if pasteboardImg == nil then
-            local okData, rawData = pcall(function() return pasteboard.readAllData() end)
-            if okData and type(rawData) == "table" then
-                local rawMimes = {
-                    ["public.png"] = "image/png",
-                    ["public.jpeg"] = "image/jpeg",
-                    ["public.jpg"] = "image/jpeg",
-                    ["public.gif"] = "image/gif",
-                    ["public.tiff"] = "image/tiff",
-                    ["public.bmp"] = "image/bmp"
-                }
-                for uti, bytes in pairs(rawData) do
-                    local mime = rawMimes[string.lower(tostring(uti))]
-                    if mime and type(bytes) == "string" and #bytes > 0 then
-                        local okDecode, decoded = pcall(function()
-                            return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
-                        end)
-                        if okDecode and decoded then
-                            pasteboardImg = decoded
-                            break
-                        end
-                    end
-                end
-            end
-        end
+    local pasteboardImg = nil
+    local readImageOK, readImageResult = pcall(function()
+        return pasteboard.readImage()
+    end)
+    if readImageOK then
+        pasteboardImg = readImageResult
+    else
+        logger.w("pasteboard.readImage() raised an error: " .. tostring(readImageResult))
+    end
 
-        if looksLikeImagePayload(content) then
-            -- Some image providers expose encoded image bytes through the
-            -- watcher callback even if native image conversion fails.
-            -- Decode raw representations first, then the payload itself.
-            -- Recognized image bytes must never be stored as ordinary text.
-            local encodedPayload = content
-            content = nil
-
-            if pasteboardImg == nil then
-                local okData, representations = pcall(function()
-                    return pasteboard.readAllData()
+    local okData, rawData = pcall(function() return pasteboard.readAllData() end)
+    local rawKeys = {}
+    local rawMimes = {
+        ["public.png"] = "image/png",
+        ["public.jpeg"] = "image/jpeg",
+        ["public.jpg"] = "image/jpeg",
+        ["public.gif"] = "image/gif",
+        ["public.tiff"] = "image/tiff",
+        ["public.bmp"] = "image/bmp"
+    }
+    if okData and type(rawData) == "table" then
+        for uti, bytes in pairs(rawData) do
+            rawKeys[#rawKeys + 1] = tostring(uti) .. ":" ..
+                (type(bytes) == "string" and tostring(#bytes) or type(bytes))
+            local mime = rawMimes[string.lower(tostring(uti))]
+            if not pasteboardImg and mime and type(bytes) == "string" and #bytes > 0 then
+                local okDecode, decoded = pcall(function()
+                    return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
                 end)
-
-                local function decodeImageBytes(bytes, mime)
-                    if type(bytes) ~= "string" or #bytes == 0 then return nil end
-                    local okDecode, decoded = pcall(function()
-                        return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
-                    end)
-                    if okDecode then return decoded end
-                    return nil
+                if okDecode and decoded then
+                    pasteboardImg = decoded
+                    logger.i("Clipboard image recovered from raw representation: " .. tostring(uti))
+                elseif not okDecode then
+                    logger.w("Raw clipboard image decode failed for " .. tostring(uti) .. ": " .. tostring(decoded))
                 end
-
-                if okData and type(representations) == "table" then
-                    local typeMimes = {
-                        ["public.png"] = "image/png",
-                        ["public.jpeg"] = "image/jpeg",
-                        ["public.jpg"] = "image/jpeg",
-                        ["public.gif"] = "image/gif",
-                        ["public.tiff"] = "image/tiff",
-                        ["public.bmp"] = "image/bmp"
-                    }
-                    for uti, bytes in pairs(representations) do
-                        local mime = typeMimes[string.lower(tostring(uti))]
-                        if mime then
-                            pasteboardImg = decodeImageBytes(bytes, mime)
-                            if pasteboardImg then break end
-                        end
-                    end
-                end
-
-                if pasteboardImg == nil then
-                    local mime, payload = encodedPayload:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
-                    if not payload then
-                        mime = encodedPayload:match("^iVBORw0KGgo") and "image/png"
-                            or encodedPayload:match("^/9j/") and "image/jpeg"
-                            or encodedPayload:match("^R0lGOD") and "image/gif"
-                        payload = encodedPayload
-                    end
-                    if mime and payload then
-                        local okDecode, decoded = pcall(function()
-                            local dataURL = encodedPayload:match("^data:image/")
-                                and encodedPayload
-                                or ("data:" .. mime .. ";base64," .. payload)
-                            return hs.image.imageFromURL(dataURL)
-                        end)
-                        if okDecode then pasteboardImg = decoded end
-                    end
-                end
-            end
-
-            if pasteboardImg == nil then
-                logger.w("Unable to decode image-encoded clipboard payload; skipping history entry")
-                return
             end
         end
-        if (content == nil) and (pasteboardImg ~= nil) then
-            -- Don't add if it's the same as the last entry
-            
-            -- print("pasteboardImg.toASCII() = " .. pasteboardImg:toASCII())
-            -- local sss = content:encodeAsURLString()
-            -- pasteboardToClipboard("image", content:encodeAsURLString())  -- don't encode it , because it will be really slow when u decode a big img from url.
-            pasteboardToClipboard("image", pasteboardImg)
-            -- Trim history if it gets too long
-            if #img_clipboard_history > max_history_size_for_img then
-                table.remove(img_clipboard_history, 1)
-            end
-            -- print("[handleClipboardChange] img.size.h = " .. content:size()["h"] .. ", img.size.w = " .. content:size()["w"])
-            -- print("[handleClipboardChange] img")
-        elseif content ~= nil then
-            -- Trust the watcher callback's exact string. Re-reading the pasteboard
-            -- here can race with another clipboard write and associate a different
-            -- value with this callback. Keep capture and display byte-for-byte.
-            -- Diagnostic capture showed that the watcher and pasteboard both
-            -- receive "interesting" intact. Keep this callback payload unchanged;
-            -- if the preview still contains missing letters, investigate clipboard
-            -- writers or keyboard-remapping tools instead of altering stored text.
-            -- logger.i("Clipboard history captured text: " .. string.format("%q", content))
+    else
+        logger.w("pasteboard.readAllData() failed or returned an unexpected value: " .. tostring(okData and type(rawData) or rawData))
+    end
 
-            -- Don't add if it's the same as the last entry
-            if #text_clipboard_history ~= 0 and 
-                (#img_clipboard_history == 0 or (text_clipboard_history[#text_clipboard_history].ts > img_clipboard_history[#img_clipboard_history].ts)) then
-                    if text_clipboard_history[#text_clipboard_history].content == content then
-                        -- print("[handleClipboardChange] it's the same as the last text, content = " .. string.sub(content, 0, display_max_text_length))
-                        return
-                    end
-            end
-            pasteboardToClipboard("text", content)
-            -- Trim history if it gets too long
-            if #text_clipboard_history > max_history_size_for_text then
-                table.remove(text_clipboard_history, 1)
-            end
-            -- print("[handleClipboardChange] text")
+    logger.i(string.format(
+        "Clipboard pasteboard read: changeCount=%s, readImageSucceeded=%s, imageAvailable=%s, rawRepresentations=[%s]",
+        tostring(callbackCount),
+        tostring(readImageOK and pasteboardImg ~= nil),
+        tostring(pasteboardImg ~= nil),
+        table.concat(rawKeys, ", ")
+    ))
+
+    -- Image wins over a non-nil string callback: some providers publish both
+    -- an image representation and a string/status flavor for the same copy.
+    -- Only classify a callback as text when no usable image was recovered.
+    if not pasteboardImg and looksLikeImagePayload(content) then
+        local mime, payload = content:match("^data:(image/[%w+%.%-]+);base64,(.+)$")
+        if not payload then
+            mime = content:match("^iVBORw0KGgo") and "image/png"
+                or content:match("^/9j/") and "image/jpeg"
+                or content:match("^R0lGOD") and "image/gif"
+            payload = content
         end
-    -- end
+        if mime and payload then
+            local okDecode, decoded = pcall(function()
+                local dataURL = content:match("^data:image/")
+                    and content
+                    or ("data:" .. mime .. ";base64," .. payload)
+                return hs.image.imageFromURL(dataURL)
+            end)
+            if okDecode and decoded then
+                pasteboardImg = decoded
+                logger.i("Clipboard image recovered from watcher callback's encoded payload")
+            else
+                logger.w("Encoded clipboard image decode failed: " .. tostring(decoded))
+            end
+        else
+            logger.w("Clipboard callback looked like an image payload but no supported signature was recognized")
+        end
+    end
+
+    if pasteboardImg then
+        local sizeOK, size = pcall(function() return pasteboardImg:size() end)
+        if sizeOK and size and tonumber(size.w) and tonumber(size.h) then
+            logger.i(string.format(
+                "Clipboard image detected: width=%s, height=%s, callbackType=%s, changeCount=%s",
+                tostring(size.w), tostring(size.h), type(content), tostring(callbackCount)
+            ))
+        else
+            logger.w("Clipboard image candidate has unreadable dimensions: " .. tostring(size))
+        end
+        if content ~= nil then
+            logger.i("Clipboard event has both an image and a callback payload; recording image instead of callback text")
+        end
+        pasteboardToClipboard("image", pasteboardImg)
+        logger.i("Clipboard image capture pipeline returned for changeCount=" .. tostring(callbackCount))
+        return
+    end
+
+    if content ~= nil then
+        if type(content) ~= "string" then
+            logger.w("Ignoring non-string clipboard watcher payload of type " .. type(content))
+            return
+        end
+        if #text_clipboard_history ~= 0
+            and (#img_clipboard_history == 0
+                or (text_clipboard_history[#text_clipboard_history].ts > img_clipboard_history[#img_clipboard_history].ts))
+            and text_clipboard_history[#text_clipboard_history].content == content then
+            logger.i("Duplicate text clipboard entry skipped; callback length=" .. tostring(#content))
+            return
+        end
+        logger.i("Clipboard text detected; length=" .. tostring(#content) .. ", changeCount=" .. tostring(callbackCount))
+        pasteboardToClipboard("text", content)
+        if #text_clipboard_history > max_history_size_for_text then
+            table.remove(text_clipboard_history, 1)
+        end
+    else
+        logger.w("Clipboard change produced neither a readable image nor a text payload; changeCount=" .. tostring(callbackCount))
+    end
 end
 
 -- restore the newest clipboard content
