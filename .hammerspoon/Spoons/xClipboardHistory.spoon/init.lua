@@ -45,6 +45,8 @@ local previousApplicationRestoreTimer = nil
 local previousApplicationRestoreGeneration = 0
 -- Forward declaration: paste handlers are defined before this helper's body.
 local activatePreviousApplication
+-- Forward declaration: paste handlers are defined before this helper's body.
+local activatePreviousApplication
 -- Declared before panel callbacks so window-close and dismissal handlers can
 -- stop the global click monitor safely.
 local outsideClickMonitor = nil
