@@ -846,6 +846,7 @@ function obj:start()
     local lastShownAt = 0
     local toolbarExpiryTimer = nil
     local pendingCapture = false
+    local clipboardVerificationTimer = nil
     local eventTapHealthTimer = nil
 
     -- Hide the selection toolbar three seconds after showing it. Duplicate
@@ -970,7 +971,12 @@ function obj:start()
 
         logger.d("Synthetic Cmd+C keyStroke returned successfully; scheduling clipboard verification")
         local timerOK, timerError = pcall(function()
-            timer.doAfter(0.35, function()
+            if clipboardVerificationTimer then
+                clipboardVerificationTimer:stop()
+                clipboardVerificationTimer = nil
+            end
+            clipboardVerificationTimer = timer.doAfter(0.35, function()
+                clipboardVerificationTimer = nil
                 logger.d("Clipboard verification timer fired after synthetic Cmd+C")
                 local checkOK, newCount, copied = pcall(function()
                     local count = pasteboard.changeCount()
