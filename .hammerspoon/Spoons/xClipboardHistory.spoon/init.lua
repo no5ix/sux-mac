@@ -589,30 +589,6 @@ function pasteboardToClipboard(item_type,item)
     if not ok then logger.e("Clipboard image processing failed: "..tostring(err)) end
 end
 
-local function imageFromRawPasteboardData()
-    local okData, rawData = pcall(function() return pasteboard.readAllData() end)
-    if not okData or type(rawData) ~= "table" then return nil end
-
-    local rawMimes = {
-        ["public.png"] = "image/png",
-        ["public.jpeg"] = "image/jpeg",
-        ["public.jpg"] = "image/jpeg",
-        ["public.gif"] = "image/gif",
-        ["public.tiff"] = "image/tiff",
-        ["public.bmp"] = "image/bmp"
-    }
-    for uti, bytes in pairs(rawData) do
-        local mime = rawMimes[string.lower(tostring(uti))]
-        if mime and type(bytes) == "string" and #bytes > 0 then
-            local okDecode, decoded = pcall(function()
-                return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
-            end)
-            if okDecode and decoded then return decoded end
-        end
-    end
-    return nil
-end
-
 -- Add this function to handle clipboard changes
 function handleClipboardChange(content)
     -- Startup cleanup alone is not enough: users may create an expired folder
@@ -649,10 +625,38 @@ function handleClipboardChange(content)
         if pasteboardImg == nil then pasteboardImg = imageFromRawPasteboardData() end
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
+        if pasteboardImg == nil then
+            -- readImage() can fail to materialize small clipboard images on
+            -- some pasteboard flavor combinations. Decode only known raw image
+            -- UTIs as a fallback, rather than relying on the watcher's text flavor.
+            local okData, rawData = pcall(function() return pasteboard.readAllData() end)
+            if okData and type(rawData) == "table" then
+                local rawMimes = {
+                    ["public.png"] = "image/png",
+                    ["public.jpeg"] = "image/jpeg",
+                    ["public.jpg"] = "image/jpeg",
+                    ["public.gif"] = "image/gif",
+                    ["public.tiff"] = "image/tiff",
+                    ["public.bmp"] = "image/bmp"
+                }
+                for uti, bytes in pairs(rawData) do
+                    local mime = rawMimes[string.lower(tostring(uti))]
+                    if mime and type(bytes) == "string" and #bytes > 0 then
+                        local okDecode, decoded = pcall(function()
+                            return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
+                        end)
+                        if okDecode and decoded then
+                            pasteboardImg = decoded
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
         if looksLikeImagePayload(content) then
-            -- Encoded image data is not ordinary text. Use it only as a
-            -- fallback if neither the native image conversion nor the raw
-            -- pasteboard bitmap representations were available.
+            -- Some clipboard writers expose base64 data as a string instead of
+            -- a raw image UTI. Decode that recognized image form as a last resort.
             local encodedPayload = content
             content = nil
             if pasteboardImg == nil then
