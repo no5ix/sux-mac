@@ -642,7 +642,11 @@ function handleClipboardChange(content)
                     if not mime or not payload then return nil end
                     local bytes = hs.base64.decode(payload)
                     if type(bytes) ~= "string" or #bytes == 0 then return nil end
-                    return hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
+                    local decoded = hs.image.imageFromURL("data:" .. mime .. ";base64," .. hs.base64.encode(bytes))
+                    if not decoded then return nil end
+                    -- Keep the temporary decoded image in the same native-image
+                    -- path as pasteboard.readImage(), then clear it after save.
+                    return decoded
                 end)
                 if okDecode and decodedImage then
                     pasteboardImg = decodedImage
