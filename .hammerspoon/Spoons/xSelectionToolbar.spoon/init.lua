@@ -474,6 +474,17 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
         translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not encode request."))
         return
     end
+    -- The local OpenAI-compatible endpoint may require an API key. Keep the
+    -- credential outside the repository and read it from the Hammerspoon process
+    -- environment (for example, launch Hammerspoon with SUX_AI_API_KEY set).
+    local apiKey = os.getenv("SUX_AI_API_KEY") or ""
+    if trim(apiKey) == "" then
+        translationWindow:evaluateJavaScript(
+            translationJSCall("translationStatus", "API key required (set SUX_AI_API_KEY in Hammerspoon's environment)")
+        )
+        return
+    end
+
     translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Working locally…"))
     local task = hs.task.new("/usr/bin/curl", function(exitCode, stdOut, stdErr)
         if requestId ~= translationRequestId or not translationWindow then return end
@@ -506,6 +517,7 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
         "-sS", "--max-time", "120", "-X", "POST",
         TRANSLATION_API_BASE .. "/chat/completions",
         "-H", "Content-Type: application/json",
+        "-H", "Authorization: Bearer " .. apiKey,
         "--data-binary", encodedBody
     })
     if not task then
