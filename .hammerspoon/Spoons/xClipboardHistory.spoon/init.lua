@@ -1517,7 +1517,6 @@ document.addEventListener('mousemove', event => {
 document.addEventListener('keydown', event => {
   if (event.code !== 'Space' && event.key !== ' ') return;
   if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-  const inputFocused = event.target === search;
   const pointerItem = window.clipboardHoveredImageItem;
   if (!pointerItem || !pointerItem.isConnected) return;
   event.preventDefault();
