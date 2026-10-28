@@ -621,8 +621,7 @@ function handleClipboardChange(content)
     -- if (cur_change_cnt > last_change) then
         -- last_change = cur_change_cnt
         local pasteboardImg = pasteboard.readImage()  -- return a hs.image object
-        -- Raw clipboard fallback is implemented below using readAllData().
-        -- Do not call a nonexistent helper here: that would abort every watcher callback.
+        -- Raw bitmap fallback below reads supported image UTIs directly.
         -- Some apps expose image bytes or a data URL through the text flavor.
         -- Never treat recognized image payloads as a user-entered text item.
         -- Some image providers expose raw bitmap data without a type that
