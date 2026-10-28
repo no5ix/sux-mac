@@ -455,12 +455,36 @@ end
 
 local function readImageAtPath(path)
     if type(path)~="string" or path=="" then return nil end
-    -- Decode straight from disk instead of reading the entire original file,
-    -- making a base64 copy, and decoding that data URL again. This avoids a
-    -- large transient allocation for high-resolution clipboard screenshots.
-    local ok,result=pcall(image.imageFromPath,path)
-    if ok then return result end
-    logger.w("Unable to decode clipboard image "..path..": "..tostring(result))
+
+    -- Prefer direct file decoding to avoid duplicate large allocations.
+    local ok,result=pcall(function() return image.imageFromPath(path) end)
+    if ok and result then return result end
+
+    -- Compatibility fallback: this was the previous, working path for image
+    -- previews. Some Hammerspoon/image-format combinations may not support
+    -- imageFromPath consistently. Build the data URL only for the single image
+    -- currently requested, and let the caller release it immediately afterward.
+    local fallbackOK,fallbackResult=pcall(function()
+        local file=io.open(path,"rb")
+        if not file then return nil end
+        local bytes=file:read("*a")
+        file:close()
+        if not bytes or #bytes==0 then return nil end
+        local ext=string.lower(path:match("%.([%w]+)$") or "png")
+        local mime=({
+            png="image/png", jpg="image/jpeg", jpeg="image/jpeg",
+            gif="image/gif", webp="image/webp", tiff="image/tiff",
+            tif="image/tiff", bmp="image/bmp", heic="image/heic"
+        })[ext] or "image/png"
+        local dataURL="data:"..mime..";base64,"..hs.base64.encode(bytes)
+        bytes=nil
+        local decoded=image.imageFromURL(dataURL)
+        dataURL=nil
+        return decoded
+    end)
+    if fallbackOK and fallbackResult then return fallbackResult end
+    logger.w("Unable to decode clipboard image "..path..": "
+        ..tostring(result).."; fallback: "..tostring(fallbackResult))
     return nil
 end
 
