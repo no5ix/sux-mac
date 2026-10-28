@@ -624,6 +624,12 @@ function handleClipboardChange(content)
             -- The watcher has moved beyond the expected synthetic event; let this
             -- change through instead of suppressing it based on elapsed time.
             _G.xSelectionToolbarSyntheticCopyUntil = nil
+        elseif not expectedChangeCount and tonumber(syntheticMarker.beforeChangeCount)
+            and callbackCount and callbackCount > tonumber(syntheticMarker.beforeChangeCount) then
+            -- The synthetic Cmd+C has not changed the count by the time this
+            -- callback arrived. This is a different clipboard event (for example,
+            -- a screenshot), so do not suppress it.
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
         elseif tonumber(syntheticMarker.expiresAt)
             and hs.timer.secondsSinceEpoch() > tonumber(syntheticMarker.expiresAt) then
             _G.xSelectionToolbarSyntheticCopyUntil = nil
