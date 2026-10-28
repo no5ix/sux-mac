@@ -910,18 +910,18 @@ function obj:start()
             local function walk(element)
                 local depth = 0
                 while element and depth < 10 do
-                    -- Only accept actual selected text from text-capable controls.
-                    -- Finder file selections and generic AXSelectedText-like values
-                    -- must not trigger the floating text toolbar.
                     local role = element:attributeValue("AXRole")
                     local subrole = element:attributeValue("AXSubrole")
                     local selected = element:attributeValue("AXSelectedText")
-                    local textRole = role == "AXTextField" or role == "AXTextArea"
-                        or role == "AXTextView" or role == "AXComboBox"
-                        or role == "AXWebArea" or role == "AXSearchField"
-                    local textSubrole = subrole == "AXSearchField"
-                    if textRole or textSubrole then
-                        if type(selected) == "string" and trim(selected) ~= "" then return selected end
+                    -- Prefer actual text-control selection. Some browsers expose the
+                    -- selected text on a web area, while others expose it on a child.
+                    if type(selected) == "string" and trim(selected) ~= "" then
+                        local textRole = role == "AXTextField" or role == "AXTextArea"
+                            or role == "AXTextView" or role == "AXComboBox"
+                            or role == "AXWebArea" or role == "AXSearchField"
+                            or role == "AXText"
+                        local textSubrole = subrole == "AXSearchField"
+                        if textRole or textSubrole then return selected end
                     end
                     element = element:attributeValue("AXParent")
                     depth = depth + 1
@@ -930,9 +930,22 @@ function obj:start()
             end
             local system = hs.axuielement.systemElement()
             local focused = system and system:attributeValue("AXFocusedUIElement")
-            return walk(focused)
+            local selected = walk(focused)
+            if selected then return selected end
+
+            -- In some applications, AXFocusedUIElement is not the element carrying
+            -- the selection. Probe the focused window's selected text as a fallback.
+            local appElement = system and system:attributeValue("AXFocusedApplication")
+            local focusedWindow = appElement and appElement:attributeValue("AXFocusedWindow")
+            return walk(focusedWindow)
         end)
-        return ok and trim(value) or ""
+        if not ok then
+            logger.d("Accessibility selection query failed: " .. tostring(value))
+            return ""
+        end
+        local text = trim(value)
+        if text == "" then logger.d("Accessibility returned no selected text") end
+        return text
     end
 
     local function showIfSelection(value)
