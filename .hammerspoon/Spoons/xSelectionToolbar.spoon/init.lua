@@ -905,65 +905,6 @@ function obj:start()
         return true
     end
 
-    local function selectionFromAccessibility()
-        local ok, value = pcall(function()
-            local function walk(element)
-                local depth = 0
-                while element and depth < 10 do
-                    local role = element:attributeValue("AXRole")
-                    local subrole = element:attributeValue("AXSubrole")
-                    local selected = element:attributeValue("AXSelectedText")
-                    -- Prefer actual text-control selection. Some browsers expose the
-                    -- selected text on a web area, while others expose it on a child.
-                    if type(selected) == "string" and trim(selected) ~= "" then
-                        local textRole = role == "AXTextField" or role == "AXTextArea"
-                            or role == "AXTextView" or role == "AXComboBox"
-                            or role == "AXWebArea" or role == "AXSearchField"
-                            or role == "AXText"
-                        local textSubrole = subrole == "AXSearchField"
-                        if textRole or textSubrole then return selected end
-                    end
-                    element = element:attributeValue("AXParent")
-                    depth = depth + 1
-                end
-                return nil
-            end
-            -- Hammerspoon exposes systemWideElement(), not systemElement().
-            -- Read the focused app/element through the supported system-wide AX object.
-            local ax = hs.axuielement
-            if not ax or type(ax.systemWideElement) ~= "function" then
-                error("hs.axuielement.systemWideElement() is unavailable")
-            end
-            local system = ax.systemWideElement()
-            local focused = system and system:attributeValue("AXFocusedUIElement")
-            local selected = walk(focused)
-            if selected then return selected end
-
-            -- The focused element is not always the element carrying the selection.
-            local appElement = system and system:attributeValue("AXFocusedApplication")
-            local focusedWindow = appElement and appElement:attributeValue("AXFocusedWindow")
-            selected = walk(focusedWindow)
-            if selected then return selected end
-
-            -- Also try the currently active application's AX root, which is useful
-            -- on releases where the system-wide element omits focused-window data.
-            local app = hs.application.frontmostApplication()
-            if app and type(ax.applicationElement) == "function" then
-                local appAX = ax.applicationElement(app)
-                selected = walk(appAX)
-                if selected then return selected end
-            end
-            return nil
-        end)
-        if not ok then
-            logger.d("Accessibility selection query failed: " .. tostring(value))
-            return ""
-        end
-        local text = trim(value)
-        if text == "" then logger.d("Accessibility returned no selected text") end
-        return text
-    end
-
     local function showIfSelection(value)
         value = trim(value)
         if value == "" then return false end
@@ -983,29 +924,6 @@ function obj:start()
         buildToolbar(value)
         scheduleToolbarExpiry()
         return true
-    end
-
-    local function captureAfterMouseSelection()
-        if pendingCapture then return end
-        if toolbar and toolbar:isVisible() then
-            local point = hs.mouse.absolutePosition()
-            local frame = toolbar:frame()
-            local inside = point.x >= frame.x and point.x <= frame.x + frame.w
-                and point.y >= frame.y and point.y <= frame.y + frame.h
-            if not inside then hideToolbar() end
-            return
-        end
-
-        local app = hs.application.frontmostApplication()
-        if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
-
-        -- First use native Accessibility selection, which does not touch the clipboard.
-        local value = selectionFromAccessibility()
-        if showIfSelection(value) then return end
-
-        -- Fallback only on a mouse-up following a real drag. Ordinary clicks and menu
-        -- clicks should never synthesize Cmd+C or open the toolbar.
-        -- eventtap's mouse-up callback below records whether the pointer moved while down.
     end
 
     local function captureSelectionFromClipboardFallback()
@@ -1033,8 +951,7 @@ function obj:start()
                 and not copied:match("^file://")
                 and not copied:match("^/[^%s]+$")
             if newCount ~= oldCount and isPlainText then
-                local axValue = selectionFromAccessibility()
-                local selection = trim(axValue ~= "" and axValue or copied)
+                local selection = copied
                 if selection ~= "" and not looksLikeImagePayload(selection) then
                     showIfSelection(selection)
                 end
@@ -1093,31 +1010,12 @@ function obj:start()
                     return
                 end
 
-                local attempts = 0
-                local function retrySelectionRead()
-                    local currentApp = hs.application.frontmostApplication()
-                    if not currentApp or currentApp:bundleID() == "org.hammerspoon.Hammerspoon" then
-                        logger.d("Selection read stopped because Hammerspoon is frontmost")
-                        return
-                    end
-
-                    attempts = attempts + 1
-                    local value = selectionFromAccessibility()
-                    if value ~= "" then
-                        logger.d(string.format("Accessibility selection read succeeded: attempt=%d, length=%d", attempts, #value))
-                    end
-                    if showIfSelection(value) then return end
-
-                    if attempts < 4 then
-                        timer.doAfter(0.08, retrySelectionRead)
-                    elseif didDrag then
-                        logger.d("Accessibility selection unavailable after retries; trying copy fallback")
-                        captureSelectionFromClipboardFallback()
-                    else
-                        logger.d("No selected text found after mouse click; fallback skipped")
-                    end
+                if didDrag then
+                    logger.d("Mouse drag detected; capturing selected text via Cmd+C")
+                    captureSelectionFromClipboardFallback()
+                else
+                    logger.d("No selected text found after mouse click; fallback skipped")
                 end
-                retrySelectionRead()
             end)
         end, debug.traceback)
         if not callbackOK then
