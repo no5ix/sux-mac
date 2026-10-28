@@ -8,8 +8,8 @@ local json = require("hs.json")
 local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 
-// Coordinated with xGlobalVim's Caps+Q WeChat screenshot shortcut.
-// A timestamp deadline makes the guard self-expiring even if the cleanup timer is missed.
+-- Coordinated with xGlobalVim's Caps+Q WeChat screenshot shortcut.
+-- A timestamp deadline makes the guard self-expiring even if the cleanup timer is missed.
 local function weChatScreenshotInProgress()
     local deadline = rawget(_G, "xWeChatScreenshotGuardUntil")
     if type(deadline) ~= "number" then return false end
