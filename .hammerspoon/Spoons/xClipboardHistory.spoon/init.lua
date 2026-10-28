@@ -1514,6 +1514,16 @@ document.addEventListener('mousemove', event => {
   const hovered = document.elementFromPoint(event.clientX, event.clientY);
   window.clipboardHoveredImageItem = hovered && hovered.closest('.image-item[data-action="paste"]');
 }, { passive: true });
+document.addEventListener('keydown', event => {
+  if (event.code !== 'Space' && event.key !== ' ') return;
+  if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+  const inputFocused = event.target === search;
+  const pointerItem = window.clipboardHoveredImageItem;
+  if (!pointerItem || !pointerItem.isConnected) return;
+  event.preventDefault();
+  event.stopPropagation();
+  bridge('toggleNativeImagePreview', Number(pointerItem.dataset.index || 0), '');
+}, true);
 
 // Do not preselect the first card or scroll the grid on open. Tab should
 // only move focus to the results container; the user chooses a row with arrows.
