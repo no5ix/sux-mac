@@ -1144,6 +1144,10 @@ function obj:start()
         scheduleScreenshotGuardSafetyCleanup()
     end
 
+    -- The Hammerspoon key event tap may be re-created during Spoon reloads.
+    -- Store its reference at module scope so stop() can reliably stop it.
+    _G.xSelectionToolbarScreenshotEscapeTap = screenshotEscapeTap
+
     -- Recover if macOS disables the event tap temporarily. This timer also emits
     -- a diagnostic only when it observes a disabled tap, avoiding noisy logs.
     eventTapHealthTimer = timer.doEvery(5, function()
@@ -1165,6 +1169,10 @@ function obj:stop()
     if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
     if screenshotGuardCleanupTimer then screenshotGuardCleanupTimer:stop(); screenshotGuardCleanupTimer = nil end
     if screenshotEscapeTap then screenshotEscapeTap:stop(); screenshotEscapeTap = nil end
+    if _G.xSelectionToolbarScreenshotEscapeTap then
+        pcall(function() _G.xSelectionToolbarScreenshotEscapeTap:stop() end)
+        _G.xSelectionToolbarScreenshotEscapeTap = nil
+    end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
     if toolbar then toolbar:delete(); toolbar = nil end
     return self
