@@ -1028,9 +1028,19 @@ function obj:start()
         pendingCapture = true
         local oldClipboard = pasteboard.getContents()
         local oldCount = pasteboard.changeCount()
-        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
+        -- The watcher callback for this synthetic Cmd+C should arrive promptly.
+        -- Keep the suppression window short so a real user copy immediately after
+        -- finishing a screenshot/selection cannot be mistaken for this fallback.
+        local syntheticCopyDeadline = hs.timer.secondsSinceEpoch() + 0.25
+        _G.xSelectionToolbarSyntheticCopyUntil = syntheticCopyDeadline
         hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
         timer.doAfter(0.22, function()
+            -- The synthetic-copy notification may not arrive in some apps. Expire
+            -- only our own marker before restoring the clipboard, so it cannot
+            -- suppress a later, unrelated user copy.
+            if _G.xSelectionToolbarSyntheticCopyUntil == syntheticCopyDeadline then
+                _G.xSelectionToolbarSyntheticCopyUntil = nil
+            end
             local newCount = pasteboard.changeCount()
             local copied = trim(pasteboard.getContents())
             if oldClipboard ~= nil and newCount ~= oldCount then
