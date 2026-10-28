@@ -29,7 +29,7 @@ local clipboard_webview = nil
 local clipboard_usercontent = nil
 local clipboard_search = ""
 local clipboard_type_filter = "all" -- "all", "text", "image", or "none"
--- Track the native macOS Quick Look preview opened from the clipboard panel.
+-- Track native Quick Look so pressing Space again can close it.
 local nativeImagePreviewOpen = false
 local nativeImagePreviewEntryPath = nil
 local nativeImagePreviewTask = nil
@@ -449,8 +449,7 @@ local function decodeImage(entry)
     return nil
 end
 
--- Launch macOS Quick Look for a stored clipboard image. qlmanage -p opens the
--- system preview UI rather than creating another in-panel image viewer.
+-- Open the stored image using macOS Quick Look.
 local function closeNativeImagePreview()
     if nativeImagePreviewTask then
         pcall(function() nativeImagePreviewTask:terminate() end)
@@ -469,7 +468,6 @@ local function openNativeImagePreview(entry)
     end
 
     closeNativeImagePreview()
-    local escapedPath = path:gsub("'", "'\\''")
     local task = hs.task.new("/usr/bin/qlmanage", function(exitCode, stdOut, stdErr)
         nativeImagePreviewTask = nil
         if exitCode ~= 0 then
@@ -1491,8 +1489,8 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (event.code === 'Space' || event.key === ' ') {
-    // Space previews the image card directly beneath the pointer. It does not
-    // rely on keyboard selection, and it never pastes the selected item.
+    // Use the current mouse position, not the keyboard-selected row.
+    // Space over an image toggles native Quick Look and never pastes.
     const hovered = document.elementFromPoint(event.clientX || 0, event.clientY || 0);
     const pointerItem = hovered && hovered.closest('.image-item[data-action="paste"]');
     if (pointerItem) {
