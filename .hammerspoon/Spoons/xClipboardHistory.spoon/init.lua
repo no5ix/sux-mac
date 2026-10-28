@@ -1463,6 +1463,16 @@ search.focus();
 end
 
 local function pasteHistoryEntry(index)
+    -- Resolve the restoration helper from the explicitly forward-declared local
+    -- at invocation time. Keep this guard to prevent a callback from throwing
+    -- an unhandled Lua error if configuration reload leaves it unavailable.
+    local restoreApplication = activatePreviousApplication
+    if type(restoreApplication) ~= "function" then
+        logger.e("Clipboard paste cancelled: previous-application restoration helper is unavailable")
+        hs.alert.show("Could not restore the original window. Paste cancelled.")
+        return
+    end
+
     local choice = menuData and menuData[index]
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
@@ -1483,7 +1493,7 @@ local function pasteHistoryEntry(index)
     -- panel first is not enough: let its Space/focus transition settle, then
     -- explicitly focus the window that was active before the panel opened.
     if clipboard_webview then clipboard_webview:hide() end
-    local started = activatePreviousApplication(function(restored)
+    local started = restoreApplication(function(restored)
         if not restored then
             -- Never send Cmd+V blindly if the original window could not be
             -- restored; that could paste into an unrelated window.
