@@ -1745,19 +1745,23 @@ end
 -- Destroy the native window on dismissal. A hidden hs.webview can remain tied
 -- to the Space where it was first shown; recreating it on the next hotkey lets
 -- macOS attach it to the currently active Space.
-local function activatePreviousApplication()
+local function activatePreviousApplication(onRestored)
     local app = previousApplication
     local pid = previousApplicationPid
     local targetWindow = previousWindow
     local targetWindowId = previousWindowId
     local targetWindowFrame = previousWindowFrame
 
-    if not app or not app:isRunning() then
+    local function clearTarget()
         previousApplication = nil
         previousApplicationPid = nil
         previousWindow = nil
         previousWindowId = nil
         previousWindowFrame = nil
+    end
+
+    if not app or not app:isRunning() then
+        clearTarget()
         return false
     end
 
@@ -1766,19 +1770,11 @@ local function activatePreviousApplication()
     local targetPid = app:pid()
     if not targetPid or (pid and targetPid ~= pid)
         or app:bundleID() == "org.hammerspoon.Hammerspoon" then
-        previousApplication = nil
-        previousApplicationPid = nil
-        previousWindow = nil
-        previousWindowId = nil
-        previousWindowFrame = nil
+        clearTarget()
         logger.w("Skipped invalid previous application restoration target")
         return false
     end
-    previousApplication = nil
-    previousApplicationPid = nil
-    previousWindow = nil
-    previousWindowId = nil
-    previousWindowFrame = nil
+    clearTarget()
 
     previousApplicationRestoreGeneration = previousApplicationRestoreGeneration + 1
     local generation = previousApplicationRestoreGeneration
@@ -1788,8 +1784,8 @@ local function activatePreviousApplication()
     end
 
     local function getSavedWindow()
-        -- Prefer the exact hs.window object while it remains valid. On reload or
-        -- if the wrapper became stale, resolve by window ID from the same app.
+        -- Prefer the exact hs.window object while it remains valid. If it has
+        -- become stale, re-resolve by ID from the same application.
         local candidate = targetWindow
         local ok, valid = pcall(function()
             return candidate and candidate:isStandard() and candidate:application()
@@ -1814,10 +1810,7 @@ local function activatePreviousApplication()
 
     local function restoreSavedWindow()
         local window = getSavedWindow()
-        if not window then
-            logger.d("Saved destination window is no longer available; keeping app-level fallback")
-            return false
-        end
+        if not window then return false end
 
         local ok, result = pcall(function()
             window:focus()
@@ -1828,8 +1821,7 @@ local function activatePreviousApplication()
             return false
         end
 
-        -- Restore the saved frame only if the window still exists. This keeps
-        -- the target on its original monitor without touching sibling windows.
+        -- Restore its saved position only; do not touch sibling windows.
         if targetWindowFrame then
             pcall(function() window:setFrame(targetWindowFrame, 0) end)
         end
@@ -1838,51 +1830,54 @@ local function activatePreviousApplication()
 
     local attempts = 0
     local maxAttempts = 4
+    local function finish(success, message)
+        previousApplicationRestoreTimer = nil
+        if message then
+            if success then logger.d(message) else logger.w(message) end
+        end
+        if onRestored then
+            local ok, err = pcall(onRestored, success)
+            if not ok then logger.e("Restore callback failed: " .. tostring(err)) end
+        end
+    end
+
     local function restoreAttempt()
         if generation ~= previousApplicationRestoreGeneration then return end
         if not app:isRunning() or app:pid() ~= targetPid then
-            previousApplicationRestoreTimer = nil
-            logger.w("Previous app exited before focus restoration")
+            finish(false, "Previous app exited before focus restoration")
             return
         end
 
         local frontApp = application.frontmostApplication()
-        if frontApp and frontApp:pid() == targetPid then
-            if restoreSavedWindow() then
-                local focused = nil
-                pcall(function() focused = hs.window.focusedWindow() end)
-                local focusedId = focused and focused:id()
-                if not targetWindowId or focusedId == targetWindowId then
-                    previousApplicationRestoreTimer = nil
-                    logger.d("Previous app and saved window restored: " .. tostring(app:name()))
-                    return
-                end
-            elseif not targetWindowId then
-                previousApplicationRestoreTimer = nil
-                logger.d("Previous application restored: " .. tostring(app:name()))
-                return
-            end
-        else
+        if not frontApp or frontApp:pid() ~= targetPid then
             attempts = attempts + 1
             local ok, activated = pcall(function() return app:activate(true) end)
             logger.d("Restore previous app attempt " .. attempts
                 .. ": app=" .. tostring(app:name())
                 .. ", activateOK=" .. tostring(ok)
                 .. ", activateResult=" .. tostring(activated))
+        else
+            -- Activation and window focus can settle on separate event-loop
+            -- turns; explicitly focus only the remembered destination window.
+            restoreSavedWindow()
+            local focused = nil
+            pcall(function() focused = hs.window.focusedWindow() end)
+            local focusedId = focused and focused:id()
+            if targetWindowId and focusedId == targetWindowId then
+                finish(true, "Previous app and saved window restored: " .. tostring(app:name()))
+                return
+            elseif not targetWindowId then
+                finish(true, "Previous application restored: " .. tostring(app:name()))
+                return
+            end
+            attempts = attempts + 1
         end
 
-        attempts = attempts + 1
         if attempts < maxAttempts then
             previousApplicationRestoreTimer = hs.timer.doAfter(0.12, restoreAttempt)
         else
-            previousApplicationRestoreTimer = nil
-            local finalFrontApp = application.frontmostApplication()
-            if not finalFrontApp or finalFrontApp:pid() ~= targetPid then
-                logger.e("Could not restore previous application after "
-                    .. maxAttempts .. " attempts: " .. tostring(app:name()))
-            else
-                logger.w("Previous app activated but original window could not be confirmed; no sibling windows were raised")
-            end
+            finish(false, "Could not confirm restoration of the previous window after "
+                .. maxAttempts .. " attempts: " .. tostring(app:name()))
         end
     end
 
@@ -2138,13 +2133,22 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     -- Restore the app that was frontmost before the panel opened before any
     -- paste keystrokes are sent.
     -- Reuse the same delayed app + specific-window restoration used by panel
-    -- dismissal before starting a sequence of paste keystrokes.
-    activatePreviousApplication()
-    hs.timer.doAfter(0.55, function()
-        -- The web panel lists newest-first; the recursive routine walks
-        -- selected row -> newest row, which pastes oldest-to-newest.
-        pasteAllWithDelimiterRecursionVersion(startRow)
+    -- dismissal, and only begin pasting once that restoration has settled.
+    local started = activatePreviousApplication(function(restored)
+        if not restored then
+            logger.w("Paste-all proceeding after window restore could not be confirmed")
+        end
+        hs.timer.doAfter(0.12, function()
+            -- The web panel lists newest-first; the recursive routine walks
+            -- selected row -> newest row, which pastes oldest-to-newest.
+            pasteAllWithDelimiterRecursionVersion(startRow)
+        end)
     end)
+    if not started then
+        hs.timer.doAfter(0.35, function()
+            pasteAllWithDelimiterRecursionVersion(startRow)
+        end)
+    end
 end
 
 -- Function to show clipboard history
@@ -2167,6 +2171,10 @@ function showClipboardHistory()
 
     -- Keep the current app as the paste destination before showing the panel.
     local frontApp = application.frontmostApplication()
+    -- Clear a stale window target before capturing the next panel session.
+    previousWindow = nil
+    previousWindowId = nil
+    previousWindowFrame = nil
     if frontApp and frontApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
         previousApplication = frontApp
         previousApplicationPid = frontApp:pid()
