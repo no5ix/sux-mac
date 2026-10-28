@@ -131,14 +131,22 @@ local function atomicWrite(path, data)
 end
 
 local function saveImageFile(dateKey, item, timestamp)
+    if not item then return nil end
+    local sizeOK, size = pcall(function() return item:size() end)
+    local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
+    if not sizeOK or width <= 0 or height <= 0
+        or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION then
+        logger.w(string.format("Refusing clipboard image with invalid dimensions (%dx%d)", width, height))
+        return nil
+    end
     local directory = historyImageDirectory(dateKey)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) or not ensureDirectory(directory) then
         return nil
     end
 
-    -- Use hs.image's native file writer. Encoding the entire screenshot to a
-    -- base64 data URL and immediately decoding it again creates large temporary
-    -- strings and stalls the pasteboard watcher for high-resolution captures.
+    -- Use hs.image's native file writer. Avoid base64 round trips, which can
+    -- multiply peak memory for high-resolution screenshots.
+    -- Save only after validating the native image dimensions.
     local baseName = os.date("%Y%m%d%H%M%S", timestamp)
     local path = directory .. "/" .. baseName .. ".png"
     local counter = 1
@@ -528,12 +536,12 @@ function pasteboardToClipboard(item_type,item)
         return
     end
 
-    -- Ignore overlapping image callbacks. Screen captures may be large, and
-    -- processing a second bitmap before releasing the first doubles the peak
-    -- allocation. The pasteboard watcher will notify us again if the clipboard
-    -- changes after the current capture has been handled.
+    -- Hammerspoon may deliver rapid duplicate callbacks for one screenshot.
+    -- Ignore re-entry while the current image is being saved and thumbnailed.
     if imageCaptureInProgress then
         logger.i("Skipping overlapping clipboard image capture while processing is in progress")
+        item = nil
+        collectgarbage("collect")
         return
     end
     imageCaptureInProgress = true
