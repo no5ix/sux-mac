@@ -1474,23 +1474,36 @@ local function pasteHistoryEntry(index)
             return
         end
         pasteboard.writeObjects(image)
+        image = nil
     end
+
+    -- Use the same window-aware restoration path as panel dismissal. Hiding the
+    -- panel first is not enough: let its Space/focus transition settle, then
+    -- explicitly focus the window that was active before the panel opened.
     if clipboard_webview then clipboard_webview:hide() end
-    hs.timer.doAfter(0.15, function()
-        -- Restore focus to the app that was active before the history panel opened.
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
+    local started = activatePreviousApplication(function(restored)
+        if not restored then
+            -- Never send Cmd+V blindly if the original window could not be
+            -- restored; that could paste into an unrelated window.
+            logger.e("Clipboard paste cancelled because the original destination window could not be restored")
+            hs.alert.show("Could not restore the original window. Paste cancelled.")
+            pasteboard_watcher:start()
+            return
         end
-        hs.timer.doAfter(0.35, function()
+        hs.timer.doAfter(0.12, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
                 restoreNewestClipContent()
                 pasteboard_watcher:start()
                 menuData = {}
-                previousApplication = nil
             end)
         end)
     end)
+    if not started then
+        logger.e("Clipboard paste cancelled because no valid destination application was captured")
+        hs.alert.show("Could not restore the original window. Paste cancelled.")
+        pasteboard_watcher:start()
+    end
 end
 
 local function updateClipboardPanel(query,kind,offset,append)
