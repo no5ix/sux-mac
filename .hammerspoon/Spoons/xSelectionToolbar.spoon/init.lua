@@ -968,11 +968,16 @@ function obj:start()
             return
         end
 
-        timer.doAfter(0.35, function()
-            local checkOK, newCount, copied = pcall(function()
-                return pasteboard.changeCount(), trim(pasteboard.getContents())
-            end)
-            pendingCapture = false
+        logger.d("Synthetic Cmd+C keyStroke returned successfully; scheduling clipboard verification")
+        local timerOK, timerError = pcall(function()
+            timer.doAfter(0.35, function()
+                logger.d("Clipboard verification timer fired after synthetic Cmd+C")
+                local checkOK, newCount, copied = pcall(function()
+                    local count = pasteboard.changeCount()
+                    local contents = trim(pasteboard.getContents())
+                    return count, contents
+                end)
+                pendingCapture = false
             if not checkOK then
                 logger.e("Failed to read clipboard after Cmd+C: " .. tostring(newCount))
                 return
@@ -1006,9 +1011,14 @@ function obj:start()
                 return
             end
 
-            local shown = showIfSelection(copied)
-            logger.d(string.format("Selection toolbar display request completed: shown=%s", tostring(shown)))
+                local shown = showIfSelection(copied)
+                logger.d(string.format("Selection toolbar display request completed: shown=%s", tostring(shown)))
+            end)
         end)
+        if not timerOK then
+            pendingCapture = false
+            logger.e("Failed to schedule clipboard verification timer: " .. tostring(timerError))
+        end
     end
 
     local mouseDownPoint = nil
