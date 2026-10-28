@@ -133,10 +133,14 @@ end
 local function saveImageFile(dateKey, item, timestamp)
     if not item then return nil end
     local sizeOK, size = pcall(function() return item:size() end)
-    local width, height = tonumber(size and size.w) or 0, tonumber(size and size.h) or 0
-    if not sizeOK or width <= 0 or height <= 0
-        or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION then
-        logger.w(string.format("Refusing clipboard image with invalid dimensions (%dx%d)", width, height))
+    local width = tonumber(size and size.w) or 0
+    local height = tonumber(size and size.h) or 0
+    if not sizeOK or width <= 0 or height <= 0 then
+        logger.w("Refusing clipboard image with invalid dimensions")
+        return nil
+    end
+    if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION then
+        logger.w(string.format("Refusing clipboard image with extreme dimensions (%dx%d)", width, height))
         return nil
     end
     local directory = historyImageDirectory(dateKey)
