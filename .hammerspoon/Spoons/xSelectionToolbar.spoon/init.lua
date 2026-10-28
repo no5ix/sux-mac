@@ -1030,6 +1030,15 @@ function obj:start()
                     logger.e("Failed to restore previous clipboard data: " .. tostring(restoreResult))
                 else
                     logger.d("Restored previous clipboard data and all original flavors")
+                    local historySpoon = spoon.xClipboardHistory
+                    if historySpoon and type(historySpoon.markCurrentClipboardAsAlreadySeen) == "function" then
+                        local markOK, markErr = pcall(function()
+                            historySpoon:markCurrentClipboardAsAlreadySeen()
+                        end)
+                        if not markOK then
+                            logger.w("Unable to mark restored clipboard as already observed: " .. tostring(markErr))
+                        end
+                    end
                 end
             end
 
