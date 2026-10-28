@@ -61,9 +61,23 @@ local function startMacScreenshot()
 end
 
 local function startPreferredScreenshot()
+    -- Guard xSelectionToolbar before sending WeChat's screenshot shortcut.
+    -- Use a deadline-based shared flag plus timer so reloads/missed events recover.
+    local function beginWeChatScreenshotGuard()
+        _G.xWeChatScreenshotGuardUntil = hs.timer.secondsSinceEpoch() + 30
+        if _G.xWeChatScreenshotGuardTimer then
+            _G.xWeChatScreenshotGuardTimer:stop()
+        end
+        _G.xWeChatScreenshotGuardTimer = hs.timer.doAfter(30, function()
+            _G.xWeChatScreenshotGuardUntil = nil
+            _G.xWeChatScreenshotGuardTimer = nil
+        end)
+    end
+
     -- local wechat = hs.application.get("微信") or hs.application.get("WeChat")
     local wechat = hs.application.get("WeChat")
     if wechat then
+        beginWeChatScreenshotGuard()
         -- Activate WeChat before sending its screenshot shortcut, so it is
         -- handled by WeChat even when another application was frontmost.
         -- wechat:activate()
