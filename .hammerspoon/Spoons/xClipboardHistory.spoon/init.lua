@@ -1524,6 +1524,13 @@ document.addEventListener('keydown', event => {
   bridge('toggleNativeImagePreview', Number(pointerItem.dataset.index || 0), '');
 }, true);
 
+document.addEventListener('keyup', event => {
+  if (event.code === 'Space' || event.key === ' ') {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
+
 // Do not preselect the first card or scroll the grid on open. Tab should
 // only move focus to the results container; the user chooses a row with arrows.
 clearRowSelection();
