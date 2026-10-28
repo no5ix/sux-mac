@@ -1507,6 +1507,14 @@ document.addEventListener('keydown', event => {
     if (item) bridge('paste', Number(item.dataset.index || 0), '');
   }
 });
+// Track the image card under the pointer so Space can preview it even when
+// the keyboard focus is in the search field or results container.
+window.clipboardHoveredImageItem = null;
+document.addEventListener('mousemove', event => {
+  const hovered = document.elementFromPoint(event.clientX, event.clientY);
+  window.clipboardHoveredImageItem = hovered && hovered.closest('.image-item[data-action="paste"]');
+}, { passive: true });
+
 // Do not preselect the first card or scroll the grid on open. Tab should
 // only move focus to the results container; the user chooses a row with arrows.
 clearRowSelection();
