@@ -1044,6 +1044,7 @@ function obj:start()
     local lastText = ""
     local lastShownAt = 0
     local toolbarExpiryTimer = nil
+    local toolbarHoverPollTimer = nil
     local pendingCapture = false
     local eventTapHealthTimer = nil
 
@@ -1099,6 +1100,31 @@ function obj:start()
             toolbarShownAt = now
             scheduleToolbarExpiry()
         end
+    end
+
+    -- Track pointer movement continuously. Mouse-up handlers alone do not fire
+    -- when the user simply moves the pointer over the toolbar, so they cannot
+    -- reliably pause the expiry countdown.
+    local function startToolbarHoverPolling()
+        if toolbarHoverPollTimer then
+            toolbarHoverPollTimer:stop()
+            toolbarHoverPollTimer = nil
+        end
+        toolbarHoverPollTimer = timer.doEvery(0.05, function()
+            if not toolbar or not toolbar:isVisible() then
+                if toolbarHoverPollTimer then
+                    toolbarHoverPollTimer:stop()
+                    toolbarHoverPollTimer = nil
+                end
+                return
+            end
+
+            local point = hs.mouse.absolutePosition()
+            local frame = toolbar:frame()
+            local inside = point.x >= frame.x and point.x <= frame.x + frame.w
+                and point.y >= frame.y and point.y <= frame.y + frame.h
+            setToolbarHovering(inside)
+        end)
     end
     local captureSelectionFromClipboardFallback
 
@@ -1190,6 +1216,7 @@ function obj:start()
         toolbarShownAt = now
         toolbarHovering = false
         buildToolbar(value)
+        startToolbarHoverPolling()
         scheduleToolbarExpiry()
         return true
     end
