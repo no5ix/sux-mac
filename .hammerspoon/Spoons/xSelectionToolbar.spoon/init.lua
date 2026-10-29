@@ -731,7 +731,9 @@ local function showLocalAISettingsWindow()
     local html = [=[
 <!doctype html><html><head><meta charset="utf-8">
 <style>
-*{box-sizing:border-box}body{margin:0;padding:20px;background:#1d1f24;color:#f5f6f8;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+*{box-sizing:border-box}
+html,body{min-height:100%;background:#1d1f24}
+body{margin:0;padding:20px;background:#1d1f24;color:#f5f6f8;font:13px -apple-system,BlinkMacSystemFont,sans-serif;-webkit-user-select:text;user-select:text}
 h1{font-size:17px;margin:0 0 8px}p{color:#a4acba;margin:0 0 18px;line-height:1.45}
 label{display:block;font-weight:600;margin:12px 0 6px}
 input{width:100%;border:1px solid #414650;border-radius:8px;background:#272a31;color:#f5f6f8;padding:10px;font:13px -apple-system,BlinkMacSystemFont,sans-serif}
@@ -808,16 +810,29 @@ window.showStatus=value=>$('status').textContent=value||'';
         developerExtrasEnabled=false, javaScriptCanOpenWindowsAutomatically=false,
         transparent=false, shadow=true, opaque=true
     }, usercontent)
-    settingsWindow:windowStyle({"titled","closable"})
+
+    -- Use a normal titled, closable, resizable window and explicitly activate it.
+    -- The explicit focus call is important: show() alone may leave a Hammerspoon
+    -- webview visible but unable to receive keyboard input.
+    settingsWindow:windowStyle({"titled","closable","resizable"})
     settingsWindow:windowTitle("Local AI Settings")
+    settingsWindow:allowTextEntry(true)
     settingsWindow:level(hs.drawing.windowLevels.normal)
+    settingsWindow:shadow(true)
     settingsWindow:html(html, "file:///")
     settingsWindow:show()
+    settingsWindow:bringToFront(true)
+    settingsWindow:hswindow():focus()
 
     local encoded = json.encode({localAISettings})
     local literal = type(encoded) == "table" and encoded[1] or encoded or "[{}]"
     timer.doAfter(0.15, function()
-        if settingsWindow then settingsWindow:evaluateJavaScript("window.setSettings(" .. literal .. "[0]);") end
+        if settingsWindow then
+            settingsWindow:bringToFront(true)
+            settingsWindow:hswindow():focus()
+            settingsWindow:evaluateJavaScript("window.setSettings(" .. literal .. "[0]);")
+            settingsWindow:evaluateJavaScript("document.getElementById('baseURL').focus();")
+        end
     end)
 end
 
