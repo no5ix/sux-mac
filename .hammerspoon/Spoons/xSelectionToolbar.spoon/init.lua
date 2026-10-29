@@ -584,7 +584,7 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
             translationJSCall("translationResult", lastTranslationResult) ..
             translationJSCall("translationStatus", windowTitle .. " · local AI")
         )
-    end, curlArgs
+    end, curlArgs)
     if not task then
         translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not start local AI request."))
         return
