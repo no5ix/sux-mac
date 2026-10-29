@@ -1047,22 +1047,58 @@ function obj:start()
     local pendingCapture = false
     local eventTapHealthTimer = nil
 
-    -- Hide the selection toolbar three seconds after showing it. Duplicate
-    -- selection detections must not keep extending the toolbar's lifetime.
+    -- The toolbar gets a full three seconds after its most recent display, and
+    -- hovering pauses expiry so the user can move onto a button without racing
+    -- the timer. Once the pointer leaves, the remaining time is scheduled.
     local TOOLBAR_VISIBLE_TIMEOUT = 3
+    local toolbarHovering = false
+    local toolbarShownAt = 0
+    local toolbarVisibleElapsedBeforeHover = 0
 
     local function scheduleToolbarExpiry()
         if toolbarExpiryTimer then
             toolbarExpiryTimer:stop()
             toolbarExpiryTimer = nil
         end
-        toolbarExpiryTimer = timer.doAfter(TOOLBAR_VISIBLE_TIMEOUT, function()
+        if toolbarHovering then return end
+        if not toolbar or not toolbar:isVisible() then return end
+
+        local elapsed = toolbarVisibleElapsedBeforeHover
+        if not toolbarHovering then
+            elapsed = elapsed + math.max(0, timer.secondsSinceEpoch() - toolbarShownAt)
+        end
+        local remaining = math.max(0, TOOLBAR_VISIBLE_TIMEOUT - elapsed)
+        toolbarExpiryTimer = timer.doAfter(remaining, function()
             toolbarExpiryTimer = nil
-            if toolbar and toolbar:isVisible()
-                and timer.secondsSinceEpoch() - lastShownAt >= TOOLBAR_VISIBLE_TIMEOUT then
+            if not toolbar or not toolbar:isVisible() then return end
+            if toolbarHovering then return end
+
+            local totalElapsed = toolbarVisibleElapsedBeforeHover
+                + math.max(0, timer.secondsSinceEpoch() - toolbarShownAt)
+            if totalElapsed >= TOOLBAR_VISIBLE_TIMEOUT then
                 hideToolbar()
+            else
+                scheduleToolbarExpiry()
             end
         end)
+    end
+
+    local function setToolbarHovering(isHovering)
+        if toolbarHovering == isHovering then return end
+        local now = timer.secondsSinceEpoch()
+        if isHovering then
+            toolbarVisibleElapsedBeforeHover = toolbarVisibleElapsedBeforeHover
+                + math.max(0, now - toolbarShownAt)
+            toolbarHovering = true
+            if toolbarExpiryTimer then
+                toolbarExpiryTimer:stop()
+                toolbarExpiryTimer = nil
+            end
+        else
+            toolbarHovering = false
+            toolbarShownAt = now
+            scheduleToolbarExpiry()
+        end
     end
     local captureSelectionFromClipboardFallback
 
@@ -1150,6 +1186,9 @@ function obj:start()
         selectedText = value
         lastText = value
         lastShownAt = now
+        toolbarVisibleElapsedBeforeHover = 0
+        toolbarShownAt = now
+        toolbarHovering = false
         buildToolbar(value)
         scheduleToolbarExpiry()
         return true
@@ -1162,7 +1201,12 @@ function obj:start()
             local frame = toolbar:frame()
             local inside = point.x >= frame.x and point.x <= frame.x + frame.w
                 and point.y >= frame.y and point.y <= frame.y + frame.h
-            if not inside then hideToolbar() end
+            if inside then
+                setToolbarHovering(true)
+            else
+                setToolbarHovering(false)
+                hideToolbar()
+            end
             return
         end
 
@@ -1272,9 +1316,10 @@ function obj:start()
                 if toolbar and toolbar:isVisible() then
                     local p = hs.mouse.absolutePosition()
                     local f = toolbar:frame()
-                    if p.x < f.x or p.x > f.x + f.w or p.y < f.y or p.y > f.y + f.h then
-                        hideToolbar()
-                    end
+                    local inside = p.x >= f.x and p.x <= f.x + f.w
+                        and p.y >= f.y and p.y <= f.y + f.h
+                    setToolbarHovering(inside)
+                    if not inside then hideToolbar() end
                     return
                 end
 
