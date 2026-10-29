@@ -852,7 +852,7 @@ local function showTranslationProviderChooser()
         {id="chatgpt", text="2. ChatGPT", subText=TRANSLATION_PROVIDER_CHOICE == "chatgpt" and "Current Provider" or "Switch to ChatGPT"}
     })
     chooser:show()
-}
+end
 
 local function runChatGPTWorkflow(text, promptTemplate)
     local prompt = tostring(promptTemplate or CHATGPT_PROMPT) .. "\n\n" .. text

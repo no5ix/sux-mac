@@ -12,3 +12,4 @@ node_modules/*
 tempCodeRunnerFile*.*
 .idea
 clipboard-history
+local_ai_settings.lua
