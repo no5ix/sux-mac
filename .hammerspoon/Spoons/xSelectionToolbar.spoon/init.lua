@@ -557,7 +557,7 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
         table.insert(curlArgs, 6, "Authorization: Bearer " .. apiKey)
         table.insert(curlArgs, 6, "-H")
     end
-    local task = hs.task.new("/usr/bin/curl", function(exitCode, stdOut, stdErr)
+    local function onLocalAIRequestComplete(exitCode, stdOut, stdErr)
         if requestId ~= translationRequestId or not translationWindow then return end
         translationRequestTask = nil
         if exitCode ~= 0 then
@@ -584,7 +584,9 @@ local function sendLocalPromptRequest(sourceText, promptTemplate, windowTitle)
             translationJSCall("translationResult", lastTranslationResult) ..
             translationJSCall("translationStatus", windowTitle .. " · local AI")
         )
-    end, curlArgs)
+    end
+
+    local task = hs.task.new("/usr/bin/curl", onLocalAIRequestComplete, curlArgs)
     if not task then
         translationWindow:evaluateJavaScript(translationJSCall("translationStatus", "Could not start local AI request."))
         return
