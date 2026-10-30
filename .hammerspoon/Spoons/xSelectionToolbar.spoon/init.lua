@@ -931,11 +931,25 @@ local function onToolbarMessage(message)
         pasteboard.setContents(text)
         hideToolbar()
     elseif action == "cut" then
-        -- Focus returns to the original application after the floating webview
-        -- is dismissed. Cmd+X then cuts the still-selected text in that app.
+        -- Capture the originating application and selection before dismissing
+        -- the floating toolbar. Bring that application back to the foreground,
+        -- then issue Cmd+X only after its text field has regained focus.
+        local originApp = hs.application.frontmostApplication()
+        if originApp and originApp:bundleID() == "org.hammerspoon.Hammerspoon" then
+            originApp = nil
+        end
+
         hideToolbar()
-        timer.doAfter(0.12, function()
-            eventtap.keyStroke({"cmd"}, "x", 0.08)
+
+        timer.doAfter(0.25, function()
+            if originApp then
+                originApp:activate(true)
+                timer.doAfter(0.15, function()
+                    eventtap.keyStroke({"cmd"}, "x", 0.08)
+                end)
+            else
+                hs.alert.show("Cannot cut: original application is unavailable")
+            end
         end)
     elseif action == "doubao" then
         local prompt = DOUbao_PROMPT .. " " .. text
