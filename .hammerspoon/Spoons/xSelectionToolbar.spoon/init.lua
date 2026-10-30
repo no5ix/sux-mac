@@ -209,11 +209,6 @@ local function getToolbarHTML(text)
     })
     addGroup(aiButtons)
     addGroup(webButtons)
-    addGroup({
-        makeButton("youdao-result", "Youdao Result", "🔍"),
-        makeButton("youdao-word", "Youdao Dictionary", "📚")
-    })
-
     local groupedButtonsHTML = table.concat(groups, '\n<span class="separator"></span>\n')
     local html = [=[
 <!doctype html>
@@ -992,12 +987,7 @@ local function onToolbarMessage(message)
                 break
             end
         end
-    elseif action == "youdao-result" then
-        hideToolbar()
-        hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/result?word=" .. urlEncode(text) .. "&lang=en" }):start()
-    elseif action == "youdao-word" then
-        hideToolbar()
-        hs.task.new("/usr/bin/open", nil, { "-a", "Safari", "https://dict.youdao.com/w/" .. urlEncode(text) }):start()
+
     end
 end
 local function buildToolbar(text)
@@ -1060,7 +1050,6 @@ local function buildToolbar(text)
         { { action = "copy" }, { action = "cut" } },
         { { action = "translation-provider" } },
         {},
-        { { action = "youdao-result" }, { action = "youdao-word" } },
     }
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         table.insert(toolbarGroups[2], { action = customActionName(config) })
