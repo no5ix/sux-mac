@@ -125,6 +125,26 @@ local CUSTOM_WEB_BUTTONS = {
         icon = "🔍",
         url = "https://www.google.com/search?q={{text}}",
     },
+    {
+        id = "youdaonew",
+        icon = "📚",
+        url = "https://dict.youdao.com/result?word={{text}}&lang=en",
+    },
+    {
+        id = "xiaohonghsu",
+        icon = "📕",
+        url = "https://www.xiaohongshu.com/search_result_ai?keyword={{text}}&source=web_explore_feed",
+    },
+    {
+        id = "youtube",
+        icon = "▶️",
+        url = "https://www.youtube.com/results?search_query={{text}}",
+    },
+    {
+        id = "youdaoold",
+        icon = "📔",
+        url = "https://dict.youdao.com/w/{{text}}",
+    },
     -- Add more websites here:
     -- { id = "reddit", icon = "👽", url = "https://www.reddit.com/search/?q={{text}}" },
 }
