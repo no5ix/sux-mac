@@ -115,6 +115,22 @@ local CUSTOM_AI_BUTTONS = {
     },
 }
 
+-- Website search buttons. Use {{text}} wherever the selected text belongs
+-- in the URL. The selected text is URL-encoded before substitution.
+local CUSTOM_WEB_BUTTONS = {
+    {
+        id = "google",
+        icon = "🔍",
+        url = "https://www.google.com/search?q={{text}}",
+    },
+    -- Add more websites here:
+    -- { id = "reddit", icon = "👽", url = "https://www.reddit.com/search/?q={{text}}" },
+}
+
+local function customWebActionName(config)
+    return "web-" .. tostring(config.id or ""):gsub("[^%w_-]", "")
+end
+
 local function htmlEscape(value)
     return tostring(value or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
         :gsub('"', "&quot;"):gsub("'", "&#39;")
@@ -160,16 +176,43 @@ local function getToolbarHTML(text)
     -- a single-element array and extract the JSON-escaped string literal.
     local encoded = json.encode({ text })
     local encodedText = type(encoded) == "table" and encoded[1] or encoded or '""'
-    local customButtons = {}
+    local function makeButton(action, label, icon)
+        return "<button data-action=\"" .. htmlEscape(action) ..
+            "\" aria-label=\"" .. htmlEscape(label) .. "\" title=\"" .. htmlEscape(label) ..
+            "\" onclick=\"action('" .. htmlEscape(action) .. "')\"><span class=\"icon\" aria-hidden=\"true\">" ..
+            htmlEscape(icon) .. "</span></button>"
+    end
+
+    local aiButtons = {
+        makeButton("translation-provider", "AI provider", "🔀")
+    }
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         local action = customActionName(config)
-        customButtons[#customButtons + 1] =
-            "<button class=\"custom-ai-button\" data-action=\"" .. htmlEscape(action) ..
-            "\" aria-label=\"" .. htmlEscape(config.label) .. "\" title=\"" .. htmlEscape(config.label) ..
-            "\" onclick=\"action('" .. htmlEscape(action) .. "')\"><span class=\"icon\" aria-hidden=\"true\">" ..
-            htmlEscape(config.icon) .. "</span></button>"
+        aiButtons[#aiButtons + 1] = makeButton(action, config.label or config.id, config.icon)
     end
-    local customButtonsHTML = table.concat(customButtons, "\n")
+
+    local webButtons = {}
+    for _, config in ipairs(CUSTOM_WEB_BUTTONS or {}) do
+        local action = customWebActionName(config)
+        webButtons[#webButtons + 1] = makeButton(action, config.id, config.icon)
+    end
+
+    local groups = {}
+    local function addGroup(buttons)
+        if #buttons > 0 then groups[#groups + 1] = table.concat(buttons, "\n") end
+    end
+    addGroup({
+        makeButton("copy", "Copy", "📋"),
+        makeButton("cut", "Cut", "✂️")
+    })
+    addGroup(aiButtons)
+    addGroup(webButtons)
+    addGroup({
+        makeButton("youdao-result", "Youdao Result", "🔍"),
+        makeButton("youdao-word", "Youdao Dictionary", "📚")
+    })
+
+    local groupedButtonsHTML = table.concat(groups, '\n<span class="separator"></span>\n')
     local html = [=[
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -189,20 +232,13 @@ button:active{background-color:var(--toolbar-active)!important}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
 </style>
 </head><body><div class="bar">
-<button data-action="copy" aria-label="Copy" title="Copy" onclick="action('copy')"><span class="icon" aria-hidden="true">📋</span></button>
-<!-- <button data-action="doubao" onclick="action('doubao')"><span class="icon" aria-hidden="true">✎</span> Proofread + translate</button> -->
-<button data-action="translation-provider" aria-label="Translation provider" title="Translation provider" onclick="action('translation-provider')"><span class="icon" aria-hidden="true">🔀</span></button>
-
-__CUSTOM_AI_BUTTONS__
-<span class="separator"></span>
-<button data-action="youdao-result" aria-label="Youdao Result" title="Youdao Result" onclick="action('youdao-result')"><span class="icon" aria-hidden="true">🔍</span></button>
-<button data-action="youdao-word" aria-label="Youdao Dictionary" title="Youdao Dictionary" onclick="action('youdao-word')"><span class="icon" aria-hidden="true">📚</span></button>
+__GROUPED_BUTTONS__
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 </script></body></html>
 ]=]
-    html = html:gsub("__CUSTOM_AI_BUTTONS__", function() return customButtonsHTML end)
+    html = html:gsub("__GROUPED_BUTTONS__", function() return groupedButtonsHTML end)
     return (html:gsub("__SELECTION_JSON__", function() return encodedText end))
 end
 local function urlEncode(text)
@@ -894,6 +930,13 @@ local function onToolbarMessage(message)
     if action == "copy" then
         pasteboard.setContents(text)
         hideToolbar()
+    elseif action == "cut" then
+        -- Focus returns to the original application after the floating webview
+        -- is dismissed. Cmd+X then cuts the still-selected text in that app.
+        hideToolbar()
+        timer.doAfter(0.12, function()
+            eventtap.keyStroke({"cmd"}, "x", 0.08)
+        end)
     elseif action == "doubao" then
         local prompt = DOUbao_PROMPT .. " " .. text
         pasteboard.setContents(prompt)
@@ -912,6 +955,22 @@ local function onToolbarMessage(message)
                     runChatGPTWorkflow(text, config.prompt)
                 else
                     showCustomAIWindow(text, config)
+                end
+                break
+            end
+        end
+    elseif type(action) == "string" and action:sub(1, 4) == "web-" then
+        local actionId = action:sub(5)
+        for _, config in ipairs(CUSTOM_WEB_BUTTONS or {}) do
+            if tostring(config.id):gsub("[^%w_-]", "") == actionId then
+                local url = tostring(config.url or ""):gsub("{{text}}", function()
+                    return urlEncode(text)
+                end)
+                hideToolbar()
+                if url:match("^https?://") then
+                    hs.task.new("/usr/bin/open", nil, {url}):start()
+                else
+                    hs.alert.show("Invalid web search URL: " .. tostring(config.id))
                 end
                 break
             end
@@ -979,14 +1038,37 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
-    -- The toolbar has five icon-only buttons and a separator. Add a safety allowance for WebKit subpixel rounding.
-    local buttonWidths = { 38, 38, 38, 38 } -- Copy, provider, Youdao Result, Youdao Dictionary
+    -- Keep the HTML and native hover hit-testing in exactly the same button order.
+    local toolbarGroups = {
+        { { action = "copy" }, { action = "cut" } },
+        { { action = "translation-provider" } },
+        {},
+        { { action = "youdao-result" }, { action = "youdao-word" } },
+    }
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
-        buttonWidths[#buttonWidths + 1] = 38
+        table.insert(toolbarGroups[2], { action = customActionName(config) })
     end
+    for _, config in ipairs(CUSTOM_WEB_BUTTONS or {}) do
+        table.insert(toolbarGroups[3], { action = customWebActionName(config) })
+    end
+
+    local buttonWidths = {}
+    local buttonActions = {}
+    local groupSeparatorWidth = 9 -- separator width plus side margins and following gap
     local gap, padding = 4, 6
-    local separatorWidthWithMargins = 5 -- 1px separator + 2px margins on both sides
-    local toolbarWidth = 2 + padding * 2 + gap * #buttonWidths + separatorWidthWithMargins
+    local visibleGroupCount = 0
+    for _, group in ipairs(toolbarGroups) do
+        if #group > 0 then
+            visibleGroupCount = visibleGroupCount + 1
+            for _, button in ipairs(group) do
+                buttonWidths[#buttonWidths + 1] = 38
+                buttonActions[#buttonActions + 1] = button.action
+            end
+        end
+    end
+    local separatorCount = math.max(0, visibleGroupCount - 1)
+    local toolbarWidth = 2 + padding * 2 + gap * #buttonWidths
+        + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 8
     local actualWidth = math.min(toolbarWidth, frame.w - 16)
@@ -1010,23 +1092,28 @@ local function buildToolbar(text)
         local target = nil
         if ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
-            local buttonActions = { "copy", "translation-provider" }
-            for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
-                buttonActions[#buttonActions + 1] = customActionName(config)
-            end
-            buttonActions[#buttonActions + 1] = "youdao-result"
-            buttonActions[#buttonActions + 1] = "youdao-word"
-            for i, name in ipairs(buttonActions) do
-                local width = buttonWidths[i]
-                if rx >= cursor and rx <= cursor + width then
-                    target = name
-                    break
+            local actionIndex = 1
+            for groupIndex, group in ipairs(toolbarGroups) do
+                if #group > 0 then
+                    for _ = 1, #group do
+                        local name = buttonActions[actionIndex]
+                        local width = buttonWidths[actionIndex]
+                        if rx >= cursor and rx <= cursor + width then
+                            target = name
+                            break
+                        end
+                        cursor = cursor + width + gap
+                        actionIndex = actionIndex + 1
+                    end
+                    if target then break end
+                    local hasLaterGroup = false
+                    for nextIndex = groupIndex + 1, #toolbarGroups do
+                        if #toolbarGroups[nextIndex] > 0 then hasLaterGroup = true; break end
+                    end
+                    if hasLaterGroup then cursor = cursor + groupSeparatorWidth end
                 end
-                cursor = cursor + width + gap
-                if i == 1 + #(CUSTOM_AI_BUTTONS or {}) then cursor = cursor + separatorWidthWithMargins + gap end
             end
         end
-
         if target ~= previousTarget then
             previousTarget = target
             local targetLiteral = target and string.format("%q", target) or "null"
