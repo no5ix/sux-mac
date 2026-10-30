@@ -1420,7 +1420,7 @@ function obj:start()
         local windows = app:allWindows()
         local count = #windows
 
-        if count > 1 then -- WeChat is running and in screenshot mode
+        if count >= 3 then -- WeChat is running and in screenshot mode
             return "active", count
         else -- WeChat is running or not,  but not in screenshot mode
             return "inactive", count
