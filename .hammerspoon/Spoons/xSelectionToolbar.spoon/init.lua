@@ -1305,6 +1305,8 @@ function obj:start()
         return ok and trim(value) or ""
     end
 
+    local mouseSelectionOriginApp = nil
+
     local function showIfSelection(value)
         value = trim(value)
         if value == "" then return false end
@@ -1419,7 +1421,6 @@ function obj:start()
 
     local mouseDownPoint = nil
     local mouseDragDistance = 0
-    local mouseSelectionOriginApp = nil
     mouseSelectionTap = hs.eventtap.new({
         hs.eventtap.event.types.leftMouseDown,
         hs.eventtap.event.types.leftMouseDragged,
