@@ -14,6 +14,8 @@ local appearancePoll = nil
 local toolbar = nil
 local selectionWatcher = nil
 local selectedText = ""
+-- App that owned the text selection before the floating toolbar was shown.
+local selectionOriginApp = nil
 
 local DOUbao_SHORTCUT = { "ctrl", "shift", "alt", "cmd" }
 local DOUbao_KEY = "o"
@@ -931,25 +933,26 @@ local function onToolbarMessage(message)
         pasteboard.setContents(text)
         hideToolbar()
     elseif action == "cut" then
-        -- Capture the originating application and selection before dismissing
-        -- the floating toolbar. Bring that application back to the foreground,
-        -- then issue Cmd+X only after its text field has regained focus.
-        local originApp = hs.application.frontmostApplication()
-        if originApp and originApp:bundleID() == "org.hammerspoon.Hammerspoon" then
-            originApp = nil
+        -- Use the application captured when the selection gesture began.
+        -- At button-click time frontmostApplication() is often Hammerspoon itself,
+        -- because the toolbar is a Hammerspoon webview.
+        local originApp = selectionOriginApp
+        if not originApp then
+            hs.alert.show("Cannot cut: source application was not captured")
+            return
         end
 
         hideToolbar()
-
         timer.doAfter(0.25, function()
-            if originApp then
-                originApp:activate(true)
-                timer.doAfter(0.15, function()
-                    eventtap.keyStroke({"cmd"}, "x", 0.08)
-                end)
-            else
-                hs.alert.show("Cannot cut: original application is unavailable")
+            local currentOrigin = hs.application.get(originApp:pid())
+            if not currentOrigin then
+                hs.alert.show("Cannot cut: source application is no longer running")
+                return
             end
+            currentOrigin:activate(true)
+            timer.doAfter(0.25, function()
+                eventtap.keyStroke({"cmd"}, "x", 0.08)
+            end)
         end)
     elseif action == "doubao" then
         local prompt = DOUbao_PROMPT .. " " .. text
@@ -1317,6 +1320,12 @@ function obj:start()
         -- the user selects the same text again quickly.
         selectedText = value
         lastText = value
+        -- Capture the source app before buildToolbar() creates/activates the
+        -- Hammerspoon webview. Prefer the app recorded at mouse-down.
+        local candidateApp = mouseSelectionOriginApp or hs.application.frontmostApplication()
+        if candidateApp and candidateApp:bundleID() ~= "org.hammerspoon.Hammerspoon" then
+            selectionOriginApp = candidateApp
+        end
         lastShownAt = now
         toolbarVisibleElapsedBeforeHover = 0
         toolbarShownAt = now
@@ -1410,6 +1419,7 @@ function obj:start()
 
     local mouseDownPoint = nil
     local mouseDragDistance = 0
+    local mouseSelectionOriginApp = nil
     mouseSelectionTap = hs.eventtap.new({
         hs.eventtap.event.types.leftMouseDown,
         hs.eventtap.event.types.leftMouseDragged,
@@ -1418,6 +1428,7 @@ function obj:start()
         local eventType = event:getType()
         if eventType == hs.eventtap.event.types.leftMouseDown then
             local p = hs.mouse.absolutePosition()
+            mouseSelectionOriginApp = hs.application.frontmostApplication()
             mouseDownPoint = {x=p.x, y=p.y}
             mouseDragDistance = 0
             return false
