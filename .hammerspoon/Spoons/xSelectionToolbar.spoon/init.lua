@@ -33,6 +33,7 @@ local CUSTOM_AI_BUTTONS = {
         prompt = [[
             Translate the input text into highly colloquial, natural-sounding Chinese, as if a native Chinese speaker were chatting casually with a friend.
 
+                - Organize the corrected text into separate paragraphs based on logical topic boundaries: group consecutive sentences that discuss the same topic or idea into one paragraph, and start a new paragraph whenever the subject or main idea changes. Each paragraph should contain no more than 2 sentences. A single sentence can form its own paragraph if it represents a distinct idea. 
                 - Use everyday spoken Chinese rather than formal, written, or textbook-style language
                 - Adapt expressions freely when necessary to make the translation sound natural in Chinese, while preserving the original meaning, tone, and intent
                 - Appropriately incorporate common Chinese conversational expressions, slang, interjections, and even mild profanity when they fit the context. For example, use expressions like “那差别可太他妈大了” when they naturally convey the intended meaning
@@ -53,8 +54,10 @@ local CUSTOM_AI_BUTTONS = {
         prompt = [[
             **Organize the speech-to-text content rules:**
             
+                - Organize the corrected text into separate paragraphs based on logical topic boundaries: group consecutive sentences that discuss the same topic or idea into one paragraph, and start a new paragraph whenever the subject or main idea changes. Each paragraph should contain no more than 2 sentences. A single sentence can form its own paragraph if it represents a distinct idea. 
                 - Proofread the original text and fix grammar, spelling, punctuation, and missing words with minimal changes. Strictly preserve the original meaning, word choices, and sentence structure. Do not rewrite, paraphrase, or improve the writing style. Only make changes necessary for grammatical correctness and natural readability. Remove all “um” and “uh” fillers and unnecessary pauses, and merge sentence fragments into complete, natural sentences where necessary.
                 - When the input text contains sequential or transitional markers such as "First," "Second," "Third," "Finally," or similar expressions, convert the relevant content into a numbered list (e.g., "1. ", "2. ", "3. "). Preserve the original meaning and wording as much as possible, ensuring that each list item represents a distinct point or step. Remove the original transitional markers when they become redundant after formatting.
+                - Always prioritize paragraph formatting over numbered lists unless the original text explicitly presents a sequence of distinct steps, instructions, or items. Maintain a consistent paragraph-based output format.
                 - only output the final text, without adding other content.   
 
             **Text to Process:**
