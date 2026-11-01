@@ -154,7 +154,7 @@ local function customWebActionName(config)
 end
 
 -- Detect a selected URL using the user's preferred indicators. A selection must
--- be a single token; ordinary text that merely mentions a domain is not enough.
+-- be a single URL token; a domain mentioned in ordinary prose does not qualify.
 local URL_INDICATORS = {
     "localhost:", "127.0.0.1", "192.168", "http://", "https://",
     ".com", ".net", ".cn", "www.", ".io", ".org", ".cc", ".tk",
@@ -164,39 +164,37 @@ local URL_INDICATORS = {
 local function detectSelectedURL(value)
     local candidate = trim(value)
     candidate = candidate:gsub("^[%(%[%{%<\"']+", "")
-    candidate = candidate:gsub("[%)%]%}%>.,;:!?'\"，。；：！？]+$", "")
+    candidate = candidate:gsub("[%)%]%}%>.,;:!?'\"]+$", "")
     if candidate == "" or candidate:find("%s") then return nil end
 
     local lower = string.lower(candidate)
-    local indicatorFound = false
+    local hasIndicator = false
     for _, indicator in ipairs(URL_INDICATORS) do
         if lower:find(indicator, 1, true) then
-            indicatorFound = true
+            hasIndicator = true
             break
         end
     end
-    if not indicatorFound then return nil end
+    if not hasIndicator then return nil end
 
     local normalized = candidate
     if lower:match("^https?://") then
-        -- Keep an explicitly supplied HTTP(S) scheme.
-    elseif lower:match("^www%.") or lower:match("^[%w%-%.]+%.[%a]+") 
-        or lower:match("^localhost:") or lower:match("^127%.0%.0%.1") 
-        or lower:match("^192%.168%.") then
+        -- Preserve the explicitly supplied HTTP(S) scheme.
+    elseif lower:match("^www%.") or lower:match("^localhost:")
+        or lower:match("^127%.0%.0%.1") or lower:match("^192%.168%.")
+        or lower:match("^[%w%-%.]+%.[%a]+") then
         normalized = "https://" .. candidate
     else
         return nil
     end
 
-    -- Reject unsupported schemes and malformed URL authority sections.
-    if normalized:find("^[%a][%w+%.%-]*://") and not normalized:match("^https?://") then
+    -- Only open HTTP(S). Reject other explicit schemes and malformed authorities.
+    if normalized:match("^[%a][%w+%.%-]*://") and not normalized:match("^https?://") then
         return nil
     end
     local authority = normalized:match("^https?://([^/%?#]+)")
     if not authority or authority == "" or authority:find("@", 1, true) then return nil end
     if authority:find("[^%w%.%-%:%[%]]") then return nil end
-    if authority:sub(1,1) == "." or authority:sub(-1) == "." then return nil end
-
     return normalized
 end
 
