@@ -153,53 +153,6 @@ local function customWebActionName(config)
     return "web-" .. tostring(config.id or ""):gsub("[^%w_-]", "")
 end
 
--- Detect a selected URL using the user's preferred indicators. A selection must
--- be a single URL token; a domain mentioned in ordinary prose does not qualify.
-local URL_INDICATORS = {
-    "localhost:", "127.0.0.1", "192.168", "http://", "https://",
-    ".com", ".net", ".cn", "www.", ".io", ".org", ".cc", ".tk",
-    ".me", ".ru", ".xyz", ".tv",
-}
-
-local function detectSelectedURL(value)
-    -- Keep this helper independent of trim(): trim is declared later in this file,
-    -- so calling it here would resolve as a nil global in Lua.
-    local candidate = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    candidate = candidate:gsub("^[%(%[%{%<\"']+", "")
-    candidate = candidate:gsub("[%)%]%}%>.,;:!?'\"]+$", "")
-    if candidate == "" or candidate:find("%s") then return nil end
-
-    local lower = string.lower(candidate)
-    local hasIndicator = false
-    for _, indicator in ipairs(URL_INDICATORS) do
-        if lower:find(indicator, 1, true) then
-            hasIndicator = true
-            break
-        end
-    end
-    if not hasIndicator then return nil end
-
-    local normalized = candidate
-    if lower:match("^https?://") then
-        -- Preserve the explicitly supplied HTTP(S) scheme.
-    elseif lower:match("^www%.") or lower:match("^localhost:")
-        or lower:match("^127%.0%.0%.1") or lower:match("^192%.168%.")
-        or lower:match("^[%w%-%.]+%.[%a]+") then
-        normalized = "https://" .. candidate
-    else
-        return nil
-    end
-
-    -- Only open HTTP(S). Reject other explicit schemes and malformed authorities.
-    if normalized:match("^[%a][%w+%.%-]*://") and not normalized:match("^https?://") then
-        return nil
-    end
-    local authority = normalized:match("^https?://([^/%?#]+)")
-    if not authority or authority == "" or authority:find("@", 1, true) then return nil end
-    if authority:find("[^%w%.%-%:%[%]]") then return nil end
-    return normalized
-end
-
 local function htmlEscape(value)
     return tostring(value or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
         :gsub('"', "&quot;"):gsub("'", "&#39;")
@@ -272,12 +225,9 @@ local function getToolbarHTML(text)
     end
     local firstGroup = {
         makeButton("copy", "Copy", "📋"),
-        makeButton("cut", "Cut", "✂️")
+        makeButton("cut", "Cut", "✂️"),
+        makeButton("open-link", "Open Link", "↗️")
     }
-    local detectedURL = detectSelectedURL(text)
-    if detectedURL then
-        firstGroup[#firstGroup + 1] = makeButton("open-link", "Open Link", "↗️")
-    end
     addGroup(firstGroup)
     addGroup(aiButtons)
     addGroup(webButtons)
@@ -1000,13 +950,8 @@ local function onToolbarMessage(message)
         pasteboard.setContents(text)
         hideToolbar()
     elseif action == "open-link" then
-        local url = detectSelectedURL(text)
-        if not url then
-            hs.alert.show("The selected text is not a supported URL")
-            return
-        end
         hideToolbar()
-        hs.task.new("/usr/bin/open", nil, {url}):start()
+        hs.task.new("/usr/bin/open", nil, { text }):start()
     elseif action == "cut" then
         -- Use the application captured when the selection gesture began.
         -- At button-click time frontmostApplication() is often Hammerspoon itself,
@@ -1131,10 +1076,7 @@ local function buildToolbar(text)
         { { action = "translation-provider" } },
         {},
     }
-    local hasOpenLink = detectSelectedURL(text) ~= nil
-    if hasOpenLink then
-        table.insert(toolbarGroups[1], { action = "open-link" })
-    end
+    table.insert(toolbarGroups[1], { action = "open-link" })
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         table.insert(toolbarGroups[2], { action = customActionName(config) })
     end
