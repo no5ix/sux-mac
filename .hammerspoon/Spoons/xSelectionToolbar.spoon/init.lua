@@ -938,7 +938,7 @@ local function onToolbarMessage(message)
         return
     end
     local action = message.action
-    local textValue = message.text or selectedText
+    local textValue = action == "open-link" and selectedText or (message.text or selectedText)
     if type(textValue) == "table" then
         textValue = textValue[1] or textValue.text or ""
     end
@@ -950,8 +950,30 @@ local function onToolbarMessage(message)
         pasteboard.setContents(text)
         hideToolbar()
     elseif action == "open-link" then
+        -- Treat every selection as a browser destination. If it has no URI
+        -- scheme, assume HTTPS; do not validate the host or path.
+        local destination = text
+        if not destination:match("^[%a][%w+%.%-]*://") then
+            destination = "https://" .. destination
+        end
+
         hideToolbar()
-        hs.task.new("/usr/bin/open", nil, { text }):start()
+        local task = hs.task.new("/usr/bin/open", function(exitCode, stdOut, stdErr)
+            if exitCode ~= 0 then
+                logger.e("Could not open selected text: " .. tostring(stdErr or stdOut or exitCode))
+                hs.alert.show("Could not open selected text in the default browser")
+            end
+        end, { destination })
+        if not task then
+            logger.e("Failed to create macOS open task")
+            hs.alert.show("Could not launch the default browser")
+            return
+        end
+        local started = task:start()
+        if not started then
+            logger.e("Failed to start macOS open task")
+            hs.alert.show("Could not launch the default browser")
+        end
     elseif action == "cut" then
         -- Use the application captured when the selection gesture began.
         -- At button-click time frontmostApplication() is often Hammerspoon itself,
