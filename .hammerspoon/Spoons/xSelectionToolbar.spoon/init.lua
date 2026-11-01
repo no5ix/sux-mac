@@ -162,7 +162,9 @@ local URL_INDICATORS = {
 }
 
 local function detectSelectedURL(value)
-    local candidate = trim(value)
+    -- Keep this helper independent of trim(): trim is declared later in this file,
+    -- so calling it here would resolve as a nil global in Lua.
+    local candidate = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
     candidate = candidate:gsub("^[%(%[%{%<\"']+", "")
     candidate = candidate:gsub("[%)%]%}%>.,;:!?'\"]+$", "")
     if candidate == "" or candidate:find("%s") then return nil end
