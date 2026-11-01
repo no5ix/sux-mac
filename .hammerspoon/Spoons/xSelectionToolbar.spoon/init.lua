@@ -153,6 +153,53 @@ local function customWebActionName(config)
     return "web-" .. tostring(config.id or ""):gsub("[^%w_-]", "")
 end
 
+-- Detect a selected URL using the user's preferred indicators. A selection must
+-- be a single token; ordinary text that merely mentions a domain is not enough.
+local URL_INDICATORS = {
+    "localhost:", "127.0.0.1", "192.168", "http://", "https://",
+    ".com", ".net", ".cn", "www.", ".io", ".org", ".cc", ".tk",
+    ".me", ".ru", ".xyz", ".tv",
+}
+
+local function detectSelectedURL(value)
+    local candidate = trim(value)
+    candidate = candidate:gsub("^[%(%[%{%<\"']+", "")
+    candidate = candidate:gsub("[%)%]%}%>.,;:!?'\"，。；：！？]+$", "")
+    if candidate == "" or candidate:find("%s") then return nil end
+
+    local lower = string.lower(candidate)
+    local indicatorFound = false
+    for _, indicator in ipairs(URL_INDICATORS) do
+        if lower:find(indicator, 1, true) then
+            indicatorFound = true
+            break
+        end
+    end
+    if not indicatorFound then return nil end
+
+    local normalized = candidate
+    if lower:match("^https?://") then
+        -- Keep an explicitly supplied HTTP(S) scheme.
+    elseif lower:match("^www%.") or lower:match("^[%w%-%.]+%.[%a]+") 
+        or lower:match("^localhost:") or lower:match("^127%.0%.0%.1") 
+        or lower:match("^192%.168%.") then
+        normalized = "https://" .. candidate
+    else
+        return nil
+    end
+
+    -- Reject unsupported schemes and malformed URL authority sections.
+    if normalized:find("^[%a][%w+%.%-]*://") and not normalized:match("^https?://") then
+        return nil
+    end
+    local authority = normalized:match("^https?://([^/%?#]+)")
+    if not authority or authority == "" or authority:find("@", 1, true) then return nil end
+    if authority:find("[^%w%.%-%:%[%]]") then return nil end
+    if authority:sub(1,1) == "." or authority:sub(-1) == "." then return nil end
+
+    return normalized
+end
+
 local function htmlEscape(value)
     return tostring(value or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
         :gsub('"', "&quot;"):gsub("'", "&#39;")
@@ -223,10 +270,15 @@ local function getToolbarHTML(text)
     local function addGroup(buttons)
         if #buttons > 0 then groups[#groups + 1] = table.concat(buttons, "\n") end
     end
-    addGroup({
+    local firstGroup = {
         makeButton("copy", "Copy", "📋"),
         makeButton("cut", "Cut", "✂️")
-    })
+    }
+    local detectedURL = detectSelectedURL(text)
+    if detectedURL then
+        firstGroup[#firstGroup + 1] = makeButton("open-link", "Open Link", "↗️")
+    end
+    addGroup(firstGroup)
     addGroup(aiButtons)
     addGroup(webButtons)
     local groupedButtonsHTML = table.concat(groups, '\n<span class="separator"></span>\n')
@@ -947,6 +999,14 @@ local function onToolbarMessage(message)
     if action == "copy" then
         pasteboard.setContents(text)
         hideToolbar()
+    elseif action == "open-link" then
+        local url = detectSelectedURL(text)
+        if not url then
+            hs.alert.show("The selected text is not a supported URL")
+            return
+        end
+        hideToolbar()
+        hs.task.new("/usr/bin/open", nil, {url}):start()
     elseif action == "cut" then
         -- Use the application captured when the selection gesture began.
         -- At button-click time frontmostApplication() is often Hammerspoon itself,
@@ -1071,6 +1131,10 @@ local function buildToolbar(text)
         { { action = "translation-provider" } },
         {},
     }
+    local hasOpenLink = detectSelectedURL(text) ~= nil
+    if hasOpenLink then
+        table.insert(toolbarGroups[1], { action = "open-link" })
+    end
     for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
         table.insert(toolbarGroups[2], { action = customActionName(config) })
     end
