@@ -1458,6 +1458,19 @@ function obj:start()
 
     local mouseDownPoint = nil
     local mouseDragDistance = 0
+
+    -- Read the coordinates from the event itself. Querying hs.mouse from inside
+    -- an event-tap callback can lag behind the event being delivered, causing
+    -- short or fast selection drags to be misclassified as ordinary clicks.
+    local function eventPoint(event)
+        local ok, point = pcall(function() return event:location() end)
+        if ok and point and point.x and point.y then
+            return { x = point.x, y = point.y }
+        end
+        local point = hs.mouse.absolutePosition()
+        return { x = point.x, y = point.y }
+    end
+
     mouseSelectionTap = hs.eventtap.new({
         hs.eventtap.event.types.leftMouseDown,
         hs.eventtap.event.types.leftMouseDragged,
@@ -1465,20 +1478,23 @@ function obj:start()
     }, function(event)
         local eventType = event:getType()
         if eventType == hs.eventtap.event.types.leftMouseDown then
-            local p = hs.mouse.absolutePosition()
+            local p = eventPoint(event)
             mouseSelectionOriginApp = hs.application.frontmostApplication()
-            mouseDownPoint = {x=p.x, y=p.y}
+            mouseDownPoint = p
             mouseDragDistance = 0
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseDragged then
             if mouseDownPoint then
-                local p = hs.mouse.absolutePosition()
+                local p = eventPoint(event)
                 local dx, dy = p.x - mouseDownPoint.x, p.y - mouseDownPoint.y
                 mouseDragDistance = math.max(mouseDragDistance, math.sqrt(dx * dx + dy * dy))
             end
             return false
         elseif eventType == hs.eventtap.event.types.leftMouseUp then
             local didDrag = mouseDragDistance >= 4
+            if didDrag then
+                logger.d(string.format("Mouse selection drag detected (distance=%.1fpx)", mouseDragDistance))
+            end
             mouseDownPoint = nil
             mouseDragDistance = 0
 
@@ -1515,13 +1531,16 @@ function obj:start()
                     local value = selectionFromAccessibility()
                     if showIfSelection(value) then return end
 
-                    -- AXSelectedText can lag behind mouse-up in browsers and other
-                    -- apps. Retry for ~320 ms; only then use clipboard fallback
-                    -- for an actual drag so normal clicks never synthesize Cmd+C.
-                    if attempts < 4 then
-                        timer.doAfter(0.08, retrySelectionRead)
+                    -- Accessibility selection updates asynchronously in some apps.
+                    -- Allow a longer settling window before falling back to a
+                    -- synthetic copy for a confirmed drag.
+                    if attempts < 9 then
+                        timer.doAfter(0.075, retrySelectionRead)
                     elseif didDrag then
+                        logger.d("Accessibility selection unavailable after retries; using clipboard fallback")
                         captureSelectionFromClipboardFallback()
+                    else
+                        logger.d("No selection detected after mouse-up; no drag fallback was needed")
                     end
                 end
                 retrySelectionRead()
@@ -1535,7 +1554,7 @@ function obj:start()
 
     -- Recover if macOS disables the event tap temporarily. This timer also emits
     -- a diagnostic only when it observes a disabled tap, avoiding noisy logs.
-    eventTapHealthTimer = timer.doEvery(5, function()
+    eventTapHealthTimer = timer.doEvery(1, function()
         if not mouseSelectionTap then
             if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
             return
