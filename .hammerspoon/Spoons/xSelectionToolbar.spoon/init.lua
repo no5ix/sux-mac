@@ -1448,11 +1448,13 @@ function obj:start()
         local windows = app:allWindows()
         local count = #windows
 
-        if count >= 3 then -- WeChat is running and in screenshot mode
+        -- Three windows can occur during ordinary WeChat use. Treat only
+        -- four or more windows as the stronger screenshot-overlay signal so
+        -- normal text selections are not discarded because of a false positive.
+        if count >= 4 then
             return "active", count
-        else -- WeChat is running or not,  but not in screenshot mode
-            return "inactive", count
         end
+        return "inactive", count
     end
 
 
@@ -1516,9 +1518,9 @@ function obj:start()
                     if showIfSelection(value) then return end
 
                     -- AXSelectedText can lag behind mouse-up in browsers and other
-                    -- apps. Retry for ~320 ms; only then use clipboard fallback
+                    -- apps. Retry for ~640 ms before using clipboard fallback
                     -- for an actual drag so normal clicks never synthesize Cmd+C.
-                    if attempts < 4 then
+                    if attempts < 8 then
                         timer.doAfter(0.08, retrySelectionRead)
                     elseif didDrag then
                         captureSelectionFromClipboardFallback()
@@ -1535,7 +1537,9 @@ function obj:start()
 
     -- Recover if macOS disables the event tap temporarily. This timer also emits
     -- a diagnostic only when it observes a disabled tap, avoiding noisy logs.
-    eventTapHealthTimer = timer.doEvery(5, function()
+    -- Check frequently because a disabled event tap misses mouse-up events;
+    -- a five-second recovery interval can lose several selection gestures.
+    eventTapHealthTimer = timer.doEvery(1, function()
         if not mouseSelectionTap then
             if eventTapHealthTimer then eventTapHealthTimer:stop(); eventTapHealthTimer = nil end
             return
