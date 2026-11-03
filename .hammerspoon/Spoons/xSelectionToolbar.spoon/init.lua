@@ -1433,6 +1433,8 @@ function obj:start()
                 if selection ~= "" and not looksLikeImagePayload(selection) then
                     showIfSelection(selection)
                 end
+            else
+                logger.d("Clipboard fallback copy did not yield a valid text selection" .. (copied ~= "" and " (copied text length=" .. tostring(#copied) .. ")" or "") .. newCount ~= oldCount and " (changeCount=" .. tostring(newCount) .. ")" or "" .. isPlainText and "" or " (not plain text)")
             end
         end)
     end
@@ -1518,26 +1520,40 @@ function obj:start()
                         and p.y >= f.y and p.y <= f.y + f.h
                     setToolbarHovering(inside)
                     if not inside then hideToolbar() end
+                    print(string.format(
+                        "Mouse-up after selection drag; toolbar is visible, pointer inside=%s",
+                        tostring(inside)
+                    ))
                     return
                 end
 
                 local attempts = 0
                 local function retrySelectionRead()
-                    if toolbar and toolbar:isVisible() then return end
+                    if toolbar and toolbar:isVisible() then
+                        print("Toolbar is visible, skipping selection read")
+                        return
+                    end
                     local app = hs.application.frontmostApplication()
-                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+                    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then
+                        print("Frontmost app is Hammerspoon, skipping selection read")
+                        return
+                     end
 
                     attempts = attempts + 1
-                    local value = selectionFromAccessibility()
-                    if showIfSelection(value) then return end
+                    -- local value = selectionFromAccessibility()
+                    -- if showIfSelection(value) then
+                    --     print("Selection detected, showing toolbar")
+                    --     return  
+                    -- end
 
                     -- Accessibility selection updates asynchronously in some apps.
                     -- Allow a longer settling window before falling back to a
                     -- synthetic copy for a confirmed drag.
-                    if attempts < 9 then
-                        timer.doAfter(0.075, retrySelectionRead)
-                    elseif didDrag then
-                        logger.d("Accessibility selection unavailable after retries; using clipboard fallback")
+                    -- if attempts < 3 then
+                        -- timer.doAfter(0.08, retrySelectionRead)
+                    -- else
+                    if didDrag then
+                        logger.d("abandon Accessibility selection; using clipboard fallback")
                         captureSelectionFromClipboardFallback()
                     else
                         logger.d("No selection detected after mouse-up; no drag fallback was needed")
