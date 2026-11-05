@@ -1346,13 +1346,16 @@ function obj:start()
 
     local function showIfSelection(value)
         value = trim(value)
-        if value == "" then return false end
+        if value == "" then 
+            print("Skipping empty selection")
+            return false end
         local now = hs.timer.secondsSinceEpoch()
         -- Suppress duplicate detections from the same gesture, but don't suppress
         -- later selections just because the selected text matches the previous one.
         if toolbar and toolbar:isVisible() and selectedText == value then
             -- Treat this as a duplicate event from the same selection gesture,
             -- not a new show request: do not reset the three-second countdown.
+            print("Skipping duplicate selection from the same gesture")
             return true
         end
         -- A hidden toolbar must never suppress a genuine new selection, even if
@@ -1372,6 +1375,7 @@ function obj:start()
         buildToolbar(value)
         startToolbarHoverPolling()
         scheduleToolbarExpiry()
+        print("Toolbar shown for selection (length=" .. tostring(#value) .. ")")
         return true
     end
 
@@ -1404,18 +1408,25 @@ function obj:start()
     end
 
     local function captureSelectionFromClipboardFallback()
-        if pendingCapture then return end
+        if pendingCapture then 
+            print("Pending capture in progress, skipping clipboard fallback")
+            return end
         local fallbackApp = hs.application.frontmostApplication()
-        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then return end
+        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then
+            print("Skipping clipboard fallback for Hammerspoon")
+            return end
         local appName = string.lower(fallbackApp:name() or "")
         local bundleID = string.lower(fallbackApp:bundleID() or "")
-        if bundleID == "com.apple.finder" or appName == "finder" then return end
+        if bundleID == "com.apple.finder" or appName == "finder" then
+            print("Skipping clipboard fallback for Finder")
+            return end
 
         pendingCapture = true
         local oldClipboard = pasteboard.getContents()
         local oldCount = pasteboard.changeCount()
         _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
         hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
+        print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
         timer.doAfter(0.22, function()
             local newCount = pasteboard.changeCount()
             local copied = trim(pasteboard.getContents())
@@ -1423,6 +1434,7 @@ function obj:start()
                 pasteboard.setContents(oldClipboard)
             end
             pendingCapture = false
+            print("Clipboard fallback copy completed (changeCount=" .. tostring(newCount) .. ", copied length=" .. tostring(#copied) .. ")")
 
             local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
                 and not copied:match("^file://")
@@ -1431,7 +1443,11 @@ function obj:start()
                 local axValue = selectionFromAccessibility()
                 local selection = trim(axValue ~= "" and axValue or copied)
                 if selection ~= "" and not looksLikeImagePayload(selection) then
+                    print("Clipboard fallback copy yielded valid text selection (length=" .. tostring(#selection) .. ")")
                     showIfSelection(selection)
+                else
+                    logger.d("Clipboard fallback copy yielded no valid text selection" .. (copied ~= "" and " (copied text length=" .. tostring(#copied) .. ")" or "") .. newCount ~= oldCount and " (changeCount=" .. tostring(newCount) .. ")" or "" .. isPlainText and "" or " (not plain text)")
+                    print("looksLikeImagePayload: " .. tostring(looksLikeImagePayload(copied)))
                 end
             else
                 logger.d("Clipboard fallback copy did not yield a valid text selection" .. (copied ~= "" and " (copied text length=" .. tostring(#copied) .. ")" or "") .. newCount ~= oldCount and " (changeCount=" .. tostring(newCount) .. ")" or "" .. isPlainText and "" or " (not plain text)")
