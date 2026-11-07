@@ -2331,6 +2331,8 @@ end
 -- Restore disk state before starting the watcher, so previous history is
 -- available immediately after Hammerspoon/Sux-Mac starts.
 runDailyCleanupIfNeeded()
+ensurePinnedStorage()
+if not fs.attributes(PINNED_HISTORY_PATH) then writePinnedHistory({}) end
 restorePersistentHistory()
 -- Also clean on the first clipboard notification after startup, since expired
 -- folders may have been created manually after the startup scan completed.
