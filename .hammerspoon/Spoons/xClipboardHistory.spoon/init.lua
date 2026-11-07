@@ -140,19 +140,11 @@ local PINNED_ROOT=HISTORY_ROOT.."/pinned"
 local PINNED_IMAGE_ROOT=PINNED_ROOT.."/pinned-images"
 local PINNED_THUMBNAIL_ROOT=PINNED_ROOT.."/pinned-thumbnails"
 local PINNED_HISTORY_PATH=PINNED_ROOT.."/pinned-history.json"
+local PINNED_MIGRATION_BACKUP_PATH=PINNED_HISTORY_PATH..".pre-migration.bak"
 local function ensurePinnedStorage() return ensureDirectory(HISTORY_ROOT) and ensureDirectory(PINNED_ROOT) and ensureDirectory(PINNED_IMAGE_ROOT) and ensureDirectory(PINNED_THUMBNAIL_ROOT) end
-local function readPinnedHistory()
- if not ensurePinnedStorage() then return {} end
- local f=io.open(PINNED_HISTORY_PATH,"rb"); if not f then return {} end
- local raw=f:read("*a"); f:close(); if not raw or raw=="" then return {} end
- local ok,data=pcall(json.decode,raw); if not ok or type(data)~="table" then logger.e("Invalid pinned history JSON"); return {} end
- return data
-end
-local function writePinnedHistory(records)
- if not ensurePinnedStorage() then return false end
- local ok,data=pcall(json.encode,records,true); return ok and type(data)=="string" and atomicWrite(PINNED_HISTORY_PATH,data) or false
-end
-
+-- Pinned records use the ordinary daily-history record shape. Pinned IO and
+-- record helpers are declared after metadataEntry() below, because pinned
+-- entries are built through that shared ordinary-history transformation.
 local function copyPinnedFile(sourcePath, destinationPath)
  if type(sourcePath)~="string" or type(destinationPath)~="string" then return false end
  local source,sourceError=io.open(sourcePath,"rb")
@@ -186,47 +178,6 @@ local function copyPinnedFile(sourcePath, destinationPath)
  if not copied then os.remove(destinationPath) end
  return copied
 end
-local function pinnedMetadata(r)
- if type(r)~="table" or type(r.id)~="string" then return nil end
- local ts=tonumber(r.ts); if not ts then return nil end
- local e={id=r.id,type=r.type,ts=ts,rowTs=ts,pinnedAt=tonumber(r.pinnedAt) or ts,dateKey=localDateKey(ts),isPinned=true}
- if r.type=="text" and type(r.contentPath)=="string" then e.contentPath=r.contentPath
- elseif r.type=="image" and type(r.imagePath)=="string" then e.imagePath=r.imagePath; e.thumbnailPath=r.thumbnailPath else return nil end
- return e
-end
-local function loadPinnedEntries()
- local out={}; for _,r in ipairs(readPinnedHistory()) do local e=pinnedMetadata(r); if e then out[#out+1]=e end end
- table.sort(out,function(a,b) if a.pinnedAt==b.pinnedAt then return a.ts>b.ts end return a.pinnedAt>b.pinnedAt end); return out
-end
-local function hydratePinnedEntry(e)
- if not e or not e.isPinned then return e end
- if e.type=="text" then local f=e.contentPath and io.open(e.contentPath,"rb"); if not f then return nil end; local v=f:read("*a"); f:close(); if type(v)~="string" then return nil end; e.content=v; e.data=v end
- return e
-end
-local function pinClipboardEntry(e)
- if not e or (e.type~="text" and e.type~="image") or e.isPinned then return false end
- if not ensurePinnedStorage() then return false end
- local records=readPinnedHistory(); local key=tostring(e.dateKey or localDateKey(e.ts))..":"..tostring(e.ts)..":"..e.type
- for _,r in ipairs(records) do if r.sourceKey==key then return true end end
- local id=tostring(math.floor(hs.timer.secondsSinceEpoch()*1000000)).."-"..tostring(#records+1)
- local r={id=id,type=e.type,ts=tonumber(e.ts or e.rowTs) or os.time(),pinnedAt=os.time(),sourceKey=key}
- if e.type=="text" then r.contentPath=PINNED_ROOT.."/"..id..".txt"; if not atomicWrite(r.contentPath,tostring(e.data or e.content or "")) then return false end
- else
-  if type(e.imagePath)~="string" or not fs.attributes(e.imagePath) then return false end
-  r.imagePath=PINNED_IMAGE_ROOT.."/"..id..".png"; local ok=copyPinnedFile(e.imagePath,r.imagePath); if not ok then logger.e("Pinned image copy failed: "..tostring(e.imagePath)); return false end
-  if type(e.thumbnailPath)=="string" and fs.attributes(e.thumbnailPath) then r.thumbnailPath=PINNED_THUMBNAIL_ROOT.."/"..id..".jpg"; if not copyPinnedFile(e.thumbnailPath,r.thumbnailPath) then r.thumbnailPath=nil end end
- end
- records[#records+1]=r
- if not writePinnedHistory(records) then if r.contentPath then os.remove(r.contentPath) end; if r.imagePath then os.remove(r.imagePath) end; if r.thumbnailPath then os.remove(r.thumbnailPath) end; return false end
- return true
-end
-local function unpinClipboardEntry(e)
- if not e or not e.id then return false end
- local kept,removed={},false
- for _,r in ipairs(readPinnedHistory()) do if r.id==e.id then removed=true; if r.contentPath then os.remove(r.contentPath) end; if r.imagePath then os.remove(r.imagePath) end; if r.thumbnailPath then os.remove(r.thumbnailPath) end else kept[#kept+1]=r end end
- return removed and writePinnedHistory(kept) or false
-end
-
 
 local function saveImageFile(dateKey, item, timestamp)
     if not item then return nil end
@@ -443,13 +394,343 @@ local function trimHistoryCache(limit)
     end
 end
 
-local function metadataEntry(record,dateKey)
+-- identity distinguishes records that share a timestamp and type, so pin
+-- deduplication and the pinned marker cannot confuse two distinct items.
+local function metadataEntry(record,dateKey,identity)
  local ts=tonumber(record and record.ts); if not ts then return nil end
- local e={type=record.type,ts=ts,rowTs=ts,dateKey=dateKey,sourceKey=tostring(dateKey)..":"..tostring(ts)..":"..tostring(record.type),isPinned=false}
+ local dayKey=type(dateKey)=="string" and dateKey or localDateKey(ts)
+ local e={type=record.type,ts=ts,rowTs=ts,dateKey=dayKey,sourceKey=tostring(dayKey)..":"..tostring(ts)..":"..tostring(record.type)..":"..tostring(identity or "")}
  if record.type=="text" and type(record.content)=="string" then e.content=record.content; e.data=record.content
  elseif record.type=="image" and type(record.imagePath)=="string" then e.imagePath=record.imagePath; e.thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil; e.thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
  else return nil end
  return e
+end
+
+-- Pinned storage: records are read through the same metadataEntry()
+-- transformation as ordinary history, so search, hydration, rendering,
+-- preview, copy, paste, and cleanup logic stay shared between collections.
+local function readPinnedHistoryRaw()
+    if not ensurePinnedStorage() then return nil end
+    local file = io.open(PINNED_HISTORY_PATH, "rb")
+    if not file then return nil end
+    local raw = file:read("*a")
+    file:close()
+    return raw
+end
+
+-- Returns nil (never an empty array) when the stored index cannot be decoded,
+-- so callers can distinguish "no pins" from "damaged pin data".
+local function decodePinnedRecords(raw)
+    if not raw or raw == "" then return {} end
+    local ok, records = pcall(json.decode, raw)
+    if not ok or type(records) ~= "table" then
+        logger.e("Invalid pinned history JSON; the existing file is preserved for recovery")
+        return nil
+    end
+    return records
+end
+
+local function readPinnedHistory()
+    return decodePinnedRecords(readPinnedHistoryRaw()) or {}
+end
+
+local function writePinnedHistory(records)
+    if not ensurePinnedStorage() then return false end
+    local ok, data = pcall(json.encode, records, true)
+    return ok and type(data) == "string" and atomicWrite(PINNED_HISTORY_PATH, data) or false
+end
+
+-- Pinned file removal must never reach ordinary history files.
+local function pathIsUnderPinned(path)
+    return type(path) == "string" and path ~= ""
+        and (path == PINNED_ROOT or path:sub(1, #PINNED_ROOT + 1) == PINNED_ROOT .. "/")
+end
+
+local function removePinnedFile(path)
+    if not pathIsUnderPinned(path) then
+        if type(path) == "string" and path ~= "" then
+            logger.w("Refusing to remove a pinned file outside the pinned root")
+        end
+        return false
+    end
+    os.remove(path)
+    return true
+end
+
+-- Maps an ordinary-history sourceKey to the pinned record id, so the ordinary
+-- view can offer Unpin without reading the pinned index per card.
+local pinnedSourceKeyCache = nil
+local function invalidatePinnedIndex() pinnedSourceKeyCache = nil end
+local function pinnedSourceKeyIndex()
+    if pinnedSourceKeyCache then return pinnedSourceKeyCache end
+    local index = {}
+    for _, record in ipairs(readPinnedHistory()) do
+        local key = type(record) == "table" and record.sourceKey
+        if type(key) == "string" and key ~= "" then index[key] = record.id end
+    end
+    pinnedSourceKeyCache = index
+    return index
+end
+
+local function pinnedIdForEntry(entry)
+    if not entry or type(entry.sourceKey) ~= "string" then return nil end
+    local index = pinnedSourceKeyIndex()
+    local id = index[entry.sourceKey]
+    if id == nil then
+        -- Legacy pinned keys were recorded without the record-identity suffix.
+        local prefix = entry.sourceKey:match("^(.-):[^:]*$")
+        if prefix then id = index[prefix] end
+    end
+    return id
+end
+
+local function pinnedRecordMatchesEntry(record, entry)
+    if type(record) ~= "table" or type(entry) ~= "table" then return false end
+    if type(entry.id) == "string" and record.id == entry.id then return true end
+    if type(record.sourceKey) ~= "string" or type(entry.sourceKey) ~= "string" then return false end
+    if record.sourceKey == entry.sourceKey then return true end
+    return record.sourceKey == entry.sourceKey:match("^(.-):[^:]*$")
+end
+
+-- Legacy text pins kept their payload in a per-item .txt file referenced by
+-- contentPath. Current pins store the text in the record's content field.
+local function legacyPinnedTextPayload(contentPath)
+    local file = io.open(contentPath, "rb")
+    if not file then return nil, false end
+    local payload = file:read("*a")
+    file:close()
+    if type(payload) ~= "string" then return nil, false end
+    return payload, true
+end
+
+-- Convert any pinned record (current or legacy) into the ordinary history
+-- record shape, carrying the pin-only fields through unchanged.
+local function pinnedRecordFields(record)
+    local fields = {
+        type = record.type,
+        ts = tonumber(record.ts),
+        id = record.id,
+        pinnedAt = record.pinnedAt,
+        sourceKey = record.sourceKey,
+    }
+    if record.type == "text" then
+        if type(record.content) == "string" then
+            fields.content = record.content
+        elseif type(record.contentPath) == "string" then
+            local payload, available = legacyPinnedTextPayload(record.contentPath)
+            fields.content = available and payload or ""
+            -- Keep the legacy reference when its file is missing so a later
+            -- reload can recover the payload instead of losing the record.
+            if not available then fields.contentPath = record.contentPath end
+        end
+    elseif record.type == "image" then
+        fields.imagePath = record.imagePath
+        fields.thumbnailPath = record.thumbnailPath
+        fields.thumbnailData = record.thumbnailData
+    end
+    return fields
+end
+
+local function pinnedMetadata(record)
+    if type(record) ~= "table" then return nil end
+    local entry = metadataEntry(pinnedRecordFields(record), nil, record.id)
+    if not entry then return nil end
+    entry.isPinned = true
+    entry.pinnedAt = tonumber(record.pinnedAt) or entry.ts
+    if type(record.id) == "string" then
+        entry.id = record.id
+    else
+        -- Stable identity for records written before identifiers existed.
+        entry.id = "pin-" .. tostring(entry.ts) .. "-" .. tostring(record.type)
+            .. "-" .. tostring(record.contentPath or record.imagePath or "")
+    end
+    return entry
+end
+
+local function loadPinnedEntries()
+    local out = {}
+    for _, record in ipairs(readPinnedHistory()) do
+        local entry = pinnedMetadata(record)
+        if entry then out[#out + 1] = entry end
+    end
+    table.sort(out, function(a, b)
+        if a.pinnedAt == b.pinnedAt then return a.ts > b.ts end
+        return a.pinnedAt > b.pinnedAt
+    end)
+    return out
+end
+
+-- Pinned text is stored in the JSON record, so the common case needs no disk
+-- hydration at all. The legacy per-item file path remains supported.
+local function hydratePinnedEntry(entry)
+    if not entry or not entry.isPinned then return entry end
+    if entry.type == "text" then
+        if type(entry.content) == "string" then
+            entry.data = entry.content
+            return entry
+        end
+        if type(entry.contentPath) == "string" then
+            local payload, available = legacyPinnedTextPayload(entry.contentPath)
+            if available then
+                entry.content = payload
+                entry.data = payload
+                return entry
+            end
+        end
+        logger.w("Pinned text payload is unavailable for this record")
+        return nil
+    end
+    return entry
+end
+
+local function pinClipboardEntry(entry)
+    if not entry or (entry.type ~= "text" and entry.type ~= "image") or entry.isPinned then return false end
+    if not ensurePinnedStorage() then return false end
+    local records = readPinnedHistory()
+    for _, record in ipairs(records) do
+        if pinnedRecordMatchesEntry(record, entry) then invalidatePinnedIndex(); return true end
+    end
+    local id = tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000)) .. "-" .. tostring(#records + 1)
+    local record = {
+        id = id,
+        type = entry.type,
+        ts = tonumber(entry.ts or entry.rowTs) or os.time(),
+        pinnedAt = os.time(),
+        sourceKey = entry.sourceKey,
+    }
+    if entry.type == "text" then
+        local payload = entry.content or entry.data
+        if type(payload) ~= "string" then
+            logger.e("Unable to pin a text record whose content is not loaded")
+            return false
+        end
+        -- Same as ordinary history: the full text lives in the JSON record.
+        record.content = payload
+    else
+        if type(entry.imagePath) ~= "string" or not fs.attributes(entry.imagePath) then
+            logger.e("Unable to pin an image whose source file is missing")
+            return false
+        end
+        record.sourcePath = entry.imagePath
+        record.imagePath = PINNED_IMAGE_ROOT .. "/" .. id .. ".png"
+        if not copyPinnedFile(entry.imagePath, record.imagePath) then
+            logger.e("Pinned image copy failed: " .. tostring(entry.imagePath))
+            removePinnedFile(record.imagePath)
+            return false
+        end
+        if type(entry.thumbnailPath) == "string" and fs.attributes(entry.thumbnailPath) then
+            local extension = entry.thumbnailPath:match("%.([%w]+)$") or "jpg"
+            record.thumbnailPath = PINNED_THUMBNAIL_ROOT .. "/" .. id .. "." .. extension
+            if not copyPinnedFile(entry.thumbnailPath, record.thumbnailPath) then
+                record.thumbnailPath = nil
+            end
+        end
+    end
+    records[#records + 1] = record
+    if not writePinnedHistory(records) then
+        removePinnedFile(record.imagePath)
+        removePinnedFile(record.thumbnailPath)
+        logger.e("Unable to persist the pinned history index")
+        return false
+    end
+    invalidatePinnedIndex()
+    return true
+end
+
+local function unpinClipboardEntry(entry)
+    if not entry then return false end
+    local kept, removedRecords = {}, {}
+    for _, record in ipairs(readPinnedHistory()) do
+        if pinnedRecordMatchesEntry(record, entry) then
+            removedRecords[#removedRecords + 1] = record
+        else
+            kept[#kept + 1] = record
+        end
+    end
+    if #removedRecords == 0 then return false end
+    if not writePinnedHistory(kept) then
+        logger.e("Unable to persist the pinned history index after unpin")
+        return false
+    end
+    -- Only pinned-owned files are removed; the ordinary source record and its
+    -- files are untouched by design.
+    for _, record in ipairs(removedRecords) do
+        removePinnedFile(record.contentPath)
+        removePinnedFile(record.imagePath)
+        removePinnedFile(record.thumbnailPath)
+    end
+    invalidatePinnedIndex()
+    return true
+end
+
+-- One-time conversion of legacy pinned records into the ordinary record shape.
+-- The migrated index is written atomically before any legacy payload file is
+-- removed, and a pre-migration backup is kept.
+local function migratePinnedHistory()
+    local raw = readPinnedHistoryRaw()
+    if not raw or raw == "" then return false end
+    local records = decodePinnedRecords(raw)
+    if not records then
+        logger.e("Pinned history migration skipped: the pinned JSON could not be decoded")
+        return false
+    end
+    local migrated, legacyFiles, changes = {}, {}, 0
+    for index, record in ipairs(records) do
+        if type(record) ~= "table" then
+            changes = changes + 1
+            logger.w("Removed a non-table entry from the pinned index during migration")
+        else
+            local migratedRecord = {}
+            for key, value in pairs(record) do migratedRecord[key] = value end
+            if migratedRecord.type == "text" and type(migratedRecord.content) ~= "string"
+                and type(migratedRecord.contentPath) == "string" then
+                local payload, available = legacyPinnedTextPayload(migratedRecord.contentPath)
+                if available then
+                    migratedRecord.content = payload
+                    legacyFiles[#legacyFiles + 1] = migratedRecord.contentPath
+                    migratedRecord.contentPath = nil
+                else
+                    -- Preserve the record and its reference: an unavailable
+                    -- payload must not delete data that may become readable.
+                    migratedRecord.content = ""
+                    logger.w("Pinned text payload file is missing; the record was preserved")
+                end
+                changes = changes + 1
+            end
+            if type(migratedRecord.id) ~= "string" then
+                migratedRecord.id = "pin-" .. tostring(migratedRecord.ts or 0) .. "-"
+                    .. tostring(migratedRecord.type) .. "-" .. tostring(index)
+                changes = changes + 1
+            end
+            if type(migratedRecord.pinnedAt) ~= "number" then
+                migratedRecord.pinnedAt = tonumber(migratedRecord.ts) or os.time()
+                changes = changes + 1
+            end
+            if type(migratedRecord.imagePath) == "string" and not fs.attributes(migratedRecord.imagePath) then
+                logger.w("Pinned image file is missing; the record and metadata were preserved")
+            end
+            migrated[#migrated + 1] = migratedRecord
+        end
+    end
+    if changes == 0 then return false end
+    copyPinnedFile(PINNED_HISTORY_PATH, PINNED_MIGRATION_BACKUP_PATH)
+    if not writePinnedHistory(migrated) then
+        logger.e("Pinned history migration failed; the previous index and payload files are unchanged")
+        return false
+    end
+    for _, path in ipairs(legacyFiles) do removePinnedFile(path) end
+    invalidatePinnedIndex()
+    collectgarbage("collect")
+    logger.i("Migrated pinned history to the ordinary history record schema")
+    return true
+end
+
+-- Shared hydration entry point: pinned text is already stored in the record,
+-- so only legacy pinned payload files need a disk read here.
+local function hydrateEntry(entry)
+    if not entry then return nil end
+    if entry.isPinned then return hydratePinnedEntry(entry) end
+    return entry
 end
 
 local function insertCacheEntry(entry)
@@ -471,9 +752,15 @@ local function restorePersistentHistory()
     local restored=0
     for _,dateKey in ipairs(dates) do
         local records=readDayHistory(dateKey)
-        table.sort(records,function(a,b)return (tonumber(a.ts) or 0)>(tonumber(b.ts) or 0) end)
-        for _,record in ipairs(records) do
-            local entry=metadataEntry(record,dateKey)
+        -- Keep each record's file position as its identity, then order the
+        -- pairs newest-first. Sorting records alone would renumber identities.
+        local ordered={}
+        for index,record in ipairs(records) do
+            ordered[#ordered+1]={record=record,index=index}
+        end
+        table.sort(ordered,function(a,b)return (tonumber(a.record.ts) or 0)>(tonumber(b.record.ts) or 0) end)
+        for _,item in ipairs(ordered) do
+            local entry=metadataEntry(item.record,dateKey,item.index)
             if entry then
                 local target=entry.type=="text" and text_clipboard_history or img_clipboard_history
                 target[#target+1]=entry
@@ -505,8 +792,6 @@ local function readImageAtPath(path)
 end
 
 local function makeThumbnailImage(original)
-
-local function hydrateEntry(entry) if not entry then return nil end; if entry.isPinned then return hydratePinnedEntry(entry) end; return entry end
     if not original then return nil end
 
     -- Avoid keeping the source NSImage, its bitmap, and its thumbnail alive
@@ -584,7 +869,7 @@ local function clearClipboardHistory()
         local function rmTree(p) local a=fs.attributes(p); if not a then return end; if a.mode=="directory" then for c in fs.dir(p) do if c~="." and c~=".." then rmTree(p.."/"..c) end end; os.remove(p) else os.remove(p) end end
         rmTree(PINNED_ROOT)
     end
-    ensurePinnedStorage(); writePinnedHistory({}); clipboardPinnedFilter=false
+    ensurePinnedStorage(); writePinnedHistory({}); invalidatePinnedIndex(); clipboardPinnedFilter=false
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -831,8 +1116,8 @@ local function persistentHistoryCount(dateFilter,kind)
                 if not kind or kind=="all" or entry.type==kind then count=count+1 end
             end
         else
-            for _,record in ipairs(readDayHistory(dateKey)) do
-                local entry=metadataEntry(record,dateKey)
+            for index,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey,index)
                 if entry and (not kind or kind=="all" or entry.type==kind) then count=count+1 end
             end
         end
@@ -849,8 +1134,8 @@ local function loadPersistentHistoryPage(offset,count,dateFilter,kind)
         local dayEntries=cached
         if not dayEntries then
             dayEntries={}
-            for _,record in ipairs(readDayHistory(dateKey)) do
-                local entry=metadataEntry(record,dateKey)
+            for index,record in ipairs(readDayHistory(dateKey)) do
+                local entry=metadataEntry(record,dateKey,index)
                 if entry then
                     dayEntries[#dayEntries+1]=entry
                 end
@@ -901,8 +1186,8 @@ local function loadPersistentDateHistory(dateKey,kind)
     local allEntries=dateHistoryCache[dateKey]
     if not allEntries then
         allEntries={}
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
+        for index,record in ipairs(readDayHistory(dateKey)) do
+            local entry=metadataEntry(record,dateKey,index)
             if entry then
                 allEntries[#allEntries+1]=entry
             end
@@ -924,8 +1209,8 @@ local function searchPersistentHistory(query,kind)
     local out={}; local needle=string.lower(tostring(query or ""))
     if needle=="" then return out end
     for _,dateKey in ipairs(historyDateDirectories()) do
-        for _,record in ipairs(readDayHistory(dateKey)) do
-            local entry=metadataEntry(record,dateKey)
+        for index,record in ipairs(readDayHistory(dateKey)) do
+            local entry=metadataEntry(record,dateKey,index)
             if entry and (not kind or kind=="all" or entry.type==kind) then
                 local value=entry.type=="text" and tostring(entry.content or "") or "[image]"
                 local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
@@ -939,19 +1224,37 @@ local function searchPersistentHistory(query,kind)
     return out
 end
 
+-- Image pixels contain no searchable text. Match the type marker, timestamp,
+-- and the pinned file names that are available as metadata.
+local function pinnedSearchValue(entry)
+    if entry.type=="text" then return tostring(entry.content or entry.data or "") end
+    local name=tostring(entry.imagePath or ""):match("([^/]+)$") or ""
+    return "[image] "..name
+end
+
+-- Search the entire pinned collection with the same case-insensitive plain
+-- substring semantics as ordinary history. Never uses an ordinary-history
+-- search cache and never depends on the rendered page.
 local function searchPinnedHistory(query,kind)
- local out={}; local needle=string.lower(tostring(query or ""))
- for _,e in ipairs(loadPinnedEntries()) do if kind=="all" or kind==nil or e.type==kind then
-  local value="[image]"
-  if e.type=="text" then local h=hydratePinnedEntry(e); value=tostring(h and h.content or ""); e.content=nil; e.data=nil end
-  local stamp=os.date("%Y-%m-%d %H:%M:%S",e.ts)
-  if needle=="" or string.lower(value.." "..stamp):find(needle,1,true) then out[#out+1]=e end
- end end
- return out
+    local out={}
+    if kind=="none" then return out end
+    local needle=string.lower(tostring(query or ""))
+    for _,entry in ipairs(loadPinnedEntries()) do
+        if not kind or kind=="all" or entry.type==kind then
+            local stamp=os.date("%Y-%m-%d %H:%M:%S",entry.ts)
+            if needle=="" or string.lower(pinnedSearchValue(entry).." "..stamp):find(needle,1,true) then
+                out[#out+1]=entry
+            end
+        end
+    end
+    return out
 end
 
 local function historyItemHTML(entry, index)
-    if not entry.isPinned then for _,r in ipairs(readPinnedHistory()) do if entry.sourceKey and r.sourceKey==entry.sourceKey then entry.isPinned=true; break end end end
+    if not entry.isPinned then
+        local pinnedId=pinnedIdForEntry(entry)
+        if pinnedId ~= nil then entry.isPinned=true; entry.id=pinnedId end
+    end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
@@ -959,9 +1262,9 @@ local function historyItemHTML(entry, index)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
-    local loaded=entry.isPinned and hydratePinnedEntry(entry) or entry
-    local content=tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "")
-    if entry.isPinned then entry.data=nil; entry.content=nil end
+    -- Pinned text is stored in the record, so it hydrates like an ordinary one.
+    local loaded=hydrateEntry(entry) or entry
+    local content=tostring(loaded.data or loaded.content or "")
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
@@ -1193,7 +1496,11 @@ document.addEventListener('click', event => {
     if (action === 'filter') { setActiveFilter(button); return; }
     if (action === 'pinScope') {
       document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
-      button.setAttribute('aria-pressed','true'); lastNonSearchDateKey=null; lastNonSearchWasAllDates=false;
+      button.setAttribute('aria-pressed','true');
+      // Remember the Pin scope as the pre-search scope, so clearing a query
+      // returns to the pinned collection instead of All Dates.
+      lastNonSearchDateKey = committedSearchQuery === '' ? null : 'pinned';
+      lastNonSearchWasAllDates = false;
       bridge('pinScope',0,committedSearchQuery,currentTypeFilter()); return;
     }
     if (action === 'dateScope' || action === 'dateFilter') {
@@ -1366,6 +1673,12 @@ function applyFilters() {
   if (nextQuery === '') {
     committedSearchQuery = '';
     const restoreDate = lastNonSearchDateKey;
+    if (restoreDate === 'pinned') {
+      document.querySelectorAll('.date-filter').forEach(b =>
+        b.setAttribute('aria-pressed', b.dataset.action === 'pinScope' ? 'true' : 'false'));
+      bridge('pinScope', 0, '', currentTypeFilter());
+      return;
+    }
     document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
     if (restoreDate) {
       document.querySelectorAll('.date-filter').forEach(b => {
@@ -1403,6 +1716,12 @@ search.addEventListener('input', () => {
   // active query is the exception: immediately restore the unsearched scope.
   if (search.value.trim() === '' && committedSearchQuery !== '') {
     committedSearchQuery = '';
+    if (lastNonSearchDateKey === 'pinned') {
+      document.querySelectorAll('.date-filter').forEach(b =>
+        b.setAttribute('aria-pressed', b.dataset.action === 'pinScope' ? 'true' : 'false'));
+      bridge('pinScope', 0, '', currentTypeFilter());
+      return;
+    }
     document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
     if (lastNonSearchDateKey) {
       document.querySelectorAll('.date-filter').forEach(b => {
@@ -1660,11 +1979,14 @@ local function updateClipboardPanel(query,kind,offset,append)
     local previousMenuDataCount=append and #menuData or 0
 
     if clipboardPinnedFilter then
+        -- The pinned collection is its own result set: never reuse the
+        -- ordinary-history search cache for it.
         menuData=searchPinnedHistory(query,kind); browseMode="pinned"; browseCursor=#menuData
     elseif query~="" then
         if clipboardDateFilter then
             -- Date views are subsets of the already computed global query results.
-            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+            if searchResultsCache and searchResultsCache.collection=="history"
+                and searchResultsCache.query==query and searchResultsCache.kind==kind then
                 menuData={}
                 for _,entry in ipairs(searchResultsCache.entries) do
                     if entry.dateKey==clipboardDateFilter then menuData[#menuData+1]=entry end
@@ -1679,11 +2001,12 @@ local function updateClipboardPanel(query,kind,offset,append)
             table.sort(menuData,function(a,b)return a.ts>b.ts end)
             browseMode="date"
         else
-            if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
+            if searchResultsCache and searchResultsCache.collection=="history"
+                and searchResultsCache.query==query and searchResultsCache.kind==kind then
                 menuData=searchResultsCache.entries
             else
                 menuData=searchPersistentHistory(query,kind)
-                searchResultsCache={query=query,kind=kind,entries=menuData}
+                searchResultsCache={collection="history",query=query,kind=kind,entries=menuData}
             end
             browseMode="search"
         end
@@ -1730,9 +2053,10 @@ local function updateClipboardPanel(query,kind,offset,append)
         js="var m=document.getElementById('clipboard-items');var main=document.querySelector('main');var b=main.querySelector(':scope > .load-more-wrap');if(b)b.remove();m.innerHTML="..jsStringLiteral(html)..";var last=m.querySelector('.load-more-wrap');if(last)last.remove();if(last)main.appendChild(last);"
     end
 
+    -- Pinned results are the complete filtered collection, so #matches is the
+    -- exact count; ordinary scopes use their persistent totals when available.
     local visibleCount=#matches
-    if clipboardPinnedFilter then visibleCount=#menuData
-    elseif query=="" and clipboardDateFilter then
+    if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     elseif query=="" and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
         if kind=="all" then visibleCount=allHistoryTotalCount end
@@ -1753,8 +2077,15 @@ function handleClipboardPanelMessage(message)
         clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
         updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
     elseif body.action == "dateFilter" then
-        clipboardPinnedFilter=false
         local dateKey=body.dateKey
+        if dateKey=="pinned" then
+            -- Restoring the Pin scope after a search is cleared.
+            clipboardPinnedFilter=true; clipboardDateFilter=nil; allDatesFilterSelected=false
+            clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
+            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
+            return
+        end
+        clipboardPinnedFilter=false
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
         if tostring(body.query or "")=="" then lastSearchRestoreDateKey=nil end
@@ -1777,8 +2108,9 @@ function handleClipboardPanelMessage(message)
         clipboard_type_filter=kind
         if query~="" then
             browseMode="search"
-            if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
-                searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+            if not searchResultsCache or searchResultsCache.collection~="history"
+                or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                searchResultsCache={collection="history",query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
             end
             menuData=searchResultsCache.entries
             browseCursor=0
@@ -1803,8 +2135,9 @@ function handleClipboardPanelMessage(message)
             else
                 if not clipboardPinnedFilter and clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
                 if not clipboardPinnedFilter then clipboardDateFilter=nil; allDatesFilterSelected=true end
-                if not clipboardPinnedFilter and (not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind) then
-                    searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
+                if not clipboardPinnedFilter and (not searchResultsCache or searchResultsCache.collection~="history"
+                    or searchResultsCache.query~=query or searchResultsCache.kind~=kind) then
+                    searchResultsCache={collection="history",query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
                 end
             end
         end
@@ -2021,6 +2354,7 @@ closeClipboardPanel = function()
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
     searchResultsCache=nil
+    invalidatePinnedIndex()
     clipboardSessionOpen=false
     panelCacheKey=nil
     panelCacheHTML=nil
@@ -2074,7 +2408,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
-                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; searchResultsCache=nil; clipboardSessionOpen=false
+                dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; searchResultsCache=nil; invalidatePinnedIndex(); clipboardSessionOpen=false
                 panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
                     for _,entry in ipairs(list) do
@@ -2307,6 +2641,7 @@ function showClipboardHistory()
     allHistoryCache={}
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
+    invalidatePinnedIndex()
     menuData=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
     browseCursor=allHistoryCacheLoaded
 
@@ -2375,7 +2710,9 @@ end
 -- available immediately after Hammerspoon/Sux-Mac starts.
 runDailyCleanupIfNeeded()
 ensurePinnedStorage()
+migratePinnedHistory()
 if not fs.attributes(PINNED_HISTORY_PATH) then writePinnedHistory({}) end
+invalidatePinnedIndex()
 restorePersistentHistory()
 -- Also clean on the first clipboard notification after startup, since expired
 -- folders may have been created manually after the startup scan completed.
@@ -2391,6 +2728,72 @@ pasteboard_watcher:start()
 local historyHotkey = hotkey.bind({"ctrl", "shift"}, "v", showClipboardHistory)
 if historyHotkey then historyHotkey:enable() end
 
-
+-- Surface used only by the isolated Lua regression harness in
+-- tests/clipboard-pinned. The panel itself never reads this table; it exists so
+-- schema conversion, migration, pinned search, and filtering can be tested
+-- without a live Hammerspoon UI.
+pkg.__test = {
+    paths = {
+        historyRoot = HISTORY_ROOT,
+        pinnedRoot = PINNED_ROOT,
+        pinnedImageRoot = PINNED_IMAGE_ROOT,
+        pinnedThumbnailRoot = PINNED_THUMBNAIL_ROOT,
+        pinnedHistoryPath = PINNED_HISTORY_PATH,
+        pinnedMigrationBackupPath = PINNED_MIGRATION_BACKUP_PATH,
+    },
+    historyDayDirectory = historyDayDirectory,
+    historyJSONPath = historyJSONPath,
+    historyImageDirectory = historyImageDirectory,
+    historyThumbnailDirectory = historyThumbnailDirectory,
+    readDayHistory = readDayHistory,
+    writeDayHistory = writeDayHistory,
+    persistClipboardEntry = persistClipboardEntry,
+    insertCacheEntry = insertCacheEntry,
+    restorePersistentHistory = restorePersistentHistory,
+    removeExpiredHistoryDirectories = removeExpiredHistoryDirectories,
+    metadataEntry = metadataEntry,
+    readPinnedHistory = readPinnedHistory,
+    writePinnedHistory = writePinnedHistory,
+    migratePinnedHistory = migratePinnedHistory,
+    loadPinnedEntries = loadPinnedEntries,
+    pinnedMetadata = pinnedMetadata,
+    pinClipboardEntry = pinClipboardEntry,
+    unpinClipboardEntry = unpinClipboardEntry,
+    hydratePinnedEntry = hydratePinnedEntry,
+    hydrateEntry = hydrateEntry,
+    invalidatePinnedIndex = invalidatePinnedIndex,
+    searchPinnedHistory = searchPinnedHistory,
+    searchPersistentHistory = searchPersistentHistory,
+    clipboardEntryMatches = clipboardEntryMatches,
+    historyItemHTML = historyItemHTML,
+    updateClipboardPanel = updateClipboardPanel,
+    pasteHistoryEntry = pasteHistoryEntry,
+    clearClipboardHistory = clearClipboardHistory,
+    handleMessage = handleClipboardPanelMessage,
+    panelState = function()
+        return {
+            query = clipboard_search,
+            kind = clipboard_type_filter,
+            dateFilter = clipboardDateFilter,
+            pinned = clipboardPinnedFilter,
+            browseMode = browseMode,
+            menuCount = #menuData,
+            menuData = menuData,
+            allDatesFilterSelected = allDatesFilterSelected,
+            searchCacheCollection = searchResultsCache and searchResultsCache.collection,
+            searchCacheQuery = searchResultsCache and searchResultsCache.query,
+            searchCacheKind = searchResultsCache and searchResultsCache.kind,
+            searchCacheCount = searchResultsCache and #searchResultsCache.entries,
+        }
+    end,
+    setPanelState = function(state)
+        if type(state) ~= "table" then return end
+        if state.allDates then clipboardDateFilter = nil; clipboardPinnedFilter = false end
+        if state.pinned ~= nil then clipboardPinnedFilter = state.pinned and true or false end
+        if state.dateFilter ~= nil then clipboardDateFilter = state.dateFilter end
+        if state.query ~= nil then clipboard_search = tostring(state.query) end
+        if state.kind ~= nil then clipboard_type_filter = tostring(state.kind) end
+    end,
+}
 
 return pkg

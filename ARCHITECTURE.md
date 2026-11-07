@@ -42,14 +42,60 @@ clipboard-history/
     └── pinned-history.json
 ```
 
-Pinned text storage and the exact JSON record representation must follow the chosen schema consistently. The intended design is to make pinned records compatible with the ordinary history record shape wherever possible, while retaining separate storage and lifetime. Pinning copies the original image and creates/retains a thumbnail; it never moves the original ordinary-history file. Pinned items survive ordinary seven-day retention cleanup.
+Pinned records use the same record shape as the ordinary daily history file.
+`pinned-history.json` is an array of records:
 
-Metadata should preserve both:
+```jsonc
+// text
+{
+  "type": "text",
+  "ts": 1793984940,          // original clipboard timestamp, never pin time
+  "content": "full text",    // full payload, exactly as in daily history
+  "id": "1794065772000195-1",// stable unique identifier
+  "pinnedAt": 1794065800,    // pin time, used for pin ordering/audit
+  "sourceKey": "2026-11-07:1793984940:text:3" // source record identity
+}
+// image
+{
+  "type": "image",
+  "ts": 1793984683,
+  "imagePath": ".../pinned/pinned-images/<id>.png",
+  "thumbnailPath": ".../pinned/pinned-thumbnails/<id>.jpg",
+  "id": "<id>",
+  "pinnedAt": 1794065800,
+  "sourceKey": "2026-11-07:1793984683:image:7",
+  "sourcePath": ".../2026-11-07/2026-11-07-images/20261107000443.png"
+}
+```
+
+No per-item `.txt` payload files and no Base64 image data are written for new
+pins. Pinned entries are built through the same `metadataEntry()`
+transformation as ordinary history, so parsing, search, hydration, thumbnail,
+rendering, preview, copy, paste, and cleanup logic stay shared; only the storage
+location and retention lifetime differ. Pinned text payloads live in memory for
+the open-panel session, exactly like ordinary history entries, and are released
+when the panel closes.
+
+Legacy pins stored text in a per-item `.txt` file referenced by `contentPath`.
+`migratePinnedHistory()` converts those records at load: it reads each payload,
+places the text in `content`, writes the index atomically (keeping a
+`pinned-history.json.pre-migration.bak`), and only then removes the obsolete
+payload files. A missing payload file, an undecodable index, or a failed write
+preserves the existing data and logs a diagnostic; the collection is never
+silently replaced with an empty array.
+
+Pinning copies the original image and creates/retains a thumbnail; it never
+moves the original ordinary-history file. Pinned items survive ordinary
+seven-day retention cleanup because that cleanup only visits valid
+`YYYY-MM-DD` day folders.
+
+Metadata preserves both:
 
 - Original clipboard timestamp: used by the existing date presentation/filtering logic.
-- Pin timestamp: records when the item was pinned and may be used for pin ordering.
+- Pin timestamp: records when the item was pinned and is used for pin ordering.
 
-Unpin removes the pinned record and pinned-owned files, but must not remove the ordinary history item.
+Unpin removes the pinned record and pinned-owned files, guarded so only paths
+under the pinned root are deleted, and must not remove the ordinary history item.
 
 Clear All is deliberately broader than ordinary retention cleanup: it removes both ordinary history and the pinned collection, then resets runtime caches and UI state.
 
@@ -66,6 +112,8 @@ The panel has mutually exclusive scope/date filters:
 Text and Images are independent content-type filters and may be combined with any scope, including Pin.
 
 Search preserves the active scope and content-type filter. With Pin active, search must examine the full pinned collection and full text content. It must not silently use the ordinary-history search cache or only the currently rendered page.
+
+Record identity is part of this model. `metadataEntry(record, dateKey, identity)` builds a `sourceKey` of `dateKey:ts:type:identity`, where identity is the record's position in its daily file (or the pinned record id for pins). Identity is taken from the record's file position, before any newest-first cache sort, so two distinct records that share a timestamp and type stay distinguishable. Pinned deduplication, the pinned marker in the ordinary view, and Unpin from the ordinary view all use this key, and older 3-part `sourceKey` values left by the previous pinned schema are still recognised. `searchResultsCache` is tagged with a `collection` field (`"history"`); the pinned path never reads or writes it.
 
 ### Context menu and actions
 
@@ -84,6 +132,7 @@ Pinned items must hydrate their stored data when Preview, Paste All, Copy, or Pa
 - Use APIs actually provided by Hammerspoon. Do not assume `hs.fs.copy` exists. A binary copy implemented with Lua file I/O is an acceptable approach where appropriate.
 - Prefer atomic writes for JSON indexes, with cleanup of temporary/partial files on failure.
 - Use safe, deterministic file names and unique record identifiers.
+- Deleting pinned files must be guarded by a pinned-root check, so a stale record can never delete an ordinary history file.
 - Handle missing files, invalid JSON, and partial writes without crashing the entire Spoon.
 - Avoid storing Base64 image data or large text payloads in long-lived metadata indexes.
 - Never log clipboard contents.
@@ -95,3 +144,21 @@ The existing panel includes search, type/date filters, result counts, pagination
 ## Data compatibility principle
 
 When a feature needs a separate persistent collection, prefer reusing the established record schema and existing serialization/hydration/rendering logic. Storage lifetime and storage location can differ without inventing a second record model. Any schema migration must be explicit, backward-compatible where practical, and safe for existing user data.
+
+## Testing
+
+`tests/clipboard-pinned/run.lua` runs the real Spoon against a sandboxed data
+root using `tests/clipboard-pinned/hs_stub.lua` (filesystem, JSON, WebView,
+pasteboard, image shims). It covers the pinned record schema, full-collection
+search, scope/type preservation, result counts, legacy migration, migration
+failure, corrupt JSON, retention isolation, actions, Clear All, and ordinary
+history behavior. Run it from the repository root with `lua
+tests/clipboard-pinned/run.lua`.
+
+The Spoon resolves its data root from `$HOME`, so the harness must load the
+module while the stub `$HOME` override is active; `run.lua` asserts the resolved
+root is inside `/tmp/sux-clipboard-history-tests` and refuses to continue
+otherwise. Never weaken that guard: without it the harness writes to the real
+`clipboard-history/` data and can overwrite and delete real records. Panel
+interaction (context menu, preview, paste, keyboard) still requires live
+Peekaboo testing against a running, unlocked Hammerspoon session.

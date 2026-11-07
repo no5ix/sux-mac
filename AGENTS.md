@@ -30,11 +30,13 @@ These instructions apply to all AI coding agents working in this repository. Rea
 ## Clipboard History-specific rules
 
 - Main implementation: `.hammerspoon/Spoons/xClipboardHistory.spoon/init.lua`.
+- Automated harness: `lua tests/clipboard-pinned/run.lua` (see `tests/clipboard-pinned/README.md`). The Spoon resolves its data root from `$HOME`; the harness must keep the stubbed sandbox `$HOME` active when loading the module and asserts the resolved root is under `/tmp/sux-clipboard-history-tests`. Never remove that guard: without it the tests write to the real `clipboard-history/` data.
 - Preserve existing capture, retention, search, date/type filtering, pagination, keyboard navigation, manual Preview, context menu, paste, copy, focus restoration, and dismissal behavior unless the task explicitly changes it.
 - Do not reintroduce hover-to-preview behavior.
 - Ordinary history is date-partitioned on disk and uses a bounded in-memory cache plus on-demand hydration. Keep that memory-conscious approach.
-- Pinning is a separate persistent collection under `clipboard-history/pinned/`; it must not be coupled to the seven-day cleanup of ordinary date folders.
+- Pinned records use the ordinary history record schema: text keeps its full `content` in `clipboard-history/pinned/pinned-history.json` (no per-item `.txt`), images use `imagePath`/`thumbnailPath` under the pinned folders, `ts` stays the original clipboard timestamp, and `id`/`pinnedAt`/`sourceKey` are the pin-only additions. Legacy `contentPath` records are migrated at load: payload into `content`, atomic write, then remove the obsolete files. See `ARCHITECTURE.md`.
 - Pinning copies source files; it must not move or mutate ordinary history files.
+- Pinning is a separate persistent collection under `clipboard-history/pinned/`; it must not be coupled to the seven-day cleanup of ordinary date folders.
 - Clear All intentionally clears both ordinary and pinned history.
 - The Pin scope is mutually exclusive with date scopes. Text and Images remain independently selectable with Pin.
 - Search must be scoped to the active collection and must search full text payloads, not only preview snippets or metadata.
