@@ -95,6 +95,20 @@ local function historyThumbnailDirectory(dateKey)
     return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-thumbnails"
 end
 
+
+local function ensureDirectory(path)
+    if fs.attributes(path) then return true end
+    local parent = path:match("^(.*)/[^/]+$")
+    if parent and parent ~= path and not fs.attributes(parent) then
+        if not ensureDirectory(parent) then return false end
+    end
+    local ok, err = fs.mkdir(path)
+    if ok then return true end
+    if fs.attributes(path) then return true end
+    logger.e("Unable to create clipboard history directory: " .. tostring(err or path))
+    return false
+end
+
 local PINNED_ROOT=HISTORY_ROOT.."/pinned"
 local PINNED_IMAGE_ROOT=PINNED_ROOT.."/pinned-images"
 local PINNED_THUMBNAIL_ROOT=PINNED_ROOT.."/pinned-thumbnails"
@@ -152,18 +166,7 @@ local function unpinClipboardEntry(e)
  return removed and writePinnedHistory(kept) or false
 end
 
-local function ensureDirectory(path)
-    if fs.attributes(path) then return true end
-    local parent = path:match("^(.*)/[^/]+$")
-    if parent and parent ~= path and not fs.attributes(parent) then
-        if not ensureDirectory(parent) then return false end
-    end
-    local ok, err = fs.mkdir(path)
-    if ok then return true end
-    if fs.attributes(path) then return true end
-    logger.e("Unable to create clipboard history directory: " .. tostring(err or path))
-    return false
-end
+
 
 local function atomicWrite(path, data)
     local temporaryPath = path .. ".tmp-" .. tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000))
