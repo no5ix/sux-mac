@@ -1582,10 +1582,11 @@ end
 
 local function pasteHistoryEntry(index)
     local choice = menuData and menuData[index]
+    if choice and choice.isPinned then choice=hydratePinnedEntry(choice) end
     if not choice or (choice.type ~= "text" and choice.type ~= "image") then return end
     pasteboard_watcher:stop()
     if choice.type == "text" then
-        pasteboard.setContents(choice.data)
+        pasteboard.setContents(choice.data or choice.content or "")
     else
         local image = decodeImage(choice.historyEntry or choice)
         if not image then
@@ -2147,7 +2148,8 @@ local function pasteAllRowsStep(row)
 
     local wroteContent = false
     if entry.type == "text" then
-        wroteContent = pasteboard.setContents(entry.data .. "\n") ~= false
+        local loaded=entry.isPinned and hydratePinnedEntry(entry) or entry
+        wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\n") ~= false
     else
         local image = decodeImage(entry.historyEntry or entry)
         if image then
