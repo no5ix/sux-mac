@@ -53,6 +53,7 @@ local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 32
 local CLIPBOARD_CACHE_SIZE = 32
 local clipboardDateFilter = nil
+local clipboardPinnedFilter = false
 local lastSearchRestoreDateKey = nil
 local browseCursor = 0
 local browseMode = "all"
@@ -92,6 +93,63 @@ end
 
 local function historyThumbnailDirectory(dateKey)
     return historyDayDirectory(dateKey) .. "/" .. dateKey .. "-thumbnails"
+end
+
+local PINNED_ROOT=HISTORY_ROOT.."/pinned"
+local PINNED_IMAGE_ROOT=PINNED_ROOT.."/pinned-images"
+local PINNED_THUMBNAIL_ROOT=PINNED_ROOT.."/pinned-thumbnails"
+local PINNED_HISTORY_PATH=PINNED_ROOT.."/pinned-history.json"
+local function ensurePinnedStorage() return ensureDirectory(HISTORY_ROOT) and ensureDirectory(PINNED_ROOT) and ensureDirectory(PINNED_IMAGE_ROOT) and ensureDirectory(PINNED_THUMBNAIL_ROOT) end
+local function readPinnedHistory()
+ if not ensurePinnedStorage() then return {} end
+ local f=io.open(PINNED_HISTORY_PATH,"rb"); if not f then return {} end
+ local raw=f:read("*a"); f:close(); if not raw or raw=="" then return {} end
+ local ok,data=pcall(json.decode,raw); if not ok or type(data)~="table" then logger.e("Invalid pinned history JSON"); return {} end
+ return data
+end
+local function writePinnedHistory(records)
+ if not ensurePinnedStorage() then return false end
+ local ok,data=pcall(json.encode,records,true); return ok and type(data)=="string" and atomicWrite(PINNED_HISTORY_PATH,data) or false
+end
+local function pinnedMetadata(r)
+ if type(r)~="table" or type(r.id)~="string" then return nil end
+ local ts=tonumber(r.ts); if not ts then return nil end
+ local e={id=r.id,type=r.type,ts=ts,rowTs=ts,pinnedAt=tonumber(r.pinnedAt) or ts,dateKey=localDateKey(ts),isPinned=true}
+ if r.type=="text" and type(r.contentPath)=="string" then e.contentPath=r.contentPath
+ elseif r.type=="image" and type(r.imagePath)=="string" then e.imagePath=r.imagePath; e.thumbnailPath=r.thumbnailPath else return nil end
+ return e
+end
+local function loadPinnedEntries()
+ local out={}; for _,r in ipairs(readPinnedHistory()) do local e=pinnedMetadata(r); if e then out[#out+1]=e end end
+ table.sort(out,function(a,b) if a.pinnedAt==b.pinnedAt then return a.ts>b.ts end return a.pinnedAt>b.pinnedAt end); return out
+end
+local function hydratePinnedEntry(e)
+ if not e or not e.isPinned then return e end
+ if e.type=="text" then local f=e.contentPath and io.open(e.contentPath,"rb"); if not f then return nil end; local v=f:read("*a"); f:close(); if type(v)~="string" then return nil end; e.content=v; e.data=v end
+ return e
+end
+local function pinClipboardEntry(e)
+ if not e or (e.type~="text" and e.type~="image") or e.isPinned then return false end
+ if not ensurePinnedStorage() then return false end
+ local records=readPinnedHistory(); local key=tostring(e.dateKey or localDateKey(e.ts))..":"..tostring(e.ts)..":"..e.type
+ for _,r in ipairs(records) do if r.sourceKey==key then return true end end
+ local id=tostring(math.floor(hs.timer.secondsSinceEpoch()*1000000)).."-"..tostring(#records+1)
+ local r={id=id,type=e.type,ts=tonumber(e.ts or e.rowTs) or os.time(),pinnedAt=os.time(),sourceKey=key}
+ if e.type=="text" then r.contentPath=PINNED_ROOT.."/"..id..".txt"; if not atomicWrite(r.contentPath,tostring(e.data or e.content or "")) then return false end
+ else
+  if type(e.imagePath)~="string" or not fs.attributes(e.imagePath) then return false end
+  r.imagePath=PINNED_IMAGE_ROOT.."/"..id..".png"; local ok,err=fs.copy(e.imagePath,r.imagePath); if not ok then logger.e("Pinned image copy failed: "..tostring(err)); return false end
+  if type(e.thumbnailPath)=="string" and fs.attributes(e.thumbnailPath) then r.thumbnailPath=PINNED_THUMBNAIL_ROOT.."/"..id..".jpg"; if not fs.copy(e.thumbnailPath,r.thumbnailPath) then r.thumbnailPath=nil end end
+ end
+ records[#records+1]=r
+ if not writePinnedHistory(records) then if r.contentPath then os.remove(r.contentPath) end; if r.imagePath then os.remove(r.imagePath) end; if r.thumbnailPath then os.remove(r.thumbnailPath) end; return false end
+ return true
+end
+local function unpinClipboardEntry(e)
+ if not e or not e.id then return false end
+ local kept,removed={},false
+ for _,r in ipairs(readPinnedHistory()) do if r.id==e.id then removed=true; if r.contentPath then os.remove(r.contentPath) end; if r.imagePath then os.remove(r.imagePath) end; if r.thumbnailPath then os.remove(r.thumbnailPath) end else kept[#kept+1]=r end end
+ return removed and writePinnedHistory(kept) or false
 end
 
 local function ensureDirectory(path)
@@ -346,20 +404,12 @@ local function trimHistoryCache(limit)
 end
 
 local function metadataEntry(record,dateKey)
-    local ts=tonumber(record and record.ts); if not ts then return nil end
-    if record.type=="text" and type(record.content)=="string" then
-        return {type="text",ts=ts,rowTs=ts,content=record.content,data=record.content,dateKey=dateKey}
-    end
-    if record.type=="image" and type(record.imagePath)=="string" then
-        -- Keep ordinary history loading independent of image-file I/O and decoding.
-        return {
-            type="image", ts=ts, rowTs=ts, dateKey=dateKey, imagePath=record.imagePath,
-            thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil,
-            -- Older records remain readable without a disruptive migration.
-            thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
-        }
-    end
-    return nil
+ local ts=tonumber(record and record.ts); if not ts then return nil end
+ local e={type=record.type,ts=ts,rowTs=ts,dateKey=dateKey,sourceKey=tostring(dateKey)..":"..tostring(ts)..":"..tostring(record.type),isPinned=false}
+ if record.type=="text" and type(record.content)=="string" then e.content=record.content; e.data=record.content
+ elseif record.type=="image" and type(record.imagePath)=="string" then e.imagePath=record.imagePath; e.thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil; e.thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
+ else return nil end
+ return e
 end
 
 local function insertCacheEntry(entry)
@@ -415,6 +465,8 @@ local function readImageAtPath(path)
 end
 
 local function makeThumbnailImage(original)
+
+local function hydrateEntry(entry) if not entry then return nil end; if entry.isPinned then return hydratePinnedEntry(entry) end; return entry end
     if not original then return nil end
 
     -- Avoid keeping the source NSImage, its bitmap, and its thumbnail alive
@@ -488,6 +540,11 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    if fs.attributes(PINNED_ROOT) then
+        local function rmTree(p) local a=fs.attributes(p); if not a then return end; if a.mode=="directory" then for c in fs.dir(p) do if c~="." and c~=".." then rmTree(p.."/"..c) end end; os.remove(p) else os.remove(p) end end
+        rmTree(PINNED_ROOT)
+    end
+    ensurePinnedStorage(); writePinnedHistory({}); clipboardPinnedFilter=false
     -- Clear only valid daily folders under the dedicated history root.
     if fs.attributes(HISTORY_ROOT) then
         local ok, err = pcall(function()
@@ -520,6 +577,7 @@ local function clearClipboardHistory()
         end)
         if not ok then logger.w("Clear All could not read clipboard history folders: " .. tostring(err)) end
     end
+    clipboardPinnedFilter=false
     if clipboard_webview then
         clipboard_search = ""
         clipboard_webview:hide()
@@ -841,15 +899,29 @@ local function searchPersistentHistory(query,kind)
     return out
 end
 
+local function searchPinnedHistory(query,kind)
+ local out={}; local needle=string.lower(tostring(query or ""))
+ for _,e in ipairs(loadPinnedEntries()) do if kind=="all" or kind==nil or e.type==kind then
+  local value="[image]"
+  if e.type=="text" then local h=hydratePinnedEntry(e); value=tostring(h and h.content or ""); e.content=nil; e.data=nil end
+  local stamp=os.date("%Y-%m-%d %H:%M:%S",e.ts)
+  if needle=="" or string.lower(value.." "..stamp):find(needle,1,true) then out[#out+1]=e end
+ end end
+ return out
+end
+
 local function historyItemHTML(entry, index)
+    if not entry.isPinned then for _,r in ipairs(readPinnedHistory()) do if entry.sourceKey and r.sourceKey==entry.sourceKey then entry.isPinned=true; break end end end
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
-    local content = tostring(entry.data or entry.content or "")
+    local loaded=entry.isPinned and hydratePinnedEntry(entry) or entry
+    local content=tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "")
+    if entry.isPinned then entry.data=nil; entry.content=nil end
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
@@ -864,7 +936,7 @@ local function historyItemHTML(entry, index)
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
@@ -1042,6 +1114,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
+<button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">Pin</button>
 <button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
 <button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
@@ -1078,6 +1151,11 @@ document.addEventListener('click', event => {
     const action = button.dataset.action;
     const index = Number(button.dataset.index || 0);
     if (action === 'filter') { setActiveFilter(button); return; }
+    if (action === 'pinScope') {
+      document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
+      button.setAttribute('aria-pressed','true'); lastNonSearchDateKey=null; lastNonSearchWasAllDates=false;
+      bridge('pinScope',0,committedSearchQuery,currentTypeFilter()); return;
+    }
     if (action === 'dateScope' || action === 'dateFilter') {
       const wasSelected = button.getAttribute('aria-pressed') === 'true';
       const selectedKind = currentTypeFilter();
@@ -1267,9 +1345,6 @@ function applyFilters() {
   }
   previousSearchQuery = committedSearchQuery;
   committedSearchQuery = nextQuery;
-  document.querySelectorAll('.date-filter').forEach(b => b.setAttribute('aria-pressed', 'false'));
-  const allDates = document.querySelector('[data-action="dateScope"]');
-  if (allDates) allDates.setAttribute('aria-pressed', 'true');
   bridge('search', 0, committedSearchQuery, currentTypeFilter());
 }
 function setActiveFilter(button) {
@@ -1389,7 +1464,8 @@ contextMenu.id = 'clipboard-context-menu';
 contextMenu.innerHTML =
   '<button type="button" data-context-action="preview">👁️ Preview</button>' +
   '<button type="button" data-context-action="pasteAll">🧴 Paste All the rows above this row in the order from early to late, including this row</button>' +
-  '<button type="button" data-context-action="copy">📋 Copy</button>';
+  '<button type="button" data-context-action="copy">📋 Copy</button>' +
+  '<button type="button" data-context-action="pin">📌 Pin</button>';
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 contextMenu.querySelectorAll('button').forEach(button => {
   button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
@@ -1404,6 +1480,8 @@ document.addEventListener('contextmenu', event => {
   if (!item) return;
   event.preventDefault();
   contextRowIndex = Number(item.dataset.index || 0);
+  const pb=contextMenu.querySelector('[data-context-action="pin"]');
+  if(pb){pb.dataset.contextAction=item.dataset.pinned==='true'?'unpin':'pin';pb.textContent=item.dataset.pinned==='true'?'📌 Unpin':'📌 Pin';}
   selectRow(rows().indexOf(item));
   contextMenu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
@@ -1423,6 +1501,8 @@ contextMenu.addEventListener('click', event => {
     bridge('pasteAllFrom', rowIndex, '');
   } else if (action === 'copy') {
     bridge('copyHistoryEntry', rowIndex, '');
+  } else if (action === 'pin' || action === 'unpin') {
+    bridge(action,rowIndex,'');
   } else if (action === 'preview') {
     const items = rows();
     const item = items.find(node => Number(node.dataset.index || 0) === rowIndex);
@@ -1538,7 +1618,9 @@ local function updateClipboardPanel(query,kind,offset,append)
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
     local previousMenuDataCount=append and #menuData or 0
 
-    if query~="" then
+    if clipboardPinnedFilter then
+        menuData=searchPinnedHistory(query,kind); browseMode="pinned"; browseCursor=#menuData
+    elseif query~="" then
         if clipboardDateFilter then
             -- Date views are subsets of the already computed global query results.
             if searchResultsCache and searchResultsCache.query==query and searchResultsCache.kind==kind then
@@ -1594,7 +1676,7 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
     end
     local html=table.concat(cards,"\n")
-    local hasMore=query=="" and not clipboardDateFilter
+    local hasMore=query=="" and not clipboardDateFilter and not clipboardPinnedFilter
         and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount)
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
     if #matches==0 then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
@@ -1608,7 +1690,8 @@ local function updateClipboardPanel(query,kind,offset,append)
     end
 
     local visibleCount=#matches
-    if query=="" and clipboardDateFilter then
+    if clipboardPinnedFilter then visibleCount=#menuData
+    elseif query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     elseif query=="" and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
         if kind=="all" then visibleCount=allHistoryTotalCount end
@@ -1624,7 +1707,12 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
+    elseif body.action == "pinScope" then
+        clipboardPinnedFilter=true; clipboardDateFilter=nil; allDatesFilterSelected=false
+        clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
+        updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
     elseif body.action == "dateFilter" then
+        clipboardPinnedFilter=false
         local dateKey=body.dateKey
         if not validDateKey(dateKey) then return end
         local kind=body.kind or "all"
@@ -1637,6 +1725,7 @@ function handleClipboardPanelMessage(message)
         -- updateClipboardPanel performs the metadata-only date cache lookup.
         updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
+        clipboardPinnedFilter=false
         -- If a query is active, return to its cached cross-date result set.
         -- Do not perform another persistent-history search when switching back.
         local query=tostring(body.query or "")
@@ -1686,7 +1775,8 @@ function handleClipboardPanelMessage(message)
         if entry and entry.type == "text" and clipboard_webview then
             local excerptLines = {}
             local lineCount = 0
-            local content = tostring(entry.data or entry.content or "")
+            local loaded=entry.isPinned and hydratePinnedEntry(entry) or entry
+            local content=tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "")
             for line in (content .. "\n"):gmatch("(.-)\n") do
                 lineCount = lineCount + 1
                 if lineCount > TEXT_PREVIEW_MAX_LINES then break end
@@ -1716,9 +1806,15 @@ function handleClipboardPanelMessage(message)
         pasteHistoryEntry(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
+    elseif body.action == "pin" or body.action == "unpin" then
+        local index=tonumber(body.index); local choice=index and menuData[index]
+        local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
+        if not ok then hs.alert.show(body.action=="pin" and "Unable to pin this clipboard item" or "Unable to unpin this clipboard item")
+        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false); hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item") end
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
         local choice = index and menuData[index]
+        if choice and choice.isPinned then choice=hydratePinnedEntry(choice) end
         if not choice or (choice.type ~= "text" and choice.type ~= "image") then
             hs.alert.show("Unable to copy this clipboard item")
             return
@@ -1872,6 +1968,7 @@ closeClipboardPanel = function()
     clipboard_search=""
     clipboard_type_filter="all"
     clipboardDateFilter=nil
+    clipboardPinnedFilter=false
     lastSearchRestoreDateKey=nil
     browseMode="all"
     browseCursor=0
@@ -2159,6 +2256,7 @@ function showClipboardHistory()
     clipboard_search = ""
     clipboard_type_filter = "all"
     clipboardDateFilter = nil
+    clipboardPinnedFilter = false
     allDatesFilterSelected = true
     browseMode = "all"
     browseCursor = 0
