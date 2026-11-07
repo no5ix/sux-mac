@@ -109,6 +109,33 @@ local function ensureDirectory(path)
     return false
 end
 
+
+
+
+
+local function atomicWrite(path, data)
+    local temporaryPath = path .. ".tmp-" .. tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000))
+    local file, openError = io.open(temporaryPath, "wb")
+    if not file then
+        logger.e("Unable to open clipboard history temp file: " .. tostring(openError))
+        return false
+    end
+    local writeOk, writeError = file:write(data)
+    local closeOk, closeError = file:close()
+    if not writeOk or closeOk == nil then
+        os.remove(temporaryPath)
+        logger.e("Unable to write clipboard history: " .. tostring(writeError or closeError))
+        return false
+    end
+    local renameOk, renameError = os.rename(temporaryPath, path)
+    if not renameOk then
+        os.remove(temporaryPath)
+        logger.e("Unable to replace clipboard history file: " .. tostring(renameError))
+        return false
+    end
+    return true
+end
+
 local PINNED_ROOT=HISTORY_ROOT.."/pinned"
 local PINNED_IMAGE_ROOT=PINNED_ROOT.."/pinned-images"
 local PINNED_THUMBNAIL_ROOT=PINNED_ROOT.."/pinned-thumbnails"
@@ -166,30 +193,6 @@ local function unpinClipboardEntry(e)
  return removed and writePinnedHistory(kept) or false
 end
 
-
-
-local function atomicWrite(path, data)
-    local temporaryPath = path .. ".tmp-" .. tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000))
-    local file, openError = io.open(temporaryPath, "wb")
-    if not file then
-        logger.e("Unable to open clipboard history temp file: " .. tostring(openError))
-        return false
-    end
-    local writeOk, writeError = file:write(data)
-    local closeOk, closeError = file:close()
-    if not writeOk or closeOk == nil then
-        os.remove(temporaryPath)
-        logger.e("Unable to write clipboard history: " .. tostring(writeError or closeError))
-        return false
-    end
-    local renameOk, renameError = os.rename(temporaryPath, path)
-    if not renameOk then
-        os.remove(temporaryPath)
-        logger.e("Unable to replace clipboard history file: " .. tostring(renameError))
-        return false
-    end
-    return true
-end
 
 local function saveImageFile(dateKey, item, timestamp)
     if not item then return nil end
