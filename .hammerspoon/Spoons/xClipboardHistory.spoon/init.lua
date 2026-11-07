@@ -152,6 +152,40 @@ local function writePinnedHistory(records)
  if not ensurePinnedStorage() then return false end
  local ok,data=pcall(json.encode,records,true); return ok and type(data)=="string" and atomicWrite(PINNED_HISTORY_PATH,data) or false
 end
+
+local function copyPinnedFile(sourcePath, destinationPath)
+ if type(sourcePath)~="string" or type(destinationPath)~="string" then return false end
+ local source,sourceError=io.open(sourcePath,"rb")
+ if not source then
+  logger.w("Unable to open source file for pinning: "..tostring(sourceError))
+  return false
+ end
+ local destination,destinationError=io.open(destinationPath,"wb")
+ if not destination then
+  source:close()
+  logger.w("Unable to create pinned file: "..tostring(destinationError))
+  return false
+ end
+ local copied=true
+ while true do
+  local chunk=source:read(1024*1024)
+  if not chunk then break end
+  local ok,writeError=destination:write(chunk)
+  if not ok then
+   copied=false
+   logger.e("Unable to write pinned file: "..tostring(writeError))
+   break
+  end
+ end
+ local sourceClosed,sourceCloseError=source:close()
+ local destinationClosed,destinationCloseError=destination:close()
+ if not sourceClosed or not destinationClosed then
+  copied=false
+  logger.e("Unable to close pinned file copy: "..tostring(sourceCloseError or destinationCloseError))
+ end
+ if not copied then os.remove(destinationPath) end
+ return copied
+end
 local function pinnedMetadata(r)
  if type(r)~="table" or type(r.id)~="string" then return nil end
  local ts=tonumber(r.ts); if not ts then return nil end
@@ -179,8 +213,8 @@ local function pinClipboardEntry(e)
  if e.type=="text" then r.contentPath=PINNED_ROOT.."/"..id..".txt"; if not atomicWrite(r.contentPath,tostring(e.data or e.content or "")) then return false end
  else
   if type(e.imagePath)~="string" or not fs.attributes(e.imagePath) then return false end
-  r.imagePath=PINNED_IMAGE_ROOT.."/"..id..".png"; local ok,err=fs.copy(e.imagePath,r.imagePath); if not ok then logger.e("Pinned image copy failed: "..tostring(err)); return false end
-  if type(e.thumbnailPath)=="string" and fs.attributes(e.thumbnailPath) then r.thumbnailPath=PINNED_THUMBNAIL_ROOT.."/"..id..".jpg"; if not fs.copy(e.thumbnailPath,r.thumbnailPath) then r.thumbnailPath=nil end end
+  r.imagePath=PINNED_IMAGE_ROOT.."/"..id..".png"; local ok=copyPinnedFile(e.imagePath,r.imagePath); if not ok then logger.e("Pinned image copy failed: "..tostring(e.imagePath)); return false end
+  if type(e.thumbnailPath)=="string" and fs.attributes(e.thumbnailPath) then r.thumbnailPath=PINNED_THUMBNAIL_ROOT.."/"..id..".jpg"; if not copyPinnedFile(e.thumbnailPath,r.thumbnailPath) then r.thumbnailPath=nil end end
  end
  records[#records+1]=r
  if not writePinnedHistory(records) then if r.contentPath then os.remove(r.contentPath) end; if r.imagePath then os.remove(r.imagePath) end; if r.thumbnailPath then os.remove(r.thumbnailPath) end; return false end
