@@ -1756,13 +1756,14 @@ function handleClipboardPanelMessage(message)
         if body.action=="search" then
             if query=="" then
                 searchResultsCache=nil
-                clipboardDateFilter=lastSearchRestoreDateKey
-                allDatesFilterSelected=clipboardDateFilter==nil
+                if not clipboardPinnedFilter then
+                    clipboardDateFilter=lastSearchRestoreDateKey
+                    allDatesFilterSelected=clipboardDateFilter==nil
+                end
             else
-                if clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
-                clipboardDateFilter=nil
-                allDatesFilterSelected=true
-                if not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
+                if not clipboardPinnedFilter and clipboardDateFilter then lastSearchRestoreDateKey=clipboardDateFilter end
+                if not clipboardPinnedFilter then clipboardDateFilter=nil; allDatesFilterSelected=true end
+                if not clipboardPinnedFilter and (not searchResultsCache or searchResultsCache.query~=query or searchResultsCache.kind~=kind) then
                     searchResultsCache={query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
                 end
             end
