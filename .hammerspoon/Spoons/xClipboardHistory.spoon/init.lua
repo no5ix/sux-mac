@@ -1395,7 +1395,7 @@ local function historyItemHTML(entry, index)
     -- clipboard timestamp stay unchanged. pointer-events:none keeps the marker
     -- out of the way of click-to-paste, keyboard selection, and the context menu.
     local pinMark = entry.isPinned == true and
-        '<div class="pin-mark" aria-label="Pinned">📌</div>' or ''
+        '<div class="pin-mark" aria-label="Pinned">📍</div>' or ''
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
@@ -1974,7 +1974,7 @@ contextMenu.innerHTML =
   '<button type="button" data-context-action="preview">👁️ Preview</button>' +
   '<button type="button" data-context-action="pasteAll">🧴 Paste All the rows above this row in the order from early to late, including this row</button>' +
   '<button type="button" data-context-action="copy">📋 Copy</button>' +
-  '<button type="button" data-context-action="pin">📌 Pin</button>';
+  '<button type="button" data-context-action="pin">📍 Pin</button>';
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 contextMenu.querySelectorAll('button').forEach(button => {
   button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
@@ -1990,7 +1990,7 @@ document.addEventListener('contextmenu', event => {
   event.preventDefault();
   contextRowIndex = Number(item.dataset.index || 0);
   const pb=contextMenu.querySelector('[data-context-action="pin"]');
-  if(pb){pb.dataset.contextAction=item.dataset.pinned==='true'?'unpin':'pin';pb.textContent=item.dataset.pinned==='true'?'📌 Unpin':'📌 Pin';}
+  if(pb){pb.dataset.contextAction=item.dataset.pinned==='true'?'unpin':'pin';pb.textContent=item.dataset.pinned==='true'?'📌 Unpin':'📍 Pin';}
   selectRow(rows().indexOf(item));
   contextMenu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
