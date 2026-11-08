@@ -69,6 +69,10 @@ local allHistoryTotalCount = nil
 -- Switching date chips or returning to All Dates reuses these matches instead
 -- of scanning every persisted daily history file again.
 local searchResultsCache = nil
+-- Search results for the unified All collection (ordinary history + pins).
+-- Kept separate from searchResultsCache so an ordinary-history cache can never
+-- be served as an All result set, and vice versa.
+local allSearchCache = nil
 
 -- Persistent, local, day-partitioned clipboard history.
 local function localDateKey(timestamp)
@@ -460,7 +464,12 @@ end
 -- Maps an ordinary-history sourceKey to the pinned record id, so the ordinary
 -- view can offer Unpin without reading the pinned index per card.
 local pinnedSourceKeyCache = nil
-local function invalidatePinnedIndex() pinnedSourceKeyCache = nil end
+local function invalidatePinnedIndex()
+    pinnedSourceKeyCache = nil
+    -- The All result set contains pinned records, so any pin/unpin/clear change
+    -- invalidates its search cache too.
+    allSearchCache = nil
+end
 local function pinnedSourceKeyIndex()
     if pinnedSourceKeyCache then return pinnedSourceKeyCache end
     local index = {}
@@ -537,6 +546,9 @@ local function pinnedMetadata(record)
     if not entry then return nil end
     entry.isPinned = true
     entry.pinnedAt = tonumber(record.pinnedAt) or entry.ts
+    -- The ordinary file path a pin was copied from, used only as a content
+    -- identity when matching a pin back to its ordinary record.
+    if type(record.sourcePath) == "string" then entry.sourcePath = record.sourcePath end
     if type(record.id) == "string" then
         entry.id = record.id
     else
@@ -903,6 +915,16 @@ local function clearClipboardHistory()
         if not ok then logger.w("Clear All could not read clipboard history folders: " .. tostring(err)) end
     end
     clipboardPinnedFilter=false
+    -- Clear All emptied both collections, so no session result may survive it:
+    -- drop the ordinary page, the date pages, the ordinary search cache, and the
+    -- unified All cache together.
+    dateHistoryCache = {}
+    allHistoryCache = {}
+    allHistoryCacheLoaded = 0
+    allHistoryTotalCount = nil
+    searchResultsCache = nil
+    allSearchCache = nil
+    visibleIndices = {}
     if clipboard_webview then
         clipboard_search = ""
         clipboard_webview:hide()
@@ -1250,17 +1272,136 @@ local function searchPinnedHistory(query,kind)
     return out
 end
 
+-- The All scope presents one collection: ordinary history plus pinned records.
+-- A pinned record represents the same clipboard event as the ordinary record it
+-- was pinned from, so the ordinary copy is dropped and the pinned copy is kept:
+-- its card keeps the pin state and the Unpin action. Deduplication uses payload
+-- identity (unifiedPayloadKey) with the sourceKey index as fallback, never the
+-- timestamp alone, so distinct records that share a ts stay separate.
+local function unifiedIdentity(entry)
+    if type(entry.id) == "string" then return entry.id end
+    if type(entry.sourceKey) == "string" then return entry.sourceKey end
+    return tostring(entry.ts) .. ":" .. tostring(entry.type)
+end
+
+local function sortUnifiedEntries(entries)
+    table.sort(entries, function(a, b)
+        if a.ts ~= b.ts then return a.ts > b.ts end
+        return unifiedIdentity(a) < unifiedIdentity(b)
+    end)
+    return entries
+end
+
+-- Content identity used when matching a pin back to its ordinary record. It
+-- always carries the payload (text length + text, or the image file name)
+-- beside ts, so the timestamp alone never merges two events. This is the
+-- authoritative rule because a daily index can be rebuilt, which shifts the
+-- file-position part of sourceKey; a payload match is stable.
+local function unifiedPayloadKey(entry)
+    if entry.type == "text" then
+        local payload = entry.content or entry.data
+        if type(payload) ~= "string" then return nil end
+        return "text:" .. tostring(entry.ts) .. ":" .. tostring(#payload) .. ":" .. payload
+    end
+    if entry.type == "image" then
+        local path = entry.sourcePath or entry.imagePath
+        local name = type(path) == "string" and path:match("([^/]+)$")
+        if type(name) == "string" and name ~= "" then
+            return "image:" .. tostring(entry.ts) .. ":" .. name
+        end
+    end
+    return nil
+end
+
+local function unifiedPayloadKeys(pinnedEntries)
+    local keys = {}
+    for _, entry in ipairs(pinnedEntries) do
+        local key = unifiedPayloadKey(entry)
+        if key then keys[key] = true end
+    end
+    return keys
+end
+
+local function unifiedIsDuplicate(entry, payloadKeys)
+    local key = unifiedPayloadKey(entry)
+    if key then return payloadKeys[key] == true end
+    -- A record whose payload is unavailable has no content identity; the
+    -- sourceKey index is then the only reliable handle.
+    return pinnedIdForEntry(entry) ~= nil
+end
+
+local function mergeUnifiedEntries(ordinaryEntries, pinnedEntries)
+    local payloadKeys = unifiedPayloadKeys(pinnedEntries)
+    local out = {}
+    for _, entry in ipairs(pinnedEntries) do out[#out + 1] = entry end
+    for _, entry in ipairs(ordinaryEntries) do
+        if not unifiedIsDuplicate(entry, payloadKeys) then out[#out + 1] = entry end
+    end
+    return sortUnifiedEntries(out)
+end
+
+local function pinnedEntriesForKind(kind)
+    local out = {}
+    for _, entry in ipairs(loadPinnedEntries()) do
+        if not kind or kind == "all" or entry.type == kind then out[#out + 1] = entry end
+    end
+    return out
+end
+
+-- All with no query: the bounded ordinary page from the existing pipeline plus
+-- every pinned record. Only the ordinary side paginates; the pinned collection
+-- is metadata-only and is always presented in full.
+local function loadUnifiedAllEntries(requiredCount, kind)
+    local cached, loaded = ensureAllHistoryCache(requiredCount)
+    local ordinary = {}
+    for _, entry in ipairs(cached) do
+        if not kind or kind == "all" or entry.type == kind then ordinary[#ordinary + 1] = entry end
+    end
+    return mergeUnifiedEntries(ordinary, pinnedEntriesForKind(kind)), loaded
+end
+
+-- All with a query: merge both collections' full-content search results and
+-- cache them as the All collection, keyed by query and content type.
+local function unifiedSearchEntries(ordinaryEntries, query, kind)
+    if allSearchCache and allSearchCache.query == query and allSearchCache.kind == kind then
+        return allSearchCache.entries
+    end
+    local merged = mergeUnifiedEntries(ordinaryEntries, searchPinnedHistory(query, kind))
+    allSearchCache = { collection = "all", query = query, kind = kind, entries = merged }
+    return merged
+end
+
+-- Exact All total once every ordinary record is loaded: ordinary records plus
+-- pins minus the ordinary records a pin already represents.
+local function unifiedTotal(kind)
+    local pins = pinnedEntriesForKind(kind)
+    local payloadKeys = unifiedPayloadKeys(pins)
+    local ordinary, duplicates = 0, 0
+    for _, entry in ipairs(allHistoryCache) do
+        if not kind or kind == "all" or entry.type == kind then
+            ordinary = ordinary + 1
+            if unifiedIsDuplicate(entry, payloadKeys) then duplicates = duplicates + 1 end
+        end
+    end
+    return ordinary + #pins - duplicates
+end
+
 local function historyItemHTML(entry, index)
     if not entry.isPinned then
         local pinnedId=pinnedIdForEntry(entry)
         if pinnedId ~= nil then entry.isPinned=true; entry.id=pinnedId end
     end
+    -- Pinned cards carry a corner marker while the type label and the original
+    -- clipboard timestamp stay unchanged. pointer-events:none keeps the marker
+    -- out of the way of click-to-paste, keyboard selection, and the context menu.
+    local pinMark = entry.isPinned == true and
+        '<div class="pin-mark" aria-label="Pinned">📌</div>' or ''
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'"><div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
     local loaded=hydrateEntry(entry) or entry
@@ -1280,7 +1421,7 @@ local function historyItemHTML(entry, index)
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
     return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
-        '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
+        pinMark .. '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
         '</button>'
@@ -1394,6 +1535,9 @@ main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+/* One thin rule separates the mutually exclusive scope chips (All, Pin, dates)
+   from the independent content-type chips (Text, Images). */
+.filter-separator { flex:0 0 1px; align-self:center; height:20px; margin:0 2px; background:var(--border); opacity:.85; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
@@ -1446,6 +1590,10 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .preview.placeholder { display:flex; align-items:center; justify-content:center; color:var(--muted); }
 .meta { padding:9px 2px 1px; }
 .kind { font-size:10px; letter-spacing:.12em; color:var(--accent); font-weight:700; }
+/* Pinned cards carry a corner marker beside the type label. It is decorative
+   and click-through, so selection, click-to-paste, keyboard navigation, and the
+   context menu keep working exactly as on ordinary cards. */
+.pin-mark { position:absolute; top:9px; right:10px; font-size:15px; line-height:1.1; pointer-events:none; user-select:none; }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
@@ -1456,10 +1604,8 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
-<button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All Dates</button>
+<button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All</button>
 <button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">Pin</button>
-<button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
-<button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 ]] .. (function()
     local buttons={}
     for ago=0,6 do
@@ -1479,7 +1625,11 @@ body.keyboard-mode #search { border-color:#7da6ff; }
         end
     end
     return table.concat(buttons,"\n")
-end)() .. [[</div></header>
+end)() .. [[
+<span class="filter-separator" aria-hidden="true"></span>
+<button class="action filter-button type-filter" data-action="filter" data-filter="text" aria-pressed="false">Text</button>
+<button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
+</div></header>
 <main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
 <footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
@@ -2001,13 +2151,18 @@ local function updateClipboardPanel(query,kind,offset,append)
             table.sort(menuData,function(a,b)return a.ts>b.ts end)
             browseMode="date"
         else
+            -- All presents ordinary history and pinned records as one result set.
+            -- The ordinary side keeps its own collection-tagged cache so date
+            -- subsets can reuse it; the merged set is cached as the All collection.
+            local ordinary
             if searchResultsCache and searchResultsCache.collection=="history"
                 and searchResultsCache.query==query and searchResultsCache.kind==kind then
-                menuData=searchResultsCache.entries
+                ordinary=searchResultsCache.entries
             else
-                menuData=searchPersistentHistory(query,kind)
-                searchResultsCache={collection="history",query=query,kind=kind,entries=menuData}
+                ordinary=searchPersistentHistory(query,kind)
+                searchResultsCache={collection="history",query=query,kind=kind,entries=ordinary}
             end
+            menuData=unifiedSearchEntries(ordinary,query,kind)
             browseMode="search"
         end
         browseCursor=0
@@ -2015,12 +2170,13 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     else
-        -- Reuse the session-wide mixed cache. Only Load More extends it by another
-        -- 32 mixed records; switching back to All Dates or toggling Text/Images is in-memory.
+        -- All: reuse the session-wide mixed ordinary cache and merge in every
+        -- pinned record. Only the ordinary side paginates, so Load More extends
+        -- it by another 32 mixed records while Text/Images switches in memory.
         local required=append and (allHistoryCacheLoaded+CLIPBOARD_RENDER_BATCH_SIZE)
             or math.max(CLIPBOARD_RENDER_BATCH_SIZE,allHistoryCacheLoaded)
-        local cached,loaded=ensureAllHistoryCache(required)
-        menuData=cached
+        local merged,loaded=loadUnifiedAllEntries(required,"all")
+        menuData=merged
         browseCursor=loaded
         browseMode="all"
     end
@@ -2053,13 +2209,15 @@ local function updateClipboardPanel(query,kind,offset,append)
         js="var m=document.getElementById('clipboard-items');var main=document.querySelector('main');var b=main.querySelector(':scope > .load-more-wrap');if(b)b.remove();m.innerHTML="..jsStringLiteral(html)..";var last=m.querySelector('.load-more-wrap');if(last)last.remove();if(last)main.appendChild(last);"
     end
 
-    -- Pinned results are the complete filtered collection, so #matches is the
-    -- exact count; ordinary scopes use their persistent totals when available.
+    -- Pinned and All results are the complete filtered collection, so #matches is
+    -- the exact count; an exhausted ordinary All cache yields the unified total.
     local visibleCount=#matches
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
-    elseif query=="" and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
-        if kind=="all" then visibleCount=allHistoryTotalCount end
+    elseif query=="" and not clipboardPinnedFilter and not clipboardDateFilter
+        and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
+        -- Unified All total: ordinary records plus pins, duplicates counted once.
+        visibleCount=unifiedTotal(kind)
     end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
@@ -2098,30 +2256,21 @@ function handleClipboardPanelMessage(message)
         updateClipboardPanel(body.query or "",kind,0,false)
     elseif body.action == "showLatest" then
         clipboardPinnedFilter=false
-        -- If a query is active, return to its cached cross-date result set.
-        -- Do not perform another persistent-history search when switching back.
+        -- If a query is active, return to its cached unified (ordinary + pinned)
+        -- result set. Do not run another search when switching back.
         local query=tostring(body.query or "")
         local kind=body.kind or "all"
         clipboardDateFilter=nil
         allDatesFilterSelected=true
         clipboard_search=query
         clipboard_type_filter=kind
-        if query~="" then
-            browseMode="search"
-            if not searchResultsCache or searchResultsCache.collection~="history"
-                or searchResultsCache.query~=query or searchResultsCache.kind~=kind then
-                searchResultsCache={collection="history",query=query,kind=kind,entries=searchPersistentHistory(query,kind)}
-            end
-            menuData=searchResultsCache.entries
-            browseCursor=0
-            updateClipboardPanel(query,kind,0,false)
-        else
+        if query=="" then
             browseMode="all"
             local cached,loaded=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
             menuData=cached
             browseCursor=loaded
-            updateClipboardPanel("",kind,0,false)
         end
+        updateClipboardPanel(query,kind,0,false)
     elseif body.action == "search" or body.action == "filter" then
         local query=tostring(body.query or "")
         local kind=body.kind or clipboard_type_filter or "all"
@@ -2766,6 +2915,7 @@ pkg.__test = {
     searchPersistentHistory = searchPersistentHistory,
     clipboardEntryMatches = clipboardEntryMatches,
     historyItemHTML = historyItemHTML,
+    panelHTML = clipboardPanelHTML,
     updateClipboardPanel = updateClipboardPanel,
     pasteHistoryEntry = pasteHistoryEntry,
     clearClipboardHistory = clearClipboardHistory,
@@ -2784,6 +2934,10 @@ pkg.__test = {
             searchCacheQuery = searchResultsCache and searchResultsCache.query,
             searchCacheKind = searchResultsCache and searchResultsCache.kind,
             searchCacheCount = searchResultsCache and #searchResultsCache.entries,
+            allCacheCollection = allSearchCache and allSearchCache.collection,
+            allCacheQuery = allSearchCache and allSearchCache.query,
+            allCacheKind = allSearchCache and allSearchCache.kind,
+            allCacheCount = allSearchCache and #allSearchCache.entries,
         }
     end,
     setPanelState = function(state)

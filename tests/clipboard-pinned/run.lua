@@ -6,8 +6,10 @@
 --   lua tests/clipboard-pinned/run.lua            # from the repository root
 --   SPOON_PATH=/path/to/init.lua lua tests/clipboard-pinned/run.lua
 --
--- Live panel behavior (context menu, preview, paste, screenshots) is verified
--- separately with Peekaboo; see AGENTS.md "Visual testing".
+-- The generated panel HTML (header chips, card markup, pin marker, result
+-- count) and the Lua state behind it are asserted here. Desktop pointer and
+-- keyboard behavior can be confirmed with Peekaboo when a task asks for it;
+-- see AGENTS.md "Visual testing".
 
 package.path = "./tests/clipboard-pinned/?.lua;" .. package.path
 
@@ -209,6 +211,23 @@ local CODEX_TEXTS = {
 local function seed_codex_day(environment)
     environment.seed_text_day(DATE, CODEX_TEXTS, BASE_TS)
     environment.t.restorePersistentHistory()
+end
+
+-- Writes a pinned text record that has no ordinary twin, so All-view
+-- aggregation, search, and cache behavior can be measured against content that
+-- exists only in the pinned collection.
+local function seed_pinned_text_only(environment, content, timestamp, id)
+    local records = environment.t.readPinnedHistory()
+    records[#records + 1] = {
+        id = id,
+        type = "text",
+        ts = timestamp,
+        pinnedAt = timestamp + 7,
+        content = content,
+    }
+    assert(environment.t.writePinnedHistory(records))
+    environment.t.invalidatePinnedIndex()
+    return records[#records]
 end
 
 -------------------------------------------------------------------------------
@@ -828,29 +847,440 @@ test("ordinary history search, dates, and cards keep working", function()
         "a query with no matches returns an empty set")
 end)
 
-test("ordinary cards are marked pinned and offer unpin", function()
+test("the All view shows one pinned card per event; date scopes keep the marker", function()
     local environment = new_environment("marker")
     seed_codex_day(environment)
     local pinned_entry = environment.pin_first_matching("codex", "text")
+    local pin_id = environment.t.readPinnedHistory()[1].id
 
     environment.t.restorePersistentHistory()
-    environment.t.setPanelState({ pinned = false, query = "", kind = "text" })
+    -- All: the pinned copy replaces the ordinary duplicate, one card per event.
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "text" })
     environment.t.updateClipboardPanel("", "text", 0, false)
-    local menu = environment.t.panelState().menuData
-    local marked, marked_id
-    for index, entry in ipairs(menu) do
+    local pinned_seen, pinned_index, duplicates, marked_id
+    for index, entry in ipairs(environment.t.panelState().menuData) do
         local card = environment.t.historyItemHTML(entry, index)
-        if entry.sourceKey == pinned_entry.sourceKey then
-            check(card:find('data-pinned="true"', 1, true), "the pinned ordinary record shows Unpin")
-            marked, marked_id = entry, entry.id
+        if entry.id == pin_id then
+            pinned_seen, pinned_index, marked_id = entry, index, entry.id
+            check(card:find('data-pinned="true"', 1, true), "the unified card is pinned (Unpin menu)")
+            check(card:find('class="pin-mark"', 1, true), "the unified card carries the pin marker")
+        elseif type(entry.sourceKey) == "string" and entry.sourceKey == pinned_entry.sourceKey then
+            duplicates = (duplicates or 0) + 1
         end
     end
-    check(marked, "found the matching ordinary entry")
-    check_equal(marked_id, environment.t.readPinnedHistory()[1].id, "the marker carries the pinned record id")
+    check(pinned_seen, "the pinned record is presented in All")
+    check_equal(marked_id, pin_id, "the card carries the pinned record id")
+    check_equal(duplicates, nil, "the ordinary duplicate is not rendered a second time")
+    check_equal(environment.t.panelState().menuCount, 5, "one card per clipboard event")
 
-    check(environment.t.unpinClipboardEntry(marked), "Unpin from the ordinary view works")
-    check_equal(#environment.t.readPinnedHistory(), 0, "record removed")
+    -- Context-menu Copy and click-to-paste work on the unified card, reading the
+    -- pinned payload through the shared hydration path.
+    STUB.reset_recorded_state()
+    environment.t.handleMessage({ body = { action = "copyHistoryEntry", index = pinned_index, query = "", kind = "text" } })
+    check_equal(STUB.state.copied_text, pinned_entry.content, "Copy from the unified card copies the pinned text")
+    STUB.reset_recorded_state()
+    environment.t.handleMessage({ body = { action = "paste", index = pinned_index } })
+    check_equal(STUB.state.pasted_text, pinned_entry.content, "click-to-paste pastes the pinned text")
+
+    check(environment.t.unpinClipboardEntry(pinned_seen), "Unpin from the All view works")
+    check_equal(#environment.t.readPinnedHistory(), 0, "only the pinned copy is removed")
+    environment.t.updateClipboardPanel("", "text", 0, false)
+    local restored
+    for index, entry in ipairs(environment.t.panelState().menuData) do
+        if entry.sourceKey == pinned_entry.sourceKey then
+            restored = entry
+            local card = environment.t.historyItemHTML(entry, index)
+            check(card:find('data-pinned="false"', 1, true), "the ordinary record is unpinned again")
+            check(not card:find('class="pin-mark"', 1, true), "no pin marker after Unpin")
+        end
+    end
+    check(restored, "the ordinary record stays available in All after Unpin")
+    check_equal(environment.t.panelState().menuCount, 5, "card count is unchanged by Unpin")
     check_equal(#environment.t.readDayHistory(DATE), 5, "ordinary records intact")
+
+    -- Date scopes stay ordinary-history-only and keep the in-place Unpin marker.
+    environment.pin_first_matching("codex", "text")
+    environment.t.setPanelState({ allDates = false, dateFilter = DATE, pinned = false, query = "", kind = "text" })
+    environment.t.updateClipboardPanel("", "text", 0, false)
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 5, "the date view lists that date's ordinary records only")
+    local marked_cards = 0
+    for index, entry in ipairs(state.menuData) do
+        if environment.t.historyItemHTML(entry, index):find('data-pinned="true"', 1, true) then
+            marked_cards = marked_cards + 1
+        end
+    end
+    check_equal(marked_cards, 1, "the date view marks the pinned record so it offers Unpin")
+end)
+
+test("All merges ordinary and pinned records into one deduplicated collection", function()
+    local environment = new_environment("all-merge")
+    seed_codex_day(environment)
+    environment.seed_image_day(DATE, "20261107103607", BASE_TS + 120)
+    environment.seed_image_day("2026-11-06", "20261106101010", BASE_TS - 86400)
+    environment.pin_first_matching("codex", "text")
+    local images = environment.t.searchPersistentHistory("[image]", "image")
+    check(environment.t.pinClipboardEntry(images[#images]), "the older image is pinned")
+    environment.t.restorePersistentHistory()
+
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 7, "five text plus two images, each event once")
+    local pinned_cards, text_cards, image_cards = 0, 0, 0
+    for _, entry in ipairs(state.menuData) do
+        if entry.type == "text" then text_cards = text_cards + 1 else image_cards = image_cards + 1 end
+        if entry.isPinned then pinned_cards = pinned_cards + 1 end
+    end
+    check_equal(pinned_cards, 2, "both pinned records appear in All")
+    check_equal(text_cards, 5, "text cards in the unified collection")
+    check_equal(image_cards, 2, "image cards in the unified collection")
+    check_equal(panel_count_text(), "7 matching items", "the count is the deduplicated collection")
+
+    environment.t.setPanelState({ kind = "text" })
+    environment.t.updateClipboardPanel("", "text", 0, false)
+    check_equal(panel_count_text(), "5 matching items", "All + Text is ordinary text plus pinned text")
+    check_equal(environment.t.panelState().kind, "text", "the Text type filter is recorded")
+
+    environment.t.setPanelState({ kind = "image" })
+    environment.t.updateClipboardPanel("", "image", 0, false)
+    check_equal(panel_count_text(), "2 matching items", "All + Images is ordinary images plus pinned images")
+    check_equal(environment.t.panelState().kind, "image", "the Images type filter is recorded")
+
+    environment.t.setPanelState({ pinned = true })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    check_equal(environment.t.panelState().menuCount, 2, "Pin stays pinned-only")
+    check_equal(panel_count_text(), "2 matching items", "Pin count")
+
+    environment.t.setPanelState({ pinned = true, kind = "image" })
+    environment.t.updateClipboardPanel("", "image", 0, false)
+    check_equal(environment.t.panelState().menuCount, 1, "Pin + Images is pinned images only")
+
+    environment.t.setPanelState({ pinned = false, dateFilter = DATE })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    check_equal(environment.t.panelState().menuCount, 6, "a date scope is ordinary history only")
+end)
+
+test("Load more extends the unified All collection without duplicating pins", function()
+    local environment = new_environment("all-loadmore")
+    local many = {}
+    for index = 1, 40 do many[index] = "bulk note " .. index .. " codex" end
+    environment.seed_text_day(DATE, many, BASE_TS)
+    seed_pinned_text_only(environment, "pinned-only bulk codex", BASE_TS + 5000, "pin-bulk-1")
+    environment.t.restorePersistentHistory()
+
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 33, "the first page is 32 ordinary records plus every pin")
+
+    local cursor
+    for index = #STUB.state.scripts, 1, -1 do
+        local script = STUB.state.scripts[index]
+        if script:find("loadMore", 1, true) then
+            cursor = script:match('data%-index=%S-(%d+)')
+            if cursor then break end
+        end
+    end
+    check(cursor, "a Load more control is offered for the ordinary side")
+
+    environment.t.handleMessage({ body = { action = "loadMore", index = tonumber(cursor), query = "", kind = "all" } })
+    state = environment.t.panelState()
+    check_equal(state.menuCount, 41, "Load more appended the remaining ordinary records")
+    check_equal(panel_count_text(), "41 matching items", "the count covers both collections")
+    local pins, seen = 0, {}
+    for _, entry in ipairs(state.menuData) do
+        if entry.isPinned then pins = pins + 1 end
+        local key = entry.id or entry.sourceKey
+        check(not seen[key], "no card is rendered twice for one event")
+        seen[key] = true
+    end
+    check_equal(pins, 1, "the pinned record appears exactly once after Load more")
+end)
+
+test("pinning from the All view collapses the pair into one pinned card", function()
+    local environment = new_environment("all-pin")
+    seed_codex_day(environment)
+    environment.t.restorePersistentHistory()
+
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "text" })
+    environment.t.updateClipboardPanel("", "text", 0, false)
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 5, "ordinary collection before pinning")
+
+    -- Pin the card the user right-clicks: the context-menu Pin action runs the
+    -- same handler with the All menuData index.
+    local target_index
+    for index, entry in ipairs(state.menuData) do
+        if entry.content == CODEX_TEXTS[2] then target_index = index end
+    end
+    check(target_index, "the target ordinary record is in All")
+    environment.t.handleMessage({ body = { action = "pin", index = target_index, query = "", kind = "text" } })
+
+    state = environment.t.panelState()
+    check_equal(#environment.t.readPinnedHistory(), 1, "one pinned record was created")
+    check_equal(state.menuCount, 5, "the pair stays one card; the count does not double")
+    check_equal(panel_count_text(), "5 matching items", "count is stable across pinning")
+    local pinned_entries, matching_ordinary = 0, 0
+    for _, entry in ipairs(state.menuData) do
+        if entry.isPinned then pinned_entries = pinned_entries + 1 end
+        if entry.content == CODEX_TEXTS[2] and not entry.isPinned then matching_ordinary = matching_ordinary + 1 end
+    end
+    check_equal(pinned_entries, 1, "the pinned copy is the card that remains")
+    check_equal(matching_ordinary, 0, "the ordinary twin is not rendered beside it")
+    check_equal(#environment.t.readDayHistory(DATE), 5, "pinning left ordinary history intact")
+
+    -- Unpinning from the same view restores the ordinary card.
+    local pin_index
+    for index, entry in ipairs(state.menuData) do
+        if entry.isPinned then pin_index = index end
+    end
+    environment.t.handleMessage({ body = { action = "unpin", index = pin_index, query = "", kind = "text" } })
+    check_equal(#environment.t.readPinnedHistory(), 0, "the pinned copy is gone")
+    local restored = 0
+    for _, entry in ipairs(environment.t.panelState().menuData) do
+        if entry.content == CODEX_TEXTS[2] then restored = restored + 1 end
+    end
+    check_equal(restored, 1, "the ordinary record is visible again after Unpin")
+end)
+
+test("records that share a timestamp are not deduplicated", function()
+    local environment = new_environment("all-ts")
+    assert(environment.t.writeDayHistory(DATE, {
+        { type = "text", ts = BASE_TS, content = "twin alpha codex" },
+        { type = "text", ts = BASE_TS, content = "twin beta codex" },
+    }))
+    environment.t.restorePersistentHistory()
+    local entries = environment.t.searchPersistentHistory("twin", "text")
+    check_equal(#entries, 2, "two ordinary records share one timestamp")
+    check(environment.t.pinClipboardEntry(entries[1]), "pin one twin")
+
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 2, "identity, not the timestamp, drives deduplication")
+    local pinned_cards, plain_cards = 0, 0
+    for _, entry in ipairs(state.menuData) do
+        if entry.isPinned then pinned_cards = pinned_cards + 1 else plain_cards = plain_cards + 1 end
+    end
+    check_equal(pinned_cards, 1, "the pinned twin")
+    check_equal(plain_cards, 1, "the untouched twin stays as its own card")
+    check_equal(panel_count_text(), "2 matching items", "count keeps both events")
+end)
+
+test("a rebuilt daily index does not break pinned deduplication", function()
+    local environment = new_environment("all-rebuild")
+    environment.seed_text_day(DATE, { "rebuild alpha pinme", "rebuild beta", "rebuild gamma" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    local target = environment.t.searchPersistentHistory("pinme", "text")
+    check_equal(#target, 1, "one seeded target")
+    check(environment.t.pinClipboardEntry(target[1]), "pin one record")
+
+    -- Rebuild the daily index in reverse: the file-position part of sourceKey
+    -- no longer lines up with the pin, so payload identity must decide.
+    local records = environment.t.readDayHistory(DATE)
+    local reversed = {}
+    for index = #records, 1, -1 do reversed[#reversed + 1] = records[index] end
+    assert(environment.t.writeDayHistory(DATE, reversed))
+    environment.t.invalidatePinnedIndex()
+    environment.t.restorePersistentHistory()
+
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "text" })
+    environment.t.updateClipboardPanel("", "text", 0, false)
+    local state = environment.t.panelState()
+    local pinned_cards, twin, beta = 0, 0, 0
+    for _, entry in ipairs(state.menuData) do
+        if entry.isPinned then
+            pinned_cards = pinned_cards + 1
+        elseif entry.content == "rebuild alpha pinme" then
+            twin = twin + 1
+        elseif entry.content == "rebuild beta" then
+            beta = beta + 1
+        end
+    end
+    check_equal(pinned_cards, 1, "the pinned card is present")
+    check_equal(twin, 0, "the pinned event stays one card, matched by payload identity")
+    check_equal(beta, 1, "an unrelated record whose sourceKey moved is not folded away")
+    check_equal(state.menuCount, 3, "three events, three cards")
+    check_equal(panel_count_text(), "3 matching items", "the count uses the same identity rule")
+end)
+
+test("All search spans both collections while Pin and date searches stay scoped", function()
+    local environment = new_environment("all-search")
+    seed_codex_day(environment)
+    seed_pinned_text_only(environment, "UNIFIED-ONLY codex pin payload", BASE_TS + 500, "pin-only-1")
+    environment.t.restorePersistentHistory()
+
+    local function send(body)
+        environment.t.handleMessage({ body = body })
+        return environment.t.panelState()
+    end
+
+    local state = send({ action = "search", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 4, "three ordinary matches plus the pinned-only record")
+    check_equal(state.searchCacheCollection, "history", "the ordinary cache stays collection-tagged")
+    check_equal(state.allCacheCollection, "all", "the merged set is cached as the All collection")
+    check_equal(panel_count_text(), "4 matching items", "count reflects the merged set")
+    local pinned_found
+    for _, entry in ipairs(state.menuData) do
+        if entry.isPinned then pinned_found = entry end
+    end
+    check(pinned_found, "the pinned record is part of the All search")
+    check(type(pinned_found.content) == "string"
+        and pinned_found.content:find("UNIFIED-ONLY", 1, true) ~= nil,
+        "a pinned-only payload is found by full-text search")
+
+    state = send({ action = "search", index = 0, query = "UNIFIED", kind = "all" })
+    check_equal(state.menuCount, 1, "case-insensitive search reaches pinned-only content")
+    check_equal(panel_count_text(), "1 matching items", "the pinned-only match is counted")
+
+    state = send({ action = "pinScope", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 1, "Pin search stays pinned-only")
+
+    state = send({ action = "dateFilter", index = 0, query = "codex", kind = "all", dateKey = "2026-11-06" })
+    check_equal(state.menuCount, 0, "a date search stays scoped to that date")
+    state = send({ action = "dateFilter", index = 0, query = "codex", kind = "all", dateKey = DATE })
+    check_equal(state.menuCount, 3, "a date search never includes pinned records")
+
+    state = send({ action = "showLatest", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 4, "returning to All restores the merged result set")
+    check_equal(state.query, "codex", "the query is preserved across scope switches")
+
+    state = send({ action = "filter", index = 0, query = "codex", kind = "text" })
+    check_equal(state.menuCount, 4, "All + Text keeps ordinary and pinned text")
+    state = send({ action = "filter", index = 0, query = "codex", kind = "image" })
+    check_equal(state.menuCount, 0, "All + Images searches image metadata only")
+    check_equal(state.query, "codex", "the query survives type switches")
+end)
+
+test("the All search cache is invalidated by pin, unpin, and Clear All", function()
+    local environment = new_environment("all-cache")
+    seed_codex_day(environment)
+    environment.t.restorePersistentHistory()
+
+    local function send(body)
+        environment.t.handleMessage({ body = body })
+        return environment.t.panelState()
+    end
+
+    local state = send({ action = "search", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 3, "ordinary-only All search")
+    check_equal(state.allCacheCount, 3, "the All cache holds the merged set")
+
+    seed_pinned_text_only(environment, "codex pinned extra", BASE_TS + 900, "pin-extra-1")
+    state = send({ action = "search", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 4, "pinning invalidates the All cache")
+
+    environment.t.unpinClipboardEntry(environment.t.readPinnedHistory()[1])
+    state = send({ action = "search", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 3, "unpinning invalidates the All cache")
+
+    -- An ordinary-history cache is never served as an All set, and Pin never
+    -- overwrites the ordinary cache.
+    check_equal(state.searchCacheCollection, "history", "the ordinary cache is separate from All")
+    state = send({ action = "pinScope", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 0, "the Pin set is computed independently")
+    check_equal(state.searchCacheCollection, "history", "the Pin path did not overwrite the ordinary cache")
+
+    environment.t.clearClipboardHistory()
+    state = send({ action = "search", index = 0, query = "codex", kind = "all" })
+    check_equal(state.menuCount, 0, "Clear All empties both collections")
+    check_equal(state.allCacheCount, 0, "Clear All emptied the All cache")
+    check_equal(#environment.t.readPinnedHistory(), 0, "no pins remain")
+end)
+
+test("pinned and ordinary cards render with and without the pin marker", function()
+    local environment = new_environment("all-cards")
+    seed_codex_day(environment)
+    environment.seed_image_day(DATE, "20261107103607", BASE_TS + 120)
+    environment.pin_first_matching("codex", "text")
+    local images = environment.t.searchPersistentHistory("[image]", "image")
+    check(environment.t.pinClipboardEntry(images[1]), "the image is pinned")
+    environment.t.restorePersistentHistory()
+
+    for _, scope in ipairs({ "all", "pin" }) do
+        environment.t.setPanelState({
+            allDates = scope == "all", pinned = scope == "pin",
+            query = "", kind = "all",
+        })
+        environment.t.updateClipboardPanel("", "all", 0, false)
+        local marked_text, marked_image, plain_text, plain_image = 0, 0, 0, 0
+        for index, entry in ipairs(environment.t.panelState().menuData) do
+            local card = environment.t.historyItemHTML(entry, index)
+            local has_mark = card:find('class="pin-mark"', 1, true) ~= nil
+            local pinned_attr = card:find('data-pinned="true"', 1, true) ~= nil
+            check(card:find('data-action="paste"', 1, true) ~= nil, "the card stays click-to-paste")
+            check(card:find('tabindex="0"', 1, true) ~= nil
+                or entry.type == "text", "image cards keep their focusable role")
+            if pinned_attr then check(has_mark, "a pinned card shows the pin marker") end
+            if has_mark then check(pinned_attr, "the pin marker implies a pinned card") end
+            if entry.isPinned then
+                local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.ts)
+                check(card:find(stamp, 1, true) ~= nil, "the original clipboard timestamp is shown")
+                if entry.pinnedAt and os.date("%Y-%m-%d %H:%M:%S", entry.pinnedAt) ~= stamp then
+                    check(not card:find(os.date("%Y-%m-%d %H:%M:%S", entry.pinnedAt), 1, true),
+                        "pinnedAt is not presented as the card timestamp")
+                end
+            end
+            if entry.type == "image" then
+                if entry.isPinned then marked_image = marked_image + 1 else plain_image = plain_image + 1 end
+            else
+                if entry.isPinned then marked_text = marked_text + 1 else plain_text = plain_text + 1 end
+            end
+        end
+        check_equal(marked_text, 1, "one pinned text card")
+        check_equal(marked_image, 1, "one pinned image card")
+        if scope == "all" then
+            check(plain_text >= 1, "ordinary text cards remain in All")
+        else
+            check_equal(plain_text, 0, "the Pin scope has no ordinary cards")
+        end
+        check_equal(plain_image, 0, "the pinned image replaced its ordinary twin")
+    end
+end)
+
+test("the filter bar is All, Pin, dates, separator, Text, Images", function()
+    local environment = new_environment("all-chips")
+    seed_codex_day(environment)
+    environment.seed_image_day("2026-11-06", "20261106101010", BASE_TS - 86400)
+    environment.t.restorePersistentHistory()
+    local html = environment.t.panelHTML()
+
+    local actions = html:match('<div class="actions">(.-)</div></header>')
+    check(actions, "the filter bar renders")
+    check(actions:find('>All</button>', 1, true) ~= nil, "the scope chip is labelled All")
+    check(actions:find('All Dates', 1, true) == nil, "the All Dates label is gone")
+
+    local function position(needle)
+        local index = actions:find(needle, 1, true)
+        return index or math.huge
+    end
+    local order = {
+        position('data-action="dateScope"'),
+        position('data-action="pinScope"'),
+        position('data-action="dateFilter"'),
+        position('class="filter-separator"'),
+        position('data-filter="text"'),
+        position('data-filter="image"'),
+    }
+    for index = 2, #order do
+        check(order[index] > order[index - 1],
+            "chip " .. tostring(index) .. " follows the previous chip in the required order")
+    end
+    local _, separator_count = actions:gsub('class="filter%-separator"', '')
+    check_equal(separator_count, 1, "exactly one separator")
+    local _, type_chip_count = actions:gsub('data%-action="filter"', '')
+    check_equal(type_chip_count, 2, "only Text and Images are type chips")
+    local _, scope_chip_count = actions:gsub('data%-action="dateScope"', '')
+    scope_chip_count = scope_chip_count + select(2, actions:gsub('data%-action="pinScope"', ''))
+    check_equal(scope_chip_count, 2, "All and Pin are the scope chips")
+    local _, row_count = html:gsub('<div class="actions">', '')
+    check_equal(row_count, 1, "one toolbar row")
+    check(html:find('<div class="actions">', 1, true) ~= nil, "the toolbar row is the existing one")
+    check(html:find('id="search"', 1, true) ~= nil, "the search box is unchanged")
+    check(html:find("class=\"count\"", 1, true) ~= nil, "the result count is unchanged")
+    check(html:find('.pin-mark {', 1, true) ~= nil, "the pin marker is styled in the panel CSS")
+    check(html:find('pointer-events:none', 1, true) ~= nil, "the pin marker is click-through")
 end)
 
 test("empty collection and panel rendering edge cases", function()

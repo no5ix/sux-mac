@@ -52,15 +52,28 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 | unpin edge | unpin works with missing pinned files and legacy 3-part `sourceKey` |
 | clear all | Clear All clears ordinary and pinned collections, resets Pin/search state, recreates pinned storage |
 | ordinary | ordinary cross-date/date-scoped/type-filtered search, counts, cards, and empty-result behavior stay intact |
-| marker | ordinary cards for pinned records render `data-pinned="true"` and Unpin through the same entry |
+| marker | the `All` view renders one pinned card per event (`data-pinned="true"`, `📌` marker, pinned id) and no ordinary twin; Unpin restores the ordinary card; date scopes stay ordinary-only and keep the in-place Unpin marker |
+| all unify | `All` merges ordinary text, ordinary images, pinned text, and pinned images into one newest-first collection; counts are the deduplicated totals; `Pin` and date scopes keep their own semantics |
+| all dedup | deduplication is identity-based (`sourceKey`/pinned id), never timestamp-based: two records sharing one `ts` stay two cards |
+| all rebuild | after a daily index is rewritten, the pinned event is still folded into one card by payload identity (text body / image file name + ts), and an unrelated record whose `sourceKey` moved is not hidden |
+| all loadmore | Load more extends the ordinary side while the pinned record appears exactly once and no event is rendered twice |
+| all pin | the context-menu Pin action from `All` collapses the pair into one pinned card (count unchanged) and leaves ordinary history intact; Unpin from `All` restores the ordinary card |
+| all search | `All` search spans both collections (including pinned-only content), case-insensitively; `Pin` search stays pinned-only; a date search stays scoped to that date and never includes pins; query survives scope/type switches |
+| all cache | the merged set is cached as `collection="all"`, the ordinary set as `collection="history"`; pin, unpin, and Clear All invalidate the All cache; the Pin path never overwrites the ordinary cache |
+| all cards | pinned text and image cards render the corner `📌` marker with `data-pinned="true"` and the original timestamp; ordinary cards render no marker; cards keep `data-action="paste"` |
+| chips | header renders `All` (no `All Dates`), `Pin`, dates, exactly one separator, then only `Text` and `Images`, in one toolbar row, with the search box and count intact |
 | empty | empty collection, empty pinned view, and refused pin/unpin edge cases |
 | privacy | no clipboard payload text appears in the log output |
 
 ## Live UI verification
 
-The harness cannot render the panel, so these need Peekaboo against a running,
-unlocked Hammerspoon session (see `AGENTS.md` → Visual testing). Use identifiable
-test phrases, and clean up only the records you created:
+The harness asserts the generated panel HTML (header chips, card markup, pin
+marker, count text) and the Lua state behind it, so the unified `All` view, the
+chip layout, and the pinned indicator are covered without a GUI. Optional
+desktop confirmation of pointer/keyboard behavior uses Peekaboo against a
+running, unlocked Hammerspoon session (see `AGENTS.md` → Visual testing) when
+the task asks for it. Use identifiable test phrases, and clean up only the
+records you created:
 
 1. `peekaboo clipboard set "PINLIVE codex <unique>"`, open the panel with
    `peekaboo press ctrl+shift+v --foreground`.
