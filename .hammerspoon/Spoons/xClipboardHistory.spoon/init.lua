@@ -1397,11 +1397,15 @@ local function historyItemHTML(entry, index)
     local pinMark = entry.isPinned == true and
         '<div class="pin-mark" aria-label="Pinned">📍</div>' or ''
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
+    -- data-uid is the stable identity used to reconcile keyboard navigation and
+    -- an open context menu after the list is rebuilt (search, scope change,
+    -- pin/unpin, load more). Ordinary records use their sourceKey, pins their id.
+    local uid = escapeHTML(unifiedIdentity(entry))
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
     local loaded=hydrateEntry(entry) or entry
@@ -1420,7 +1424,7 @@ local function historyItemHTML(entry, index)
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-uid="' .. uid .. '" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         pinMark .. '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
@@ -1631,7 +1635,7 @@ end)() .. [[
 <button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 </div></header>
 <main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
-<footer>Tab: results · Shift+Tab: search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
+<footer>Tab: next result · Shift+Tab: previous result, then search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
 const bridge = (action, index, query, kind, dateKey) => {
   try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind, dateKey}); } catch (_) {}
@@ -1904,7 +1908,9 @@ search.addEventListener('keydown', event => {
   }
 });
 const resultsPanel = document.getElementById('clipboard-items');
-resultsPanel.tabIndex = 0;
+// The results container is deliberately not a tab stop: an extra stop between
+// the search field and the first card made every Tab press land on an element
+// the user cannot see, so the visible sequence skipped a card.
 resultsPanel.setAttribute('role', 'listbox');
 resultsPanel.setAttribute('aria-label', 'Clipboard history results');
 
@@ -1961,61 +1967,247 @@ document.addEventListener('focusin', event => {
   if (event.target.classList && event.target.classList.contains('item')) {
     const items = rows();
     const index = items.indexOf(event.target);
-    if (index >= 0) selectRow(index);
+    if (index >= 0) {
+      selectRow(index);
+      // Keep the keyboard cursor on the card that really has focus, so the next
+      // Tab continues from there instead of restarting at the first card.
+      navState.navIndex = index;
+      navState.lastCardIndex = index;
+      navState.uid = cardUids()[index] || null;
+    }
   }
 });
+search.addEventListener('focus', () => {
+  // Focus left the results area. The remembered card stays, so the next Tab
+  // returns to it.
+  navState.navIndex = -1;
+});
+/* BEGIN KEYBOARD NAVIGATION MODEL (tests/clipboard-pinned/panel_js_test.mjs
+   evaluates this block verbatim: pure state transitions, no DOM access.) */
+// navIndex: -1 is the search input, 0..n-1 is the nth rendered card in DOM
+// order (row-major, exactly the order the cards are in the document).
+// lastCardIndex/uid remember the last card visited, so Tab from search returns
+// to that card. Stale indexes are clamped against the current rendered list.
+function navClamp(index, count) {
+  if (!(count > 0)) return -1;
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return 0;
+  return Math.min(index, count - 1);
+}
+function navTransition(state, uids, forward) {
+  const count = uids.length;
+  const navIndex = typeof state.navIndex === 'number' ? state.navIndex : -1;
+  const remembered = navClamp(state.lastCardIndex, count);
+  const out = { navIndex: navIndex, lastCardIndex: remembered, uid: null, target: 'search' };
+  if (navIndex < 0) {
+    // The search input is focused. Tab goes to the remembered card (the first
+    // card when nothing was visited yet); Shift+Tab stays in the search field
+    // rather than falling through to unrelated header controls.
+    if (forward && count > 0) {
+      out.navIndex = remembered;
+      out.lastCardIndex = remembered;
+      out.uid = uids[remembered];
+      out.target = 'card';
+    }
+    return out;
+  }
+  const next = forward ? navIndex + 1 : navIndex - 1;
+  if (next < 0 || next >= count) {
+    // Past either end of the results: back to the search input, keeping the
+    // remembered card so the next Tab returns to the same place.
+    out.navIndex = -1;
+    out.lastCardIndex = remembered;
+    out.uid = null;
+    out.target = 'search';
+    return out;
+  }
+  out.navIndex = next;
+  out.lastCardIndex = next;
+  out.uid = uids[next];
+  out.target = 'card';
+  return out;
+}
+// Reconcile remembered/focused state against a newly rendered list. Prefer the
+// stable card uid; if it is gone, clamp to a predictable position so a stale
+// index can never point at a nonexistent card.
+function navReconcile(state, uids) {
+  const count = uids.length;
+  const navIndex = typeof state.navIndex === 'number' ? state.navIndex : -1;
+  const out = { navIndex: navIndex < 0 ? -1 : navClamp(navIndex, count), lastCardIndex: -1, uid: null };
+  if (typeof state.uid === 'string' && state.uid) {
+    const found = uids.indexOf(state.uid);
+    if (found >= 0) {
+      out.uid = state.uid;
+      out.lastCardIndex = found;
+      if (navIndex >= 0) out.navIndex = found;
+      return out;
+    }
+  }
+  const fallback = navClamp(typeof state.lastCardIndex === 'number' ? state.lastCardIndex : navIndex, count);
+  out.lastCardIndex = fallback;
+  out.uid = fallback >= 0 ? uids[fallback] : null;
+  return out;
+}
+/* END KEYBOARD NAVIGATION MODEL */
+/* BEGIN KEYBOARD NAVIGATION BINDING (tests/clipboard-pinned/panel_js_test.mjs
+   evaluates the model plus this binding against a minimal DOM stub.) */
+const navState = { navIndex: -1, lastCardIndex: -1, uid: null };
+function cardUids() {
+  return rows().map((node, position) => node.dataset.uid || ('idx:' + (node.dataset.index || position)));
+}
+function navMove(forward) {
+  const next = navTransition(navState, cardUids(), forward);
+  navState.navIndex = next.navIndex;
+  navState.lastCardIndex = next.lastCardIndex;
+  navState.uid = next.uid;
+  // Keep the document viewport exactly where it was; only the results viewport
+  // may scroll, and only to reveal the highlighted card.
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  if (next.target === 'search') {
+    clearRowSelection();
+    search.focus({ preventScroll: true });
+    if (search.setSelectionRange) {
+      try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {}
+    }
+  } else {
+    const item = rows()[next.navIndex];
+    if (!item) {
+      clearRowSelection();
+      search.focus({ preventScroll: true });
+    } else {
+      // selectRow highlights the card and reveals it inside the scrolling main.
+      selectRow(next.navIndex, true);
+      item.focus({ preventScroll: true });
+    }
+  }
+  window.scrollTo(scrollX, scrollY);
+}
 window.resetClipboardSelection = () => {
+  // Called after every panel rebuild (search, scope, filter, load more, refresh,
+  // Clear All). Re-resolve the remembered and focused card against the new list.
   selectedIndex = 0;
   clearRowSelection();
+  const reconciled = navReconcile(navState, cardUids());
+  navState.navIndex = reconciled.navIndex;
+  navState.lastCardIndex = reconciled.lastCardIndex;
+  navState.uid = reconciled.uid;
 };
-const contextMenu = document.createElement('div');
-contextMenu.id = 'clipboard-context-menu';
-contextMenu.innerHTML =
-  '<button type="button" data-context-action="preview">👁️ Preview</button>' +
-  '<button type="button" data-context-action="pasteAll">🧴 Paste All the rows above this row in the order from early to late, including this row</button>' +
-  '<button type="button" data-context-action="copy">📋 Copy</button>' +
-  '<button type="button" data-context-action="pin">📍 Pin</button>';
-contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
-contextMenu.querySelectorAll('button').forEach(button => {
-  button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
-  button.style.borderRadius = '5px';
-  button.addEventListener('mouseenter', () => { button.style.background = '#3a4250'; });
-  button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
-});
-document.body.appendChild(contextMenu);
-let contextRowIndex = 0;
-document.addEventListener('contextmenu', event => {
-  const item = event.target.closest('.item');
-  if (!item) return;
-  event.preventDefault();
-  contextRowIndex = Number(item.dataset.index || 0);
-  const pb=contextMenu.querySelector('[data-context-action="pin"]');
-  if(pb){pb.dataset.contextAction=item.dataset.pinned==='true'?'unpin':'pin';pb.textContent=item.dataset.pinned==='true'?'📌 Unpin':'📍 Pin';}
-  selectRow(rows().indexOf(item));
-  contextMenu.style.display = 'block';
+/* END KEYBOARD NAVIGATION BINDING */
+/* BEGIN CONTEXT MENU MODEL (tests/clipboard-pinned/panel_js_test.mjs evaluates
+   this block verbatim, so it must stay free of panel-specific wiring.) */
+// The menu is rebuilt from the item that is being right-clicked, on every open.
+// Each button keeps a stable data-context-slot; the mutable data-context-action
+// value is only the payload. Looking the button up by that payload is what made
+// the state leak: opening a pinned item rewrote the attribute that identified
+// the button, so the next open could no longer find it and the label stayed
+// "Unpin" for every following item.
+const CONTEXT_MENU_ITEMS = [
+  { slot: 'preview', label: '👁️ Preview' },
+  { slot: 'pasteAll', label: '🧴 Paste All the rows above this row in the order from early to late, including this row' },
+  { slot: 'copy', label: '📋 Copy' },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
+];
+function contextMenuSpec(isPinned) {
+  return CONTEXT_MENU_ITEMS.map(spec => ({
+    slot: spec.slot,
+    action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label
+  }));
+}
+function buildContextMenu(menu) {
+  contextMenuSpec(false).forEach(part => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('data-context-slot', part.slot);
+    button.dataset.contextAction = part.action;
+    button.textContent = part.label;
+    button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+    button.addEventListener('mouseenter', () => { button.style.background = '#3a4250'; });
+    button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
+    menu.appendChild(button);
+  });
+  return menu;
+}
+// Recompute every button from the current target. The pinned state comes from
+// the target card only - never from the previously opened menu, the selected
+// card, or any shared menu state.
+function applyContextMenuTarget(menu, item) {
+  if (!menu || !item) return null;
+  const spec = contextMenuSpec(item.dataset.pinned === 'true');
+  spec.forEach(part => {
+    const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
+    if (!button) return;
+    button.dataset.contextAction = part.action;
+    button.textContent = part.label;
+  });
+  return spec;
+}
+function openContextMenu(menu, state, item, point) {
+  const parsed = Number(item.dataset.index);
+  state.rowIndex = Number.isInteger(parsed) ? parsed : 0;
+  state.uid = item.dataset.uid || null;
+  applyContextMenuTarget(menu, item);
+  menu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
-  const menuHeight = contextMenu.offsetHeight || 64;
-  contextMenu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)) + 'px';
-  contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)) + 'px';
-});
-contextMenu.addEventListener('click', event => {
-  const button = event.target.closest('button[data-context-action]');
-  if (!button) return;
-  event.preventDefault();
-  event.stopPropagation();
-  const rowIndex = contextRowIndex;
+  const menuHeight = menu.offsetHeight || 64;
+  menu.style.left = Math.max(8, Math.min(point.x, window.innerWidth - menuWidth - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(point.y, window.innerHeight - menuHeight - 8)) + 'px';
+  return state;
+}
+// Resolve the menu target from the identity captured when the menu opened. The
+// rendered list can change (pin, unpin, refresh) while the menu is visible, so
+// the stable card uid decides. When the uid is gone the menu target is gone:
+// the captured row index is never used as a fallback for a card that has a uid,
+// because after a rebuild that index can belong to an unrelated record.
+function findContextRow(state, items) {
+  if (state.uid) {
+    for (const node of items) {
+      if (node.dataset.uid === state.uid) return node;
+    }
+    return null;
+  }
+  for (const node of items) {
+    if (Number(node.dataset.index || 0) === state.rowIndex) return node;
+  }
+  return null;
+}
+function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items) {
+  const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
+  if (!button) return false;
   const action = button.dataset.contextAction;
-  contextMenu.style.display = 'none';
+  menu.style.display = 'none';
+  const target = findContextRow(state, items);
+  if (!target) return true;
+  const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') {
     bridge('pasteAllFrom', rowIndex, '');
   } else if (action === 'copy') {
     bridge('copyHistoryEntry', rowIndex, '');
   } else if (action === 'pin' || action === 'unpin') {
-    bridge(action,rowIndex,'');
-  } else if (action === 'preview') {
-    const items = rows();
-    const item = items.find(node => Number(node.dataset.index || 0) === rowIndex);
-    openManualPreview(item);
+    bridge(action, rowIndex, '');
+  } else if (action === 'preview' && openManualPreview) {
+    openManualPreview(target);
+  }
+  return true;
+}
+/* END CONTEXT MENU MODEL */
+const contextMenu = document.createElement('div');
+contextMenu.id = 'clipboard-context-menu';
+buildContextMenu(contextMenu);
+contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
+document.body.appendChild(contextMenu);
+const contextState = { rowIndex: -1, uid: null };
+document.addEventListener('contextmenu', event => {
+  const item = event.target.closest ? event.target.closest('.item') : null;
+  if (!item) return;
+  event.preventDefault();
+  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY });
+  selectRow(rows().indexOf(item));
+});
+contextMenu.addEventListener('click', event => {
+  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows())) {
+    event.preventDefault();
+    event.stopPropagation();
   }
 });
 document.addEventListener('click', event => {
@@ -2030,25 +2222,25 @@ if (clipboardScrollContainer) {
 }
 
 document.addEventListener('keydown', event => {
-  // Keep arrow keys in the search input native, so the caret can move through
-  // the query. Tab moves to the results container; Shift+Tab returns to search.
-  if (event.key === 'Tab' && event.target === search && !event.shiftKey) {
+  // One navigation path owns Tab in both directions. The panel handles Tab only
+  // while the search field or a clipboard card is focused, so header controls
+  // keep native Tab order and the event is never processed twice.
+  if (event.key === 'Tab') {
+    const inSearch = event.target === search;
+    const inResults = !inSearch && event.target.classList &&
+      event.target.classList.contains('item') && resultsPanel.contains(event.target);
+    if (!inSearch && !inResults) {
+      // Rebuilding the results (search, scope, pin, Clear All) drops focus to
+      // <body>. Treat that as the search context so Tab reaches a card and
+      // never a header control; header controls keep native Tab order.
+      if (event.target === document.body || event.target === resultsPanel) {
+        event.preventDefault();
+        navMove(!event.shiftKey);
+      }
+      return;
+    }
     event.preventDefault();
-    // Prevent WebKit from revealing the focused results container/card by
-    // scrolling the document. Keep the search field's current viewport stable.
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-    resultsPanel.focus({preventScroll:true});
-    window.scrollTo(scrollX, scrollY);
-    return;
-  }
-  if (event.key === 'Tab' && event.shiftKey &&
-      (event.target === resultsPanel ||
-       (event.target.classList && event.target.classList.contains('item') &&
-        resultsPanel.contains(event.target)))) {
-    event.preventDefault();
-    search.focus();
-    search.setSelectionRange(search.value.length, search.value.length);
+    navMove(!event.shiftKey);
     return;
   }
   if (event.target === search && ['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
@@ -2081,8 +2273,8 @@ document.addEventListener('keydown', event => {
     if (item) bridge('paste', Number(item.dataset.index || 0), '');
   }
 });
-// Do not preselect the first card or scroll the grid on open. Tab should
-// only move focus to the results container; the user chooses a row with arrows.
+// Do not preselect the first card or scroll the grid on open: focus starts in
+// the search field and Tab walks the cards in order from the first one.
 clearRowSelection();
 search.focus();
 </script></body></html>]]

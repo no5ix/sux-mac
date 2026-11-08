@@ -1,0 +1,574 @@
+#!/usr/bin/env node
+// Automated verification for the Clipboard History panel JavaScript.
+//
+// The code under test is extracted VERBATIM from the production Spoon file
+// (.hammerspoon/Spoons/xClipboardHistory.spoon/init.lua) between the
+// BEGIN/END markers, so this file exercises the shipped panel logic, not a
+// copy of it. A minimal DOM stub supplies the few browser APIs the extracted
+// blocks touch.
+//
+// Scope: the context-menu Pin/Unpin state and the Tab / Shift+Tab navigation
+// model. There is no GUI automation here: Peekaboo is deliberately not used.
+//
+//   node tests/clipboard-pinned/panel_js_test.mjs
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const SPOON = join(here, "..", "..", ".hammerspoon", "Spoons",
+  "xClipboardHistory.spoon", "init.lua");
+const source = readFileSync(SPOON, "utf8");
+
+function block(begin, end) {
+  const start = source.indexOf(begin);
+  const stop = source.indexOf(end);
+  assert.ok(start > 0, `missing marker in the Spoon file: ${begin}`);
+  assert.ok(stop > start, `missing marker in the Spoon file: ${end}`);
+  return source.slice(start, stop);
+}
+
+const menuModel = block("/* BEGIN CONTEXT MENU MODEL", "/* END CONTEXT MENU MODEL */");
+const navModel = block("/* BEGIN KEYBOARD NAVIGATION MODEL", "/* END KEYBOARD NAVIGATION MODEL */");
+const navBinding = block("/* BEGIN KEYBOARD NAVIGATION BINDING", "/* END KEYBOARD NAVIGATION BINDING */");
+
+// The panel script as the browser sees it, for the structural checks.
+const scriptStart = source.indexOf("<script>");
+const scriptEnd = source.indexOf("</script>");
+assert.ok(scriptStart > 0 && scriptEnd > scriptStart, "panel <script> not found");
+const panelScript = source.slice(scriptStart + "<script>".length, scriptEnd);
+
+// ---------------------------------------------------------------- DOM stub --
+
+const kebab = (name) => name.replace(/[A-Z]/g, (ch) => "-" + ch.toLowerCase());
+
+class El {
+  constructor(tagName) {
+    this.tagName = String(tagName).toUpperCase();
+    this.parentNode = null;
+    this.children = [];
+    this.attrs = new Map();
+    this.style = {};
+    this.textContent = "";
+    this.classList = new ClassList(this);
+    this.handlers = new Map();
+    // dataset mirrors the browser: dataset.contextAction maps to the
+    // data-context-action attribute, and writing it updates that attribute -
+    // exactly the coupling the leaked-state bug relied on.
+    this.dataset = new Proxy({}, {
+      get: (_t, prop) => (typeof prop === "string" ? this.attrs.get(`data-${kebab(prop)}`) : undefined),
+      set: (_t, prop, value) => { this.attrs.set(`data-${kebab(prop)}`, String(value)); return true; },
+      has: (_t, prop) => this.attrs.has(`data-${kebab(prop)}`),
+    });
+  }
+  setAttribute(name, value) { this.attrs.set(name, String(value)); }
+  getAttribute(name) { return this.attrs.has(name) ? this.attrs.get(name) : null; }
+  appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+  addEventListener(type, handler) {
+    if (!this.handlers.has(type)) this.handlers.set(type, []);
+    this.handlers.get(type).push(handler);
+  }
+  matches(selector) {
+    const tag = selector.match(/^([a-z]+)/i);
+    const rest = tag ? selector.slice(tag[1].length) : selector;
+    if (tag && this.tagName !== tag[1].toUpperCase()) return false;
+    for (const part of rest.match(/\[[^\]]+\]/g) || []) {
+      const inner = part.slice(1, -1);
+      const eq = inner.indexOf("=");
+      if (eq < 0) {
+        if (!this.attrs.has(inner)) return false;
+      } else {
+        const name = inner.slice(0, eq);
+        const value = inner.slice(eq + 1).replace(/^["']|["']$/g, "");
+        if (this.attrs.get(name) !== value) return false;
+      }
+    }
+    if (rest.startsWith(".item") && !this.classList.contains("item")) return false;
+    return true;
+  }
+  querySelectorAll(selector) {
+    const found = [];
+    const walk = (node) => node.children.forEach((child) => {
+      if (child.matches(selector)) found.push(child);
+      walk(child);
+    });
+    walk(this);
+    return found;
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches && node.matches(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+  focus() { FOCUS.set(this); }
+  dispatch(type, event) {
+    (this.handlers.get(type) || []).forEach((handler) => handler(event));
+  }
+}
+
+class ClassList {
+  constructor(el) { this.el = el; this.set = new Set(); }
+  add(name) { this.set.add(name); }
+  remove(name) { this.set.delete(name); }
+  contains(name) { return this.set.has(name); }
+  toggle(name, on) { if (on) this.set.add(name); else this.set.delete(name); }
+}
+
+const FOCUS = {
+  current: null,
+  log: [],
+  set(el) {
+    this.current = el;
+    this.log.push(el === SEARCH ? "search" : `card:${el.dataset.uid}`);
+  },
+};
+
+const SEARCH = {
+  value: "",
+  setSelectionRange() {},
+  focus() { FOCUS.set(SEARCH); },
+};
+
+function makeWindow() {
+  return { innerWidth: 1200, innerHeight: 800, scrollX: 7, scrollY: 11, scrollTo() {} };
+}
+
+// Card fixtures: text and image, ordinary and pinned, in rendered DOM order.
+function card(index, uid, pinned, type) {
+  const el = new El(type === "image" ? "div" : "button");
+  el.classList.add("item");
+  el.attrs.set("data-index", String(index));
+  el.attrs.set("data-uid", uid);
+  el.attrs.set("data-pinned", String(pinned));
+  el.attrs.set("data-kind", type);
+  el.attrs.set("data-action", "paste");
+  return el;
+}
+
+function loadNavigation(cards) {
+  const state = { cards: [...cards], selected: -1, cleared: 0 };
+  const rows = () => state.cards;
+  const selectRow = (index) => { state.selected = index; };
+  const clearRowSelection = () => { state.cleared += 1; };
+  const windowStub = makeWindow();
+  const api = new Function("rows", "selectRow", "clearRowSelection", "search", "window", "selectedIndex",
+    `${navModel}\n${navBinding}\nreturn { navState, cardUids, navMove, reset: window.resetClipboardSelection };`)(
+    rows, selectRow, clearRowSelection, SEARCH, windowStub, 0);
+  return { ...state, api, state: state };
+}
+
+function loadMenuModel() {
+  const document = { createElement: (tag) => new El(tag) };
+  const window = makeWindow();
+  return new Function("document", "window",
+    `${menuModel}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick };`)(
+    document, window);
+}
+
+// ------------------------------------------------------------------- tests --
+
+const results = [];
+function test(name, body) {
+  try {
+    body();
+    results.push(["PASS", name]);
+  } catch (error) {
+    results.push(["FAIL", `${name} :: ${error && error.message ? error.message : error}`]);
+  }
+}
+
+const menu = loadMenuModel();
+const actions = (m) => m.querySelectorAll("button").map((b) => b.dataset.contextAction);
+const labels = (m) => m.querySelectorAll("button").map((b) => b.textContent);
+
+test("context menu: ordinary text and image items produce Pin", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const ordinaryText = card(0, "2026-11-08:100:text:1", false, "text");
+  const ordinaryImage = card(1, "2026-11-08:101:image:2", false, "image");
+  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryText).map(p => p.action),
+    ["preview", "pasteAll", "copy", "pin"]);
+  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"]);
+  assert.ok(labels(m)[3].includes("Pin") && !labels(m)[3].includes("Unpin"), labels(m)[3]);
+  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryImage).map(p => p.action),
+    ["preview", "pasteAll", "copy", "pin"]);
+  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"]);
+  // Order and item count are preserved; nothing is duplicated.
+  assert.equal(m.querySelectorAll("button").length, 4);
+  assert.deepEqual(labels(m).map(l => l.slice(0, 2)), ["👁️", "🧴", "📋", "📍"].map(s => s.slice(0, 2)));
+});
+
+test("context menu: pinned text and image items produce Unpin", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const pinnedText = card(0, "pin-1", true, "text");
+  const pinnedImage = card(1, "pin-2", true, "image");
+  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedText).map(p => p.action),
+    ["preview", "pasteAll", "copy", "unpin"]);
+  assert.ok(labels(m)[3].includes("Unpin"), labels(m)[3]);
+  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedImage).map(p => p.action),
+    ["preview", "pasteAll", "copy", "unpin"]);
+  assert.equal(m.querySelectorAll("button").length, 4);
+});
+
+test("context menu: opening a pinned menu does not change the next ordinary menu", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const pinned = card(0, "pin-1", true, "text");
+  const ordinary = card(1, "2026-11-08:102:text:3", false, "text");
+  menu.applyContextMenuTarget(m, pinned);
+  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "unpin"]);
+  menu.applyContextMenuTarget(m, ordinary);
+  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"], "state leaked from the pinned item");
+  assert.ok(labels(m)[3].includes("Pin") && !labels(m)[3].includes("Unpin"));
+});
+
+test("context menu: opening an ordinary menu does not change the next pinned menu", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const pinned = card(0, "pin-9", true, "image");
+  const ordinary = card(1, "2026-11-08:103:text:4", false, "text");
+  menu.applyContextMenuTarget(m, ordinary);
+  menu.applyContextMenuTarget(m, pinned);
+  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "unpin"]);
+});
+
+test("context menu: repeated alternating pinned and ordinary opens stay correct", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const sequence = [
+    card(0, "2026-11-08:200:text:1", false, "text"),
+    card(1, "pin-a", true, "text"),
+    card(2, "2026-11-08:201:text:2", false, "text"),
+    card(3, "pin-b", true, "image"),
+    card(0, "2026-11-08:200:text:1", false, "text"),
+    card(4, "2026-11-08:202:image:5", false, "image"),
+    card(5, "pin-c", true, "image"),
+    card(4, "2026-11-08:202:image:5", false, "image"),
+    card(5, "pin-c", true, "image"),
+    card(0, "2026-11-08:200:text:1", false, "text"),
+  ];
+  for (const item of sequence) {
+    menu.applyContextMenuTarget(m, item);
+    const expected = item.dataset.pinned === "true" ? "unpin" : "pin";
+    assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", expected],
+      `uid ${item.dataset.uid} expected ${expected}, got ${actions(m).join(",")}`);
+  }
+});
+
+test("context menu: the pin button stays findable after its action is mutated", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  menu.applyContextMenuTarget(m, card(0, "pin-1", true, "text"));
+  assert.equal(m.querySelectorAll("button").length, 4, "no duplicate buttons were added");
+  assert.ok(m.querySelector('[data-context-slot="pin"]'), "stable slot lookup must survive");
+  // Documents why the slot is required: the mutable payload is now "unpin", so a
+  // lookup keyed on the payload finds nothing (the original leak).
+  assert.equal(m.querySelector('[data-context-action="pin"]'), null);
+});
+
+test("context menu: the click acts on the card that opened the menu", () => {
+  const calls = [];
+  const bridge = (action, index) => calls.push([action, index]);
+  const m = menu.buildContextMenu(new El("div"));
+  const items = [
+    card(1, "2026-11-08:300:text:1", false, "text"),
+    card(2, "2026-11-08:301:image:2", false, "image"),
+    card(3, "pin-x", true, "text"),
+  ];
+  const state = { rowIndex: -1, uid: null };
+  const target = items[2];
+  menu.openContextMenu(m, state, target, { x: 40, y: 60 });
+  assert.equal(state.uid, "pin-x");
+  assert.equal(m.style.display, "block");
+  const pinButton = m.querySelector('[data-context-slot="pin"]');
+  menu.handleContextMenuClick(m, state, { target: pinButton }, bridge, () => {}, items);
+  assert.deepEqual(calls, [["unpin", 3]], "must unpin the right-clicked card");
+
+  menu.openContextMenu(m, state, items[0], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state, { target: pinButton }, bridge, () => {}, items);
+  assert.deepEqual(calls[1], ["pin", 1], "the following ordinary card must be pinned");
+
+  const previewed = [];
+  menu.openContextMenu(m, state, items[1], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="preview"]') }, bridge,
+    (item) => previewed.push(item.dataset.uid), items);
+  assert.deepEqual(previewed, ["2026-11-08:301:image:2"], "preview uses the current target");
+  menu.openContextMenu(m, state, items[1], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="copy"]') }, bridge, () => {}, items);
+  assert.deepEqual(calls[2], ["copyHistoryEntry", 2]);
+  menu.openContextMenu(m, state, items[1], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pasteAll"]') }, bridge, () => {}, items);
+  assert.deepEqual(calls[3], ["pasteAllFrom", 2]);
+});
+
+test("context menu: a rebuilt list is resolved by uid, not by a stale index", () => {
+  const calls = [];
+  const bridge = (action, index) => calls.push([action, index]);
+  const m = menu.buildContextMenu(new El("div"));
+  const before = [card(5, "pin-x", true, "text")];
+  const state = { rowIndex: -1, uid: null };
+  menu.openContextMenu(m, state, before[0], { x: 5, y: 5 });
+  // The panel re-renders: index 5 is now a different, ordinary record.
+  const after = [
+    card(0, "2026-11-08:400:text:1", false, "text"),
+    card(5, "2026-11-08:401:text:2", false, "text"),
+    card(9, "pin-x", true, "text"),
+  ];
+  const pinButton = m.querySelector('[data-context-slot="pin"]');
+  menu.handleContextMenuClick(m, state, { target: pinButton }, bridge, () => {}, after);
+  assert.deepEqual(calls, [["unpin", 9]], "must follow the pinned card, not index 5");
+});
+
+test("context menu: a target that disappeared is ignored", () => {
+  const calls = [];
+  const m = menu.buildContextMenu(new El("div"));
+  const state = { rowIndex: -1, uid: null };
+  menu.openContextMenu(m, state, card(4, "pin-gone", true, "text"), { x: 5, y: 5 });
+  const handled = menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pin"]') },
+    (action, index) => calls.push([action, index]), () => {}, [card(4, "other", false, "text")]);
+  assert.equal(handled, true, "the click is consumed");
+  assert.deepEqual(calls, [], "no action runs against an unrelated card sharing the old index");
+  // A card without a uid still resolves by its captured index (defensive path).
+  const legacy = new El("button");
+  legacy.classList.add("item");
+  legacy.attrs.set("data-index", "7");
+  legacy.attrs.set("data-pinned", "true");
+  const legacyState = { rowIndex: -1, uid: null };
+  menu.openContextMenu(m, legacyState, legacy, { x: 5, y: 5 });
+  assert.equal(legacyState.uid, null);
+  menu.handleContextMenuClick(m, legacyState,
+    { target: m.querySelector('[data-context-slot="pin"]') },
+    (action, index) => calls.push([action, index]), () => {}, [card(7, "late-uid", true, "text")]);
+  assert.deepEqual(calls, [["unpin", 7]], "the index fallback stays available without a uid");
+});
+
+test("navigation: Tab walks the cards in DOM order across rows", () => {
+  const cards = Array.from({ length: 12 }, (_, i) => card(i + 1, `u${i}`, false, "text"));
+  const nav = loadNavigation(cards);
+  FOCUS.log = [];
+  FOCUS.set(SEARCH);
+  const seen = [];
+  for (let i = 0; i < 12; i += 1) {
+    nav.api.navMove(true);
+    seen.push(FOCUS.current.dataset.uid);
+  }
+  assert.deepEqual(seen, cards.map(c => c.dataset.uid), "one step per card, no skips, no repeats");
+});
+
+test("navigation: grid column count does not change the Tab order", () => {
+  const cards = Array.from({ length: 12 }, (_, i) => card(i + 1, `c${i}`, false, "text"));
+  for (const columns of [1, 2, 3, 4, 5]) {
+    const nav = loadNavigation(cards);
+    FOCUS.log = [];
+    const seen = [];
+    for (let i = 0; i < 12; i += 1) {
+      nav.api.navMove(true);
+      seen.push(FOCUS.current.dataset.uid);
+    }
+    assert.equal(columns > 0, true);
+    assert.deepEqual(seen, cards.map(c => c.dataset.uid), `columns=${columns}`);
+  }
+});
+
+test("navigation: the required Tab and Shift+Tab sequence is sequential", () => {
+  const cards = Array.from({ length: 8 }, (_, i) => card(i + 1, `s${i}`, i % 3 === 1, "text"));
+  const nav = loadNavigation(cards);
+  FOCUS.log = [];
+  FOCUS.set(SEARCH);
+  const step = (forward) => {
+    nav.api.navMove(forward);
+    return FOCUS.current === SEARCH ? "search" : `item ${cards.findIndex(c => c === FOCUS.current) + 1}`;
+  };
+  assert.equal(step(true), "item 1");
+  assert.equal(step(true), "item 2");
+  assert.equal(step(false), "item 1");   // Shift+Tab steps one card back
+  assert.equal(step(false), "search");   // from the first card it returns to search
+  assert.equal(step(false), "search");   // Shift+Tab in search stays in search
+  assert.equal(step(true), "item 1");
+  assert.equal(step(true), "item 2");
+  assert.equal(step(true), "item 3");
+  assert.equal(step(true), "item 4");
+  assert.equal(step(true), "item 5");
+  assert.equal(step(false), "item 4");
+  assert.equal(step(false), "item 3");
+  assert.equal(step(false), "item 2");
+  assert.equal(step(false), "item 1");
+  assert.equal(step(false), "search");
+  assert.deepEqual(nav.api.navState, { navIndex: -1, lastCardIndex: 0, uid: null });
+});
+
+test("navigation: Shift+Tab to search then Tab returns to the remembered card", () => {
+  const cards = Array.from({ length: 6 }, (_, i) => card(i + 1, `r${i}`, false, "text"));
+  const nav = loadNavigation(cards);
+  FOCUS.set(SEARCH);
+  nav.api.navMove(true);
+  nav.api.navMove(true);            // item 2
+  assert.equal(FOCUS.current.dataset.uid, "r1");
+  nav.api.navMove(false);           // item 1
+  nav.api.navMove(false);           // search
+  assert.equal(FOCUS.current, SEARCH);
+  // The documented scenario: leaving item 2's neighbourhood and tabbing back must
+  // not restart at item 1, so no card is skipped over.
+  assert.equal(nav.api.navState.lastCardIndex, 0);
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current.dataset.uid, "r0", "Tab returns to the remembered card");
+  // Explicit memory of item 2:
+  nav.api.navState.lastCardIndex = 1;
+  nav.api.navState.uid = "r1";
+  nav.api.navState.navIndex = -1;
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current.dataset.uid, "r1");
+});
+
+test("navigation: only search and cards receive focus", () => {
+  const cards = [card(1, "f0", false, "text"), card(2, "pin-f", true, "image")];
+  const nav = loadNavigation(cards);
+  FOCUS.log = [];
+  FOCUS.set(SEARCH);
+  for (let i = 0; i < 8; i += 1) nav.api.navMove(i % 2 === 0);
+  FOCUS.log.forEach(target =>
+    assert.ok(target === "search" || target.startsWith("card:"), `unexpected focus target: ${target}`));
+});
+
+test("navigation: list rebuild keeps the remembered card by stable identity", () => {
+  const nav = loadNavigation([card(1, "keep-me", false, "text"), card(2, "other", false, "text")]);
+  nav.api.navState.navIndex = 0;
+  nav.api.navState.lastCardIndex = 0;
+  nav.api.navState.uid = "keep-me";
+  const rebuilt = [
+    card(1, "new-top", true, "text"),
+    card(2, "keep-me", false, "text"),
+    card(3, "other", false, "image"),
+  ];
+  nav.state.cards = rebuilt;
+  nav.api.reset();
+  assert.equal(nav.api.navState.uid, "keep-me", "identity, not index");
+  assert.equal(nav.api.navState.lastCardIndex, 1, "the card moved to position 1");
+  assert.equal(nav.api.navState.navIndex, 1, "focus follows the same card");
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current.dataset.uid, "other");
+});
+
+test("navigation: a focused card that disappears falls back predictably", () => {
+  const nav = loadNavigation([card(1, "a", false, "text"), card(2, "b", false, "text"), card(3, "c", false, "text")]);
+  nav.api.navState.navIndex = 2;
+  nav.api.navState.lastCardIndex = 2;
+  nav.api.navState.uid = "c";
+  // The Text filter removes "c": the cursor must land on a real card, never a
+  // nonexistent index.
+  nav.state.cards = [card(1, "a", false, "text"), card(2, "b", false, "text")];
+  nav.api.reset();
+  assert.equal(nav.api.navState.navIndex, 1);
+  assert.equal(nav.api.navState.lastCardIndex, 1);
+  assert.equal(nav.api.navState.uid, "b");
+  nav.api.navMove(false);
+  assert.equal(FOCUS.current.dataset.uid, "a");
+});
+
+test("navigation: empty results and Clear All keep focus in the search field", () => {
+  const nav = loadNavigation([card(1, "a", false, "text")]);
+  nav.api.navState.navIndex = 0;
+  nav.api.navState.lastCardIndex = 0;
+  nav.api.navState.uid = "a";
+  nav.state.cards = [];
+  nav.api.reset();
+  assert.deepEqual(nav.api.navState, { navIndex: -1, lastCardIndex: -1, uid: null });
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current, SEARCH, "Tab on an empty list must not focus an unrelated control");
+  nav.api.navMove(false);
+  assert.equal(FOCUS.current, SEARCH);
+});
+
+test("navigation: one result cycles between search and that card", () => {
+  const nav = loadNavigation([card(1, "only", true, "image")]);
+  FOCUS.set(SEARCH);
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current.dataset.uid, "only");
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current, SEARCH);
+  nav.api.navMove(true);
+  assert.equal(FOCUS.current.dataset.uid, "only");
+  nav.api.navMove(false);
+  assert.equal(FOCUS.current, SEARCH);
+});
+
+test("navigation: load more keeps the position and continues sequentially", () => {
+  const nav = loadNavigation(Array.from({ length: 4 }, (_, i) => card(i + 1, `p${i}`, false, "text")));
+  nav.api.navState.navIndex = 3;
+  nav.api.navState.lastCardIndex = 3;
+  nav.api.navState.uid = "p3";
+  nav.state.cards = Array.from({ length: 8 }, (_, i) => card(i + 1, `p${i}`, false, "text"));
+  nav.api.reset();
+  assert.equal(nav.api.navState.uid, "p3");
+  assert.equal(nav.api.navState.navIndex, 3);
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    nav.api.navMove(true);
+    seen.push(FOCUS.current.dataset.uid);
+  }
+  assert.deepEqual(seen, ["p4", "p5", "p6", "p7"], "the appended cards follow in order");
+});
+
+test("navigation: a stale state object can never point past the list", () => {
+  const stale = { navIndex: 40, lastCardIndex: 40, uid: "gone" };
+  const uids = ["x", "y", "z"];
+  const reconciled = new Function(`${navModel}\nreturn navReconcile;`)();
+  const next = reconciled(stale, uids);
+  const inRange = (index) => index === -1 || (index >= 0 && index < uids.length);
+  assert.ok(inRange(next.navIndex), `navIndex out of range: ${JSON.stringify(next)}`);
+  assert.ok(inRange(next.lastCardIndex), `lastCardIndex out of range: ${JSON.stringify(next)}`);
+  assert.equal(next.uid, uids[next.lastCardIndex]);
+  const transition = new Function(`${navModel}\nreturn navTransition;`)();
+  const moved = transition({ navIndex: next.navIndex, lastCardIndex: next.lastCardIndex, uid: next.uid }, uids, true);
+  // -1 is the search sentinel; anything else must be a real card position.
+  assert.ok(inRange(moved.navIndex), `transition target out of range: ${JSON.stringify(moved)}`);
+  if (moved.target === "card") assert.ok(moved.navIndex >= 0 && moved.navIndex < uids.length);
+  // From the last card, Tab returns to search and then back to the same card.
+  assert.equal(moved.target, "search");
+  const back = transition(moved, uids, true);
+  assert.equal(back.target, "card");
+  assert.equal(back.uid, uids[next.lastCardIndex]);
+});
+
+test("navigation: one keydown path drives Tab, other keys keep their handlers", () => {
+  const tabBranches = panelScript.match(/event\.key === ['"]Tab['"]/g) || [];
+  assert.equal(tabBranches.length, 1, `expected exactly one Tab branch, found ${tabBranches.length}`);
+  assert.ok(panelScript.includes("navMove(!event.shiftKey)"), "Tab must delegate to navMove");
+  assert.ok(/event\.target === document\.body \|\| event\.target === resultsPanel/.test(panelScript),
+    "Tab after a results rebuild must fall back to the card list, not header controls");
+  assert.ok(!panelScript.includes("resultsPanel.focus("), "the results container must not be a tab stop");
+  assert.ok(!panelScript.includes("resultsPanel.tabIndex"), "no tabindex on the results container");
+  assert.ok(/if \(event\.key === 'Escape'\) \{[\s\S]*bridge\('close', 0, ''\)/.test(panelScript),
+    "Escape must still close the panel");
+  assert.ok(panelScript.includes("bridge('paste', Number(item.dataset.index || 0), '')"),
+    "Enter must still paste the selected card");
+  assert.ok(panelScript.includes("['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)"),
+    "arrow navigation must remain");
+  assert.ok(panelScript.includes("event.stopImmediatePropagation();\n    applyFilters();"),
+    "Enter-to-search must stay isolated from the card handler");
+  assert.ok(panelScript.includes("search.addEventListener('input'"), "typing in search stays native");
+  assert.ok(!/data-context-action=/.test(panelScript),
+    "menu buttons must not be keyed by the mutable payload attribute");
+});
+
+test("navigation: nav model uses DOM order only, never grid geometry", () => {
+  assert.ok(!/clientWidth|gridTemplate|columns/.test(navModel),
+    "the navigation model must not derive order from grid geometry");
+  assert.ok(/uids\[next\]/.test(navModel) && /uids\[remembered\]/.test(navModel));
+});
+
+// ------------------------------------------------------------------ report --
+
+let failed = 0;
+for (const [status, name] of results) {
+  console.log(`${status} ${name}`);
+  if (status === "FAIL") failed += 1;
+}
+console.log(`${results.length - failed} passed, ${failed} failed (${results.length} JavaScript scenarios)`);
+console.log("Peekaboo was not used: no GUI automation is performed by this file.");
+process.exit(failed === 0 ? 0 : 1);

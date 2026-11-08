@@ -1283,6 +1283,157 @@ test("the filter bar is All, Pin, dates, separator, Text, Images", function()
     check(html:find('pointer-events:none', 1, true) ~= nil, "the pin marker is click-through")
 end)
 
+test("the context menu is resolved per card and never shared between cards", function()
+    local environment = new_environment("context-menu")
+    seed_codex_day(environment)
+    environment.seed_image_day(DATE, "20261107103607", BASE_TS + 300)
+    environment.pin_first_matching("codex", "text")
+    local images = environment.t.searchPersistentHistory("[image]", "image")
+    check(environment.t.pinClipboardEntry(images[1]), "the image is pinned")
+    environment.t.restorePersistentHistory()
+
+    for _, scope in ipairs({ "all", "pin" }) do
+        environment.t.setPanelState({
+            allDates = scope == "all", pinned = scope == "pin", query = "", kind = "all",
+        })
+        environment.t.updateClipboardPanel("", "all", 0, false)
+        local menu = environment.t.panelState().menuData
+        local seen_uids, pinned_indexes, ordinary_indexes = {}, {}, {}
+        for index, entry in ipairs(menu) do
+            local card = environment.t.historyItemHTML(entry, index)
+            local uid = card:match('data%-uid="([^"]*)"')
+            check(uid and uid ~= "", "every card carries a stable data-uid")
+            if scope == "all" then
+                check(not seen_uids[uid], "card identities are unique in the All collection: " .. tostring(uid))
+            end
+            seen_uids[uid] = card
+            check_equal(card:find('data-pinned="true"', 1, true) ~= nil, entry.isPinned == true,
+                "data-pinned matches the entry at index " .. index)
+            check_equal(card:find('class="pin-mark"', 1, true) ~= nil, entry.isPinned == true,
+                "the pin marker matches the entry at index " .. index)
+            if entry.isPinned then pinned_indexes[#pinned_indexes + 1] = index
+            else ordinary_indexes[#ordinary_indexes + 1] = index end
+        end
+        check(#pinned_indexes >= 2, "the fixture has a pinned text card and a pinned image card")
+        if scope == "all" then check(#ordinary_indexes >= 2, "the fixture has ordinary cards") end
+
+        -- The reported sequence: pinned, ordinary, pinned, ordinary, then the first
+        -- ordinary card again. Each card is derived from its own entry, so opening
+        -- a pinned menu can never leave Unpin on a later ordinary card.
+        local sequence = {}
+        for position = 1, math.max(#pinned_indexes, #ordinary_indexes) do
+            if ordinary_indexes[position] then sequence[#sequence + 1] = ordinary_indexes[position] end
+            if pinned_indexes[position] then sequence[#sequence + 1] = pinned_indexes[position] end
+        end
+        sequence[#sequence + 1] = ordinary_indexes[1]
+        for _, index in ipairs(sequence) do
+            local card = environment.t.historyItemHTML(menu[index], index)
+            local expect_pinned = menu[index].isPinned == true
+            check_equal(card:find('data-pinned="true"', 1, true) ~= nil, expect_pinned,
+                "re-rendering index " .. index .. " in the " .. scope .. " scope keeps its own pinned state")
+            check_equal(card:find('class="pin-mark"', 1, true) ~= nil, expect_pinned,
+                "the pin marker follows the card that is rendered")
+        end
+    end
+
+    -- The JavaScript that consumes data-pinned must identify its buttons by a
+    -- stable slot. The shipped leak came from finding the button by the very
+    -- attribute the open handler rewrote.
+    local html = environment.t.panelHTML()
+    check(html:find("data-context-slot", 1, true) ~= nil, "menu buttons carry a stable data-context-slot")
+    check(html:find('const CONTEXT_MENU_ITEMS', 1, true) ~= nil, "the menu items come from one ordered spec")
+    check(html:find('applyContextMenuTarget', 1, true) ~= nil, "the menu is rebuilt from the target item")
+    check(html:find('[data-context-action="', 1, true) == nil,
+        "no button lookup by the attribute an open handler mutates")
+    local _, slot_uses = html:gsub('data%-context%-slot', '')
+    check(slot_uses >= 3, "the slot attribute is used to build, apply, and read the menu")
+    check(html:find("resultsPanel.tabIndex", 1, true) == nil, "the results container is not a tab stop")
+    check(html:find("<footer>Tab: next result", 1, true) ~= nil, "the footer documents the sequential Tab model")
+end)
+
+test("context menu actions act on the card that requested them", function()
+    local environment = new_environment("context-actions")
+    seed_codex_day(environment)
+    environment.seed_image_day(DATE, "20261107103607", BASE_TS + 400)
+    environment.pin_first_matching("codex", "text")
+    local images = environment.t.searchPersistentHistory("[image]", "image")
+    check(environment.t.pinClipboardEntry(images[1]), "the image is pinned")
+    environment.t.restorePersistentHistory()
+
+    check_equal(#environment.t.readPinnedHistory(), 2, "the fixture pins one text and one image record")
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+
+    local function find_entry(menu, predicate, message)
+        for index, entry in ipairs(menu) do
+            if predicate(entry) then return index, entry end
+        end
+        error("fixture missing: " .. message, 2)
+    end
+
+    local menu = environment.t.panelState().menuData
+    local pinned_index, pinned_entry = find_entry(menu,
+        function(entry) return entry.isPinned and entry.type == "text" end, "pinned text card")
+    local _, pinned_image = find_entry(menu,
+        function(entry) return entry.isPinned and entry.type == "image" end, "pinned image card")
+    local ordinary_index, ordinary_entry = find_entry(menu,
+        function(entry) return not entry.isPinned and entry.type == "text" end, "ordinary text card")
+    local other_index, other_entry = find_entry(menu, function(entry)
+        return not entry.isPinned and entry.type == "text" and entry.ts ~= ordinary_entry.ts
+    end, "a second ordinary text card")
+
+    local function pinned_by_id()
+        local by_id = {}
+        for _, record in ipairs(environment.t.readPinnedHistory()) do by_id[record.id] = record end
+        return by_id
+    end
+
+    -- Copy follows the requested index, not a previously opened menu.
+    environment.t.handleMessage({ body = { action = "copyHistoryEntry", index = ordinary_index } })
+    check_equal(STUB.state.copied_text, ordinary_entry.content, "Copy copies the requested ordinary card")
+    environment.t.handleMessage({ body = { action = "copyHistoryEntry", index = pinned_index } })
+    check_equal(STUB.state.copied_text, pinned_entry.content, "Copy copies the requested pinned card")
+
+    -- Unpin removes exactly the pinned card that was right-clicked.
+    environment.t.handleMessage({ body = { action = "unpin", index = pinned_index } })
+    local after_unpin = pinned_by_id()
+    check(after_unpin[pinned_image.id], "the untouched pinned image survives")
+    check(not after_unpin[pinned_entry.id], "the requested pinned text record is removed")
+
+    -- Pin acts on the requested ordinary card and stores that card's content.
+    environment.t.handleMessage({ body = { action = "pin", index = ordinary_index } })
+    local after_pin = pinned_by_id()
+    local copied_pin = false
+    for _, record in pairs(after_pin) do
+        if record.type == "text" and record.content == ordinary_entry.content then copied_pin = true end
+    end
+    check(copied_pin, "the requested ordinary card is pinned with its own content")
+    check(after_pin[pinned_image.id], "the pinned image is unchanged by the new pin")
+
+    -- The list is rebuilt after every pin/unpin; later requests stay targeted.
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local rebuilt = environment.t.panelState().menuData
+    local image_pin_index = find_entry(rebuilt,
+        function(entry) return entry.isPinned and entry.type == "image" end, "pinned image card after rebuild")
+    environment.t.handleMessage({ body = { action = "unpin", index = image_pin_index } })
+    check(not pinned_by_id()[pinned_image.id], "the pinned image is removed on request")
+    check_equal(#environment.t.readPinnedHistory(), 1, "only the newly pinned text record remains")
+
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local current = environment.t.panelState().menuData
+    local other_now = find_entry(current, function(entry)
+        return not entry.isPinned and entry.content == other_entry.content
+    end, "the second ordinary card after the churn")
+    environment.t.handleMessage({ body = { action = "copyHistoryEntry", index = other_now } })
+    check_equal(STUB.state.copied_text, other_entry.content, "Copy stays targeted after menu churn")
+
+    -- An Unpin request for a card that is not pinned changes nothing.
+    local ordinary_now = find_entry(current,
+        function(entry) return not entry.isPinned end, "an ordinary card after the churn")
+    environment.t.handleMessage({ body = { action = "unpin", index = ordinary_now } })
+    check_equal(#environment.t.readPinnedHistory(), 1, "Unpin on an ordinary card changes nothing")
+end)
+
 test("empty collection and panel rendering edge cases", function()
     local environment = new_environment("empty")
     check_equal(#environment.t.readPinnedHistory(), 0, "empty pinned index")
