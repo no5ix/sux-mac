@@ -199,7 +199,15 @@ hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "right", hs.fnutils.partial(wi
 hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "up", hs.fnutils.partial(winresize, "max"))
 -- hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "up", hs.fnutils.partial(winresize, "stage_manager_max"))
 
-
+hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "down", function()
+	local win = hs.window.focusedWindow()
+	if win ~= nil then
+		win:moveToScreen(hs.mouse.getCurrentScreen())
+		-- hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+		-- 	winresize("max")
+		-- end)
+	end
+end)
 ----------------------------------------------------------------
 
 function getMilliseconds()
@@ -343,8 +351,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("launchOrFocus NetEaseMusic)")
 			--TimerLaunchOrFocusApp("NetEaseMusic")
 
-			hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
 				-- local app = hs.application.frontmostApplication()
@@ -363,8 +371,7 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("launchOrFocus WeChat")
 			--TimerLaunchOrFocusApp("WeChat")
 
-			hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "up",remove all the hot corner triggers, and modify hot edge triggersalse):post()
 		elseif gestureOrMouseClick == 'middleMouse' then
 			--print("cmd up handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
@@ -383,8 +390,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("ul.cb()")
 			--ul.cb()
 		elseif gestureOrMouseClick == 'rightMouse' then
-			hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
 				-- local app = hs.application.frontmostApplication()
@@ -399,8 +406,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--print("ur.cb()")
 			--ur.cb()
 		elseif gestureOrMouseClick == 'rightMouse' then
-			hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 		elseif gestureOrMouseClick == 'middleMouse' then
 			--print("cmd down handleGestureAndMouseClickOnEdge")
 			--hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
@@ -431,8 +438,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			-- hs.eventtap.keyStroke({}, "ctrl", 0)
 			-- hs.eventtap.keyStroke({}, "shift", 0)
 			-- print("cmd[")
-			hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
 			-- hs.eventtap.keyStroke({"cmd"}, "[")
 		elseif gestureOrMouseClick == 'middleMouse' then
 		end
@@ -448,8 +455,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			-- hs.wifi.setPower(false)
 		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd]")
-			hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
 				local win = hs.window.focusedWindow()
@@ -460,15 +467,15 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 					end)
 				end
 				return true
-			elseif gestureType == hs.eventtap.event.types.rotate then
-				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
-					local win = hs.window.focusedWindow()
-					if win then
-						win:close()
-					end
-				end
-				return true
+			-- elseif gestureType == hs.eventtap.event.types.rotate then
+			-- 	if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+			-- 	elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+			-- 		local win = hs.window.focusedWindow()
+			-- 		if win then
+			-- 			win:close()
+			-- 		end
+			-- 	end
+			-- 	return true
 			end
 		end
 	elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 下左
@@ -507,8 +514,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--TimerLaunchOrFocusApp("WeChat")
 		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd]")
-			hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
 			--winresize("right")
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
@@ -520,15 +527,15 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 					end)
 				end
 				return true
-			elseif gestureType == hs.eventtap.event.types.rotate then
-				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
-					local win = hs.window.focusedWindow()
-					if win then
-						win:close()
-					end
-				end
-				return true
+			-- elseif gestureType == hs.eventtap.event.types.rotate then
+			-- 	if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+			-- 	elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+			-- 		local win = hs.window.focusedWindow()
+			-- 		if win then
+			-- 			win:close()
+			-- 		end
+			-- 	end
+			-- 	return true
 			end
 		end
 	else
@@ -557,12 +564,12 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			elseif gestureType == hs.eventtap.event.types.rotate then
 				-- print("rotationDegreesSum=" .. tostring(rotationDegreesSum))
 				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-					hs.eventtap.keyStroke({"cmd"}, "q")
+					hs.eventtap.keyStroke({"cmd"}, "w")
 				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
 					local app = hs.application.frontmostApplication()
 						-- print("app:name()=" .. app:name())
 				    -- if EDITOR_BROWSER_APPS[app:name()] then
-						hs.eventtap.keyStroke({"cmd"}, "w")
+						hs.eventtap.keyStroke({"cmd"}, "q")
 					-- else
 					-- 	local win = hs.window.focusedWindow()
 					-- 	if win then
@@ -681,7 +688,7 @@ function pkg:init()
 				if middle and isMouseInsideFocusedWindowScreen() then
 					--print("px[" .. revisedPos.x .. "] py[" .. revisedPos.y .. "], lastX[" .. lastMouseX .. "] lastY[" .. lastMouseY)
 					-- print("ul corner hit?")
-					trigger(ul)
+					-- trigger(ul)
 				end
 
 			end
@@ -692,7 +699,7 @@ function pkg:init()
 			if (p.x <= lastMouseX and p.y >= lastMouseY) then
 				if middle and isMouseInsideFocusedWindowScreen() then
 					-- print("ll corner hit?")
-					trigger(ll)
+					-- trigger(ll)
 				end
 			end
 			middle = false
@@ -701,7 +708,7 @@ function pkg:init()
 			if (p.x >= lastMouseX and p.y <= lastMouseY) then
 				if middle and isMouseInsideFocusedWindowScreen() then
 					-- print("ur corner hit?")
-					trigger(ur)
+					-- trigger(ur)
 				end
 			end
 			middle = false
@@ -711,7 +718,7 @@ function pkg:init()
 				--if #sFrameList == 1 or (#sFrameList == 2 and screenIndex == 1) then
 				if middle and isMouseInsideFocusedWindowScreen() then
 					-- print("lr corner hit?")
-					trigger(lr)
+					-- trigger(lr)
 				end
 				--end
 			end
@@ -724,7 +731,9 @@ function pkg:init()
 						--trigger(ul)
 						-- winresize("left")
 						-- print("ul hotedge hit trigggggggggggger?" .. tostring(curTs) .. "?" .. tostring(lastHitEdgeTs)  .. "?" .. tostring(curTs - lastHitEdgeTs) )
-						winresize("left")
+						-- winresize("left")
+						hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
+						hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -741,7 +750,9 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and (lastHitEdgeType == 1 or lastHitEdgeType == 2) and isMouseInsideFocusedWindowScreen() then
 						--trigger(ll)
 						-- winresize("left")
-						winresize("right")
+						-- winresize("right")
+						hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
+						hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -757,7 +768,8 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 6 and isMouseInsideFocusedWindowScreen() then
 						--trigger(ur)
 						-- print("ur hotedge hit trigggggggggggger?" .. tostring(curTs) .. "?" .. tostring(lastHitEdgeTs)  .. "?" .. tostring(curTs - lastHitEdgeTs) )
-						winresize("right")
+						hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
+						hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -775,7 +787,9 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 5 and isMouseInsideFocusedWindowScreen() then
 						--print("lr hotedge hit?")
 						--trigger(lr)
-						winresize("left")
+						-- winresize("left")
+						hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
+						hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -787,7 +801,7 @@ function pkg:init()
 			end
 			middleForDoubleHotEdge = false
 			--end
-		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 4) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左1/4触发边
+		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 上左1/4触发边
 			if p.y <= lastMouseY then
 				--if #sFrameList == 2 and screenIndex ~= 1 then  -- 容易误触
 				if middleForDoubleHotEdge then
@@ -797,7 +811,9 @@ function pkg:init()
 						-- -- 模拟释放 Ctrl+Shift 键
 						-- hs.eventtap.keyStroke({}, "ctrl", 0)
 						-- hs.eventtap.keyStroke({}, "shift", 0)
-						winresize("max")
+						-- winresize("max")
+						trigger(ul)
+
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -808,7 +824,7 @@ function pkg:init()
 			end
 			middleForDoubleHotEdge = false
 			--end
-		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x >= (curFrame.w * 3 / 4) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 上右1/4触发边
+		elseif revisedPos.y < pkg.edgeDeltaShort and revisedPos.x >= (curFrame.w / 2) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 上右1/4触发边
 						-- print("cmd up 0")
 			if p.y <= lastMouseY then
 						-- print("cmd up1")
@@ -818,8 +834,10 @@ function pkg:init()
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 7 and isMouseInsideFocusedWindowScreen() then
 						--trigger(ur)
 						-- print("cmd up3")
-						hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
-						hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
+						-- hs.eventtap.event.newKeyEvent({"cmd"}, "up", true):post()
+						-- hs.eventtap.event.newKeyEvent({"cmd"}, "up", false):post()
+						trigger(ur)
+
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
@@ -831,12 +849,14 @@ function pkg:init()
 			end
 			middleForDoubleHotEdge = false
 			--end
-		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x < (curFrame.w / 4) and revisedPos.x > pkg.edgeDeltaLong then  -- 下左1/4触发边(why 1/4? because we don't wanna trigger the dock)
+		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 下左1/4触发边(why 1/4? because we don't wanna trigger the dock)
 			if p.y >= lastMouseY then
 				if middleForDoubleHotEdge then
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 3 and isMouseInsideFocusedWindowScreen() then
 						--trigger(ll)
-						winresize("max")
+						-- winresize("max")
+						trigger(ul)
+
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 						-- hs.eventtap.event.newKeyEvent({""}, "F12", true):post()
@@ -848,15 +868,17 @@ function pkg:init()
 				end
 			end
 			middleForDoubleHotEdge = false
-		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x >= (curFrame.w * 3 / 4) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 下右1/4触发边(why 1/4? because we don't wanna trigger the dock)
+		elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x >= (curFrame.w / 2) and revisedPos.x < (curFrame.w - pkg.edgeDeltaLong) then  -- 下右1/4触发边(why 1/4? because we don't wanna trigger the dock)
 			if p.y >= lastMouseY then
 				--if #sFrameList == 2 and screenIndex == 1 then  -- 容易误触
 				if middleForDoubleHotEdge then
 					if isNiceDoubleHotEdgeHit and lastHitEdgeType == 4 and isMouseInsideFocusedWindowScreen() then
 						--trigger(lr)
 						-- print("cmd down")
-						hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
-						hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
+						-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", true):post()
+						-- hs.eventtap.event.newKeyEvent({"cmd"}, "down", false):post()
+						trigger(ur)
+
 						lastHitEdgeTs = 0
 						lastHitEdgeType = 0
 					else
