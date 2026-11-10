@@ -1019,7 +1019,7 @@ test("pinning from the All view collapses the pair into one pinned card", functi
     check(target_index, "the target ordinary record is in All")
     STUB.reset_recorded_state()
     environment.t.handleMessage({ body = { action = "pin", index = target_index, query = "", kind = "text" } })
-    check(not table.concat(STUB.state.alerts or {}, "\\n"):find("Pinned clipboard item", 1, true), "successful Pin shows no confirmation toast")
+    check(not table.concat(STUB.state.alerts or {}, "\n"):find("Pinned clipboard item", 1, true), "successful Pin shows no confirmation toast")
 
     state = environment.t.panelState()
     check_equal(#environment.t.readPinnedHistory(), 1, "one pinned record was created")
