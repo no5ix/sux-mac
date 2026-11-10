@@ -2525,8 +2525,11 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "pin" or body.action == "unpin" then
         local index=tonumber(body.index); local choice=index and menuData[index]
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
-        if not ok then hs.alert.show(body.action=="pin" and "Unable to pin this clipboard item" or "Unable to unpin this clipboard item")
-        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false); hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item") end
+        if not ok then
+            hs.alert.show(body.action=="pin" and "Unable to pin this clipboard item" or "Unable to unpin this clipboard item")
+        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false);
+        --     hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item")
+        end
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
         local choice = index and menuData[index]
