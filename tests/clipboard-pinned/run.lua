@@ -854,23 +854,25 @@ test("the All view shows one pinned card per event; date scopes keep the marker"
     local pin_id = environment.t.readPinnedHistory()[1].id
 
     environment.t.restorePersistentHistory()
-    -- All: the pinned copy replaces the ordinary duplicate, one card per event.
+    -- All: the ordinary record remains the representative, with the pin
+    -- identity attached so rendering shows its marker and offers Unpin.
     environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "text" })
     environment.t.updateClipboardPanel("", "text", 0, false)
     local pinned_seen, pinned_index, duplicates, marked_id
     for index, entry in ipairs(environment.t.panelState().menuData) do
         local card = environment.t.historyItemHTML(entry, index)
-        if entry.id == pin_id then
+        if entry.sourceKey == pinned_entry.sourceKey then
             pinned_seen, pinned_index, marked_id = entry, index, entry.id
+            check(entry.isPinned == true, "the ordinary representative is marked pinned")
             check(card:find('data-pinned="true"', 1, true), "the unified card is pinned (Unpin menu)")
             check(card:find('class="pin-mark"', 1, true), "the unified card carries the pin marker")
-        elseif type(entry.sourceKey) == "string" and entry.sourceKey == pinned_entry.sourceKey then
+        elseif entry.id == pin_id then
             duplicates = (duplicates or 0) + 1
         end
     end
-    check(pinned_seen, "the pinned record is presented in All")
+    check(pinned_seen, "the pinned record is represented by its ordinary history card in All")
     check_equal(marked_id, pin_id, "the card carries the pinned record id")
-    check_equal(duplicates, nil, "the ordinary duplicate is not rendered a second time")
+    check_equal(duplicates, nil, "the pinned-only duplicate is not rendered")
     check_equal(environment.t.panelState().menuCount, 5, "one card per clipboard event")
 
     -- Context-menu Copy and click-to-paste work on the unified card, reading the
@@ -1015,7 +1017,9 @@ test("pinning from the All view collapses the pair into one pinned card", functi
         if entry.content == CODEX_TEXTS[2] then target_index = index end
     end
     check(target_index, "the target ordinary record is in All")
+    STUB.reset_recorded_state()
     environment.t.handleMessage({ body = { action = "pin", index = target_index, query = "", kind = "text" } })
+    check(not table.concat(STUB.state.alerts or {}, "\n"):find("Pinned clipboard item", 1, true), "successful Pin shows no confirmation toast")
 
     state = environment.t.panelState()
     check_equal(#environment.t.readPinnedHistory(), 1, "one pinned record was created")

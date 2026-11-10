@@ -1329,13 +1329,35 @@ local function unifiedIsDuplicate(entry, payloadKeys)
     -- sourceKey index is then the only reliable handle.
     return pinnedIdForEntry(entry) ~= nil
 end
-
 local function mergeUnifiedEntries(ordinaryEntries, pinnedEntries)
+    -- In All, keep the ordinary-history card as the representative when a
+    -- matching item is pinned. historyItemHTML() resolves isPinned from the
+    -- pinned index, so the ordinary card gets the same corner marker and its
+    -- existing source identity/context-menu behavior is preserved.
     local payloadKeys = unifiedPayloadKeys(pinnedEntries)
     local out = {}
-    for _, entry in ipairs(pinnedEntries) do out[#out + 1] = entry end
     for _, entry in ipairs(ordinaryEntries) do
-        if not unifiedIsDuplicate(entry, payloadKeys) then out[#out + 1] = entry end
+        if unifiedIsDuplicate(entry, payloadKeys) then
+            local pinnedId = pinnedIdForEntry(entry)
+            if pinnedId ~= nil then
+                entry.isPinned = true
+                entry.id = pinnedId
+            end
+        end
+        out[#out + 1] = entry
+    end
+    -- Include pins whose original ordinary record is no longer available
+    -- (for example, because its retention window expired).
+    for _, entry in ipairs(pinnedEntries) do
+        local represented = false
+        for _, ordinary in ipairs(out) do
+            if unifiedIsDuplicate(ordinary, {[unifiedPayloadKey(entry) or ""] = true})
+                or pinnedRecordMatchesEntry({id=entry.id,sourceKey=entry.sourceKey}, ordinary) then
+                represented = true
+                break
+            end
+        end
+        if not represented then out[#out + 1] = entry end
     end
     return sortUnifiedEntries(out)
 end
@@ -2526,7 +2548,7 @@ function handleClipboardPanelMessage(message)
         local index=tonumber(body.index); local choice=index and menuData[index]
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
         if not ok then hs.alert.show(body.action=="pin" and "Unable to pin this clipboard item" or "Unable to unpin this clipboard item")
-        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false); hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item") end
+        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false) end
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
         local choice = index and menuData[index]
