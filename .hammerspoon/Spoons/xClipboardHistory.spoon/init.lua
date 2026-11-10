@@ -49,6 +49,11 @@ local closeOutsideClickPending = false
 local stopOutsideClickMonitor
 local selectedVisibleIndex = 1
 local visibleIndices = {}
+-- Uids of the cards currently in the results panel. The Load-more path appends
+-- to the DOM, so it must ask "has this event already been rendered?" rather than
+-- trusting a list index: the merged All list re-sorts when a new page arrives,
+-- and an index-only guard skips boundary cards and leaves stale cards in place.
+local renderedCardUids = {}
 local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 32
 local CLIPBOARD_CACHE_SIZE = 32
@@ -275,13 +280,33 @@ local function writeDayHistory(dateKey, records)
     return atomicWrite(historyJSONPath(dateKey), encoded)
 end
 
+-- Stable identity for an ordinary record. Ids are assigned when a record is
+-- captured and survive a daily-index rewrite, so a pinned record can point at
+-- its source record with `sourceId` instead of the array position inside a day
+-- file, which shifts whenever that file is rewritten. Built from a monotonic
+-- microsecond stamp plus a process-local sequence and prefixed with the date
+-- key, so ids stay unique across day files. Clipboard content is never part of
+-- an id.
+local recordIdSequence = 0
+local function nextRecordId(dateKey)
+    recordIdSequence = recordIdSequence + 1
+    local stamp = math.floor((hs.timer.secondsSinceEpoch and hs.timer.secondsSinceEpoch() or os.time()) * 1000000)
+    return tostring(dateKey) .. "-" .. tostring(stamp) .. "-" .. tostring(recordIdSequence)
+end
+
+-- Byte-for-byte file copy for ordinary history backups. copyPinnedFile() is the
+-- existing streaming copier; this alias names the ordinary-history use.
+local function copyFileContents(sourcePath, destinationPath)
+    return copyPinnedFile(sourcePath, destinationPath)
+end
+
 local function persistClipboardEntry(itemType, content, timestamp)
     timestamp = timestamp or os.time()
     local dateKey = localDateKey(timestamp)
     if not ensureDirectory(HISTORY_ROOT) or not ensureDirectory(historyDayDirectory(dateKey)) then return false end
     -- Daily cleanup runs at startup and on the first copy observed each date.
     local records = readDayHistory(dateKey)
-    local record = {type=itemType, ts=timestamp}
+    local record = {type=itemType, ts=timestamp, id=nextRecordId(dateKey)}
     if itemType == "text" then
         record.content = content
     elseif itemType == "image" then
@@ -296,7 +321,10 @@ local function persistClipboardEntry(itemType, content, timestamp)
         if record.imagePath then os.remove(record.imagePath) end
         return false
     end
-    return true, record.imagePath
+    -- The caller builds its cache entry from the persisted record, so the
+    -- in-memory entry carries the same id, dateKey, and sourceKey as a record
+    -- read back from disk.
+    return true, record.imagePath, record
 end
 
 local function removeExpiredHistoryDirectories(todayKey)
@@ -389,6 +417,45 @@ local function historyDateDirectories()
     return dates
 end
 
+-- One-time backfill of record ids for daily indexes written before ids existed.
+-- Only files that actually change are rewritten, the previous file is kept as a
+-- backup, and the write is atomic. Duplicate ids inside a file are re-assigned
+-- so the identity stays one-per-record. Pinned storage is never touched: it is
+-- not a valid date directory, and pinned ids are assigned by the pin action.
+local function migrateDailyHistoryIndexes()
+    local assigned, rewritten, failures = 0, 0, 0
+    for _, dateKey in ipairs(historyDateDirectories()) do
+        local records = readDayHistory(dateKey)
+        local seen, changed = {}, false
+        for _, record in ipairs(records) do
+            if type(record) == "table" and (type(record.id) ~= "string" or record.id == "" or seen[record.id]) then
+                local id
+                repeat id = nextRecordId(dateKey) until not seen[id]
+                record.id = id
+                changed = true
+                assigned = assigned + 1
+            end
+            if type(record) == "table" then seen[record.id] = true end
+        end
+        if changed then
+            local path = historyJSONPath(dateKey)
+            if not copyFileContents(path, path .. ".pre-migration.bak") then
+                logger.w("Unable to back up the clipboard history index for " .. tostring(dateKey))
+            end
+            if writeDayHistory(dateKey, records) then
+                rewritten = rewritten + 1
+            else
+                failures = failures + 1
+                logger.e("Clipboard history id migration failed for " .. tostring(dateKey) .. "; the file is unchanged")
+            end
+        end
+    end
+    if assigned > 0 then
+        logger.i(string.format("Assigned ids to %d clipboard history records across %d daily indexes", assigned, rewritten))
+    end
+    return assigned, rewritten, failures
+end
+
 local function trimHistoryCache(limit)
     limit=tonumber(limit) or CLIPBOARD_CACHE_SIZE
     while (#text_clipboard_history+#img_clipboard_history)>limit do
@@ -399,11 +466,17 @@ local function trimHistoryCache(limit)
 end
 
 -- identity distinguishes records that share a timestamp and type, so pin
--- deduplication and the pinned marker cannot confuse two distinct items.
+-- deduplication and the pinned marker cannot confuse two distinct items. A
+-- record's own id is the preferred identity because it survives a rewrite of
+-- the daily index; the caller-supplied file position is only the fallback for
+-- records written before ids existed.
 local function metadataEntry(record,dateKey,identity)
  local ts=tonumber(record and record.ts); if not ts then return nil end
  local dayKey=type(dateKey)=="string" and dateKey or localDateKey(ts)
- local e={type=record.type,ts=ts,rowTs=ts,dateKey=dayKey,sourceKey=tostring(dayKey)..":"..tostring(ts)..":"..tostring(record.type)..":"..tostring(identity or "")}
+ local hasId=type(record.id)=="string" and record.id~=""
+ local identityPart=hasId and record.id or tostring(identity or "")
+ local e={type=record.type,ts=ts,rowTs=ts,dateKey=dayKey,sourceKey=tostring(dayKey)..":"..tostring(ts)..":"..tostring(record.type)..":"..identityPart}
+ if hasId then e.id=record.id end
  if record.type=="text" and type(record.content)=="string" then e.content=record.content; e.data=record.content
  elseif record.type=="image" and type(record.imagePath)=="string" then e.imagePath=record.imagePath; e.thumbnailPath=type(record.thumbnailPath)=="string" and record.thumbnailPath or nil; e.thumbnailData=type(record.thumbnailData)=="string" and record.thumbnailData or ""
  else return nil end
@@ -461,41 +534,95 @@ local function removePinnedFile(path)
     return true
 end
 
--- Maps an ordinary-history sourceKey to the pinned record id, so the ordinary
--- view can offer Unpin without reading the pinned index per card.
+-- Maps an ordinary record identity to the pinned record id, so the ordinary
+-- view can mark the record and offer Unpin without reading the pinned index per
+-- card. Keys are, in preference order: the source record's own id (`sourceId`,
+-- exact and stable across a daily-index rewrite), the source record's sourceKey,
+-- and the legacy 3-part sourceKey prefix recorded by older builds.
 local pinnedSourceKeyCache = nil
+-- The All scope renders one stream over ordinary history and pinned records.
+-- Its cursor lives next to the pinned index it depends on, because any pin,
+-- unpin, clear, or session reset must rebuild that stream from the start.
+local allStreamState = nil
+local function resetAllStreamState()
+    allStreamState = nil
+end
 local function invalidatePinnedIndex()
     pinnedSourceKeyCache = nil
     -- The All result set contains pinned records, so any pin/unpin/clear change
-    -- invalidates its search cache too.
+    -- invalidates its search cache and its stream cursor too.
     allSearchCache = nil
+    resetAllStreamState()
 end
 local function pinnedSourceKeyIndex()
     if pinnedSourceKeyCache then return pinnedSourceKeyCache end
-    local index = {}
+    local exact, legacy = {}, {}
     for _, record in ipairs(readPinnedHistory()) do
-        local key = type(record) == "table" and record.sourceKey
-        if type(key) == "string" and key ~= "" then index[key] = record.id end
+        if type(record) == "table" and type(record.id) == "string" and record.id ~= "" then
+            local pinId = record.id
+            if type(record.sourceId) == "string" and record.sourceId ~= "" then
+                exact[record.sourceId] = pinId
+            end
+            if type(record.sourceKey) == "string" and record.sourceKey ~= "" then
+                -- A 3-part sourceKey was written before the record-identity
+                -- suffix existed, so it can only be matched on its leading
+                -- parts. A full 4-part key is never widened to a prefix: that
+                -- prefix would fold away every other record captured in the
+                -- same second with the same type.
+                local _, colons = record.sourceKey:gsub(":", "")
+                if colons < 3 then
+                    local leading = record.sourceKey:match("^(.-):[^:]*$")
+                    if leading then legacy[leading] = pinId end
+                else
+                    exact[record.sourceKey] = pinId
+                end
+            end
+        end
     end
-    pinnedSourceKeyCache = index
-    return index
+    pinnedSourceKeyCache = { exact = exact, legacy = legacy }
+    return pinnedSourceKeyCache
 end
 
+-- The pinned record id for an ordinary record, or nil. `sourceId` is the exact
+-- join key for pins created after record ids existed; a full sourceKey is exact
+-- for pins created with one, and a 3-part legacy sourceKey is matched on its
+-- leading parts.
 local function pinnedIdForEntry(entry)
-    if not entry or type(entry.sourceKey) ~= "string" then return nil end
+    if not entry then return nil end
     local index = pinnedSourceKeyIndex()
-    local id = index[entry.sourceKey]
-    if id == nil then
-        -- Legacy pinned keys were recorded without the record-identity suffix.
-        local prefix = entry.sourceKey:match("^(.-):[^:]*$")
-        if prefix then id = index[prefix] end
+    if type(entry.id) == "string" and entry.id ~= "" then
+        local id = index.exact[entry.id]
+        if id ~= nil then return id end
     end
-    return id
+    if type(entry.sourceKey) ~= "string" then return nil end
+    local id = index.exact[entry.sourceKey]
+    if id ~= nil then return id end
+    local _, colons = entry.sourceKey:gsub(":", "")
+    if colons >= 3 then
+        local leading = entry.sourceKey:match("^(.-):[^:]*$")
+        if leading then return index.legacy[leading] end
+    end
+    return nil
+end
+
+-- Effective pinned state for one card render: a pinned entry carries it
+-- directly, and an ordinary record is pinned when the pinned index links to its
+-- identity. Computed per render and never written back to the entry: the same
+-- metadata entry object is shared by the history caches, so mutating it here
+-- keeps a stale pin marker on the card after an Unpin.
+local function effectivePinnedId(entry)
+    if entry and entry.isPinned and type(entry.id) == "string" then return entry.id end
+    return pinnedIdForEntry(entry)
 end
 
 local function pinnedRecordMatchesEntry(record, entry)
     if type(record) ~= "table" or type(entry) ~= "table" then return false end
+    -- A card's own pin id, which is how a pinned entry and a pinned record
+    -- compare directly. The two id namespaces never collide: an ordinary record
+    -- id is prefixed with its date key, a pin id is not.
     if type(entry.id) == "string" and record.id == entry.id then return true end
+    -- An ordinary record identified by the id its pin recorded.
+    if type(entry.id) == "string" and entry.id ~= "" and record.sourceId == entry.id then return true end
     if type(record.sourceKey) ~= "string" or type(entry.sourceKey) ~= "string" then return false end
     if record.sourceKey == entry.sourceKey then return true end
     return record.sourceKey == entry.sourceKey:match("^(.-):[^:]*$")
@@ -595,6 +722,43 @@ local function hydratePinnedEntry(entry)
     return entry
 end
 
+-- Identity helpers shared by the pinned marker, the unified All stream, and the
+-- migration that links a pinned record back to its source record. They are
+-- declared here because the pinned paths below need them; the All aggregation
+-- and rendering code reuses the same rules.
+
+-- Stable card identity: a record id, then a sourceKey, then the timestamp and
+-- type. The fallback is deliberately last because a timestamp alone cannot
+-- separate two distinct records captured in the same second.
+local function unifiedIdentity(entry)
+    if type(entry.id) == "string" then return entry.id end
+    if type(entry.sourceKey) == "string" then return entry.sourceKey end
+    return tostring(entry.ts) .. ":" .. tostring(entry.type)
+end
+
+-- Content identity used when matching a pin back to its ordinary record. It
+-- always carries the payload (text length + text, or the image file name)
+-- beside ts, so the timestamp alone never merges two events. This is the
+-- fallback rule: a record id, when present, is the exact key. It is needed
+-- because a daily index can be rebuilt, which shifts the file-position part of
+-- sourceKey, and because pins created before record ids existed recorded no
+-- source identity at all.
+local function unifiedPayloadKey(entry)
+    if entry.type == "text" then
+        local payload = entry.content or entry.data
+        if type(payload) ~= "string" then return nil end
+        return "text:" .. tostring(entry.ts) .. ":" .. tostring(#payload) .. ":" .. payload
+    end
+    if entry.type == "image" then
+        local path = entry.sourcePath or entry.imagePath
+        local name = type(path) == "string" and path:match("([^/]+)$")
+        if type(name) == "string" and name ~= "" then
+            return "image:" .. tostring(entry.ts) .. ":" .. name
+        end
+    end
+    return nil
+end
+
 local function pinClipboardEntry(entry)
     if not entry or (entry.type ~= "text" and entry.type ~= "image") or entry.isPinned then return false end
     if not ensurePinnedStorage() then return false end
@@ -609,6 +773,9 @@ local function pinClipboardEntry(entry)
         ts = tonumber(entry.ts or entry.rowTs) or os.time(),
         pinnedAt = os.time(),
         sourceKey = entry.sourceKey,
+        -- The source record's own id is the exact, stable join key. sourceKey
+        -- stays for readers that predate record ids.
+        sourceId = type(entry.id) == "string" and entry.id ~= "" and entry.id or nil,
     }
     if entry.type == "text" then
         local payload = entry.content or entry.data
@@ -675,6 +842,23 @@ local function unpinClipboardEntry(entry)
     return true
 end
 
+-- Maps a payload identity to the ordinary record id, so a pinned record that
+-- recorded no source key at all (a pin created from a live in-memory entry)
+-- can be linked to the record it was pinned from.
+local function ordinaryPayloadIdIndex()
+    local index = {}
+    for _, dateKey in ipairs(historyDateDirectories()) do
+        for _, record in ipairs(readDayHistory(dateKey)) do
+            if type(record) == "table" and type(record.id) == "string" and record.id ~= "" then
+                local entry = metadataEntry(record, dateKey, record.id)
+                local key = entry and unifiedPayloadKey(entry)
+                if key and index[key] == nil then index[key] = record.id end
+            end
+        end
+    end
+    return index
+end
+
 -- One-time conversion of legacy pinned records into the ordinary record shape.
 -- The migrated index is written atomically before any legacy payload file is
 -- removed, and a pre-migration backup is kept.
@@ -687,6 +871,7 @@ local function migratePinnedHistory()
         return false
     end
     local migrated, legacyFiles, changes = {}, {}, 0
+    local payloadIds = nil
     for index, record in ipairs(records) do
         if type(record) ~= "table" then
             changes = changes + 1
@@ -717,6 +902,19 @@ local function migratePinnedHistory()
             if type(migratedRecord.pinnedAt) ~= "number" then
                 migratedRecord.pinnedAt = tonumber(migratedRecord.ts) or os.time()
                 changes = changes + 1
+            end
+            -- A pin created from a live in-memory entry recorded no source
+            -- identity, so it could never be matched back to its ordinary
+            -- record. Link it now, by payload identity, to the source id.
+            if type(migratedRecord.sourceId) ~= "string" and type(migratedRecord.sourceKey) ~= "string" then
+                payloadIds = payloadIds or ordinaryPayloadIdIndex()
+                local pinnedEntry = pinnedMetadata(migratedRecord)
+                local key = pinnedEntry and unifiedPayloadKey(pinnedEntry)
+                local sourceId = key and payloadIds[key]
+                if type(sourceId) == "string" and sourceId ~= "" then
+                    migratedRecord.sourceId = sourceId
+                    changes = changes + 1
+                end
             end
             if type(migratedRecord.imagePath) == "string" and not fs.attributes(migratedRecord.imagePath) then
                 logger.w("Pinned image file is missing; the record and metadata were preserved")
@@ -943,8 +1141,13 @@ end
 function pasteboardToClipboard(item_type,item)
     local ts=os.time()
     if item_type=="text" then
-        local ok=persistClipboardEntry("text",item,ts)
-        if ok then insertCacheEntry({type="text",ts=ts,rowTs=ts,content=item,data=item}) end
+        local ok,_,record=persistClipboardEntry("text",item,ts)
+        -- Build the in-memory entry through the same metadataEntry() path as a
+        -- record read back from disk, so a live capture carries the same id,
+        -- dateKey, and sourceKey. Entries without that identity could not be
+        -- matched to a pinned record, which left the newest cards unmarked.
+        local entry=ok and metadataEntry(record,localDateKey(ts),record and record.id) or nil
+        if entry then insertCacheEntry(entry) end
         return
     end
 
@@ -971,17 +1174,17 @@ function pasteboardToClipboard(item_type,item)
         thumbnailImage = nil
 
         local records=readDayHistory(dateKey)
-        records[#records+1]={type="image",ts=ts,imagePath=imagePath,thumbnailPath=thumbnailPath}
+        local record={type="image",ts=ts,id=nextRecordId(dateKey),imagePath=imagePath,thumbnailPath=thumbnailPath}
+        records[#records+1]=record
         if not writeDayHistory(dateKey,records) then
             if thumbnailPath then os.remove(thumbnailPath) end
             os.remove(imagePath)
             logger.e("Clipboard image record could not be persisted")
             return
         end
-        insertCacheEntry({
-            type="image",ts=ts,rowTs=ts,dateKey=dateKey,imagePath=imagePath,
-            thumbnailPath=thumbnailPath,thumbnailData=""
-        })
+        -- Same identity as the persisted record; see the text path above.
+        local entry=metadataEntry(record,dateKey,record.id)
+        if entry then insertCacheEntry(entry) end
     end)
 
     -- Do not retain the full-resolution NSImage on any Lua table. The history
@@ -1272,18 +1475,6 @@ local function searchPinnedHistory(query,kind)
     return out
 end
 
--- The All scope presents one collection: ordinary history plus pinned records.
--- A pinned record represents the same clipboard event as the ordinary record it
--- was pinned from, so the ordinary copy is dropped and the pinned copy is kept:
--- its card keeps the pin state and the Unpin action. Deduplication uses payload
--- identity (unifiedPayloadKey) with the sourceKey index as fallback, never the
--- timestamp alone, so distinct records that share a ts stay separate.
-local function unifiedIdentity(entry)
-    if type(entry.id) == "string" then return entry.id end
-    if type(entry.sourceKey) == "string" then return entry.sourceKey end
-    return tostring(entry.ts) .. ":" .. tostring(entry.type)
-end
-
 local function sortUnifiedEntries(entries)
     table.sort(entries, function(a, b)
         if a.ts ~= b.ts then return a.ts > b.ts end
@@ -1292,27 +1483,12 @@ local function sortUnifiedEntries(entries)
     return entries
 end
 
--- Content identity used when matching a pin back to its ordinary record. It
--- always carries the payload (text length + text, or the image file name)
--- beside ts, so the timestamp alone never merges two events. This is the
--- authoritative rule because a daily index can be rebuilt, which shifts the
--- file-position part of sourceKey; a payload match is stable.
-local function unifiedPayloadKey(entry)
-    if entry.type == "text" then
-        local payload = entry.content or entry.data
-        if type(payload) ~= "string" then return nil end
-        return "text:" .. tostring(entry.ts) .. ":" .. tostring(#payload) .. ":" .. payload
-    end
-    if entry.type == "image" then
-        local path = entry.sourcePath or entry.imagePath
-        local name = type(path) == "string" and path:match("([^/]+)$")
-        if type(name) == "string" and name ~= "" then
-            return "image:" .. tostring(entry.ts) .. ":" .. name
-        end
-    end
-    return nil
-end
-
+-- The rules in unifiedIdentity() and unifiedPayloadKey() (declared with the
+-- pinned helpers, above) are what the merge below uses: a pinned record and the
+-- ordinary record it was pinned from are one clipboard event, so the ordinary
+-- copy is dropped and the pinned copy is kept - its card keeps the pin marker
+-- and the Unpin action. The payload identity is what makes the fold stable when
+-- a daily index is rebuilt and the file-position part of sourceKey shifts.
 local function unifiedPayloadKeys(pinnedEntries)
     local keys = {}
     for _, entry in ipairs(pinnedEntries) do
@@ -1348,16 +1524,138 @@ local function pinnedEntriesForKind(kind)
     return out
 end
 
--- All with no query: the bounded ordinary page from the existing pipeline plus
--- every pinned record. Only the ordinary side paginates; the pinned collection
--- is metadata-only and is always presented in full.
-local function loadUnifiedAllEntries(requiredCount, kind)
-    local cached, loaded = ensureAllHistoryCache(requiredCount)
-    local ordinary = {}
-    for _, entry in ipairs(cached) do
-        if not kind or kind == "all" or entry.type == kind then ordinary[#ordinary + 1] = entry end
+-- All with no query: one stream over ordinary history and pinned records,
+-- ordered strictly by clipboard timestamp, newest first. Pagination walks the
+-- merged stream rather than the ordinary side alone, so a pinned event sits at
+-- its own timestamp: it never clumps at the bottom of a page, and it is not
+-- rendered a second time when the page holding its ordinary twin arrives. The
+-- cursor is append-only, which is what makes appending a Load-more page to the
+-- DOM safe: every event is emitted once and stays where its timestamp puts it.
+local function unifiedIsNewer(a, b)
+    if a.ts ~= b.ts then return a.ts > b.ts end
+    -- On an exact timestamp tie the pinned copy takes the position, so the card
+    -- keeps the pin marker and Unpin; identity breaks any remaining tie.
+    local aPinned = a.isPinned == true
+    local bPinned = b.isPinned == true
+    if aPinned ~= bPinned then return aPinned end
+    return tostring(unifiedIdentity(a)) < tostring(unifiedIdentity(b))
+end
+
+local function extendAllStream(requiredCount)
+    requiredCount = math.max(CLIPBOARD_RENDER_BATCH_SIZE, tonumber(requiredCount) or CLIPBOARD_RENDER_BATCH_SIZE)
+    local state = allStreamState
+    if not state then
+        local pins = pinnedEntriesForKind("all")
+        table.sort(pins, unifiedIsNewer)
+        state = {
+            entries = {},
+            pinEntries = pins,
+            pinPayloadKeys = unifiedPayloadKeys(pins),
+            emittedIds = {},
+            emittedPayloadKeys = {},
+            ordinaryOffset = 0,
+            pinnedOffset = 1,
+            exhausted = false,
+        }
+        allStreamState = state
     end
-    return mergeUnifiedEntries(ordinary, pinnedEntriesForKind(kind)), loaded
+
+    -- A record already in the stream. Identity first, then payload: the same
+    -- capture can reach the stream twice with different sourceKey values, once
+    -- from the session cache and once from the daily index page.
+    local function isEmitted(entry)
+        local id = type(entry.id) == "string" and entry.id or nil
+        if id and state.emittedIds[id] then return true end
+        local key = unifiedPayloadKey(entry)
+        return key ~= nil and state.emittedPayloadKeys[key] == true
+    end
+    local function markEmitted(entry)
+        local id = type(entry.id) == "string" and entry.id or nil
+        if id then state.emittedIds[id] = true end
+        local key = unifiedPayloadKey(entry)
+        if key then state.emittedPayloadKeys[key] = true end
+    end
+    -- The pinned copy represents its ordinary twin, so the twin is dropped and
+    -- the pinned record is the card. Identity (`sourceId`) is exact; the payload
+    -- key covers pins created before record ids existed.
+    local function ordinaryHasPinTwin(ordinary)
+        if pinnedIdForEntry(ordinary) ~= nil then return true end
+        local key = unifiedPayloadKey(ordinary)
+        return key ~= nil and state.pinPayloadKeys[key] == true
+    end
+    local function pinTwinAlreadyEmitted(pin)
+        if type(pin.sourceId) == "string" and state.emittedIds[pin.sourceId] then return true end
+        local key = unifiedPayloadKey(pin)
+        return key ~= nil and state.emittedPayloadKeys[key] == true
+    end
+
+    while #state.entries < requiredCount and not state.exhausted do
+        local before = #state.entries
+        local _, loaded = ensureAllHistoryCache(state.ordinaryOffset + CLIPBOARD_RENDER_BATCH_SIZE)
+        local ordinaryDone = allHistoryTotalCount ~= nil and allHistoryCacheLoaded >= allHistoryTotalCount
+        while #state.entries < requiredCount do
+            -- Peek, never consume: the next ordinary record is advanced past
+            -- only when it is emitted as a card or folded by its pinned twin.
+            -- Reading it here and then letting a pinned record take the position
+            -- dropped the ordinary event on the floor, so one clipboard event
+            -- vanished from the All collection.
+            local ordinary = nil
+            while ordinary == nil and state.ordinaryOffset < loaded do
+                local candidate = allHistoryCache[state.ordinaryOffset + 1]
+                if candidate == nil then
+                    state.ordinaryOffset = state.ordinaryOffset + 1
+                else
+                    ordinary = candidate
+                end
+            end
+            if ordinary ~= nil and (isEmitted(ordinary) or ordinaryHasPinTwin(ordinary)) then
+                -- Its pinned copy is the card, or it is already in the stream.
+                state.ordinaryOffset = state.ordinaryOffset + 1
+                ordinary = nil
+            end
+            local pin = state.pinEntries[state.pinnedOffset]
+            if ordinary ~= nil and pin ~= nil and unifiedIsNewer(ordinary, pin) then
+                state.ordinaryOffset = state.ordinaryOffset + 1
+                markEmitted(ordinary)
+                state.entries[#state.entries + 1] = ordinary
+            elseif pin ~= nil and not pinTwinAlreadyEmitted(pin) then
+                markEmitted(pin)
+                state.pinnedOffset = state.pinnedOffset + 1
+                state.entries[#state.entries + 1] = pin
+            elseif ordinary ~= nil then
+                state.ordinaryOffset = state.ordinaryOffset + 1
+                markEmitted(ordinary)
+                state.entries[#state.entries + 1] = ordinary
+            elseif pin ~= nil then
+                -- A pinned record whose twin was already emitted: no card.
+                state.pinnedOffset = state.pinnedOffset + 1
+            else
+                -- This ordinary page is consumed; the outer loop grows it, and
+                -- exhaustion is only claimed when the disk side is finished.
+                if ordinaryDone then state.exhausted = true end
+                break
+            end
+        end
+        if #state.entries == before and not state.exhausted then
+            -- No progress is possible: the ordinary side cannot grow and no
+            -- pinned record is left.
+            state.exhausted = true
+        end
+    end
+    return state.entries, #state.entries, not state.exhausted
+end
+
+-- The panel-open path and the All branch of updateClipboardPanel must present
+-- the same collection, so both build their first page here. Rendering the
+-- ordinary cache straight from showClipboardPanel() skipped every pinned record,
+-- and therefore every pin marker, on the first paint.
+local function openAllPanelPage(requiredCount)
+    resetAllStreamState()
+    local entries = extendAllStream(requiredCount or CLIPBOARD_RENDER_BATCH_SIZE)
+    menuData = entries
+    browseCursor = #entries
+    browseMode = "all"
+    return entries
 end
 
 -- All with a query: merge both collections' full-content search results and
@@ -1371,41 +1669,37 @@ local function unifiedSearchEntries(ordinaryEntries, query, kind)
     return merged
 end
 
--- Exact All total once every ordinary record is loaded: ordinary records plus
--- pins minus the ordinary records a pin already represents.
-local function unifiedTotal(kind)
-    local pins = pinnedEntriesForKind(kind)
-    local payloadKeys = unifiedPayloadKeys(pins)
-    local ordinary, duplicates = 0, 0
-    for _, entry in ipairs(allHistoryCache) do
-        if not kind or kind == "all" or entry.type == kind then
-            ordinary = ordinary + 1
-            if unifiedIsDuplicate(entry, payloadKeys) then duplicates = duplicates + 1 end
-        end
-    end
-    return ordinary + #pins - duplicates
+-- The data-uid of a card: the pinned record id while the event is pinned, the
+-- record identity otherwise. The renderer and the append guard must agree, so
+-- both read this one function.
+local function cardUid(entry)
+    local pinnedId = effectivePinnedId(entry)
+    if pinnedId ~= nil then return tostring(pinnedId) end
+    return tostring(unifiedIdentity(entry))
 end
 
 local function historyItemHTML(entry, index)
-    if not entry.isPinned then
-        local pinnedId=pinnedIdForEntry(entry)
-        if pinnedId ~= nil then entry.isPinned=true; entry.id=pinnedId end
-    end
+    -- The pin marker is resolved for this render only. Cached metadata entries
+    -- are shared by the history caches, so writing the pin state onto the entry
+    -- here would leave a stale marker on the card after an Unpin.
+    local pinnedId = effectivePinnedId(entry)
+    local cardIsPinned = pinnedId ~= nil
     -- Pinned cards carry a corner marker while the type label and the original
     -- clipboard timestamp stay unchanged. pointer-events:none keeps the marker
     -- out of the way of click-to-paste, keyboard selection, and the context menu.
-    local pinMark = entry.isPinned == true and
+    local pinMark = cardIsPinned and
         '<div class="pin-mark" aria-label="Pinned">📍</div>' or ''
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     -- data-uid is the stable identity used to reconcile keyboard navigation and
     -- an open context menu after the list is rebuilt (search, scope change,
-    -- pin/unpin, load more). Ordinary records use their sourceKey, pins their id.
-    local uid = escapeHTML(unifiedIdentity(entry))
+    -- pin/unpin, load more). A pinned event keeps the pinned record id, so the
+    -- marker, the menu, and the keyboard focus survive the fold of a pinned pair.
+    local uid = escapeHTML(cardUid(entry))
     if entry.type == "image" then
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(cardIsPinned)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
     local loaded=hydrateEntry(entry) or entry
@@ -1424,7 +1718,7 @@ local function historyItemHTML(entry, index)
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-uid="' .. uid .. '" data-pinned="'..tostring(entry.isPinned==true)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-uid="' .. uid .. '" data-pinned="'..tostring(cardIsPinned)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         pinMark .. '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
         '</div><div class="hint">Click to paste</div>' ..
@@ -1458,12 +1752,14 @@ end
 local function renderClipboardBatch(query, kind, offset)
     local matches = getClipboardMatches(query, kind)
     local cards = {}
+    renderedCardUids = {}
     offset = math.max(0, tonumber(offset) or 0)
     -- Render up to the configured 32-item batch from the currently loaded page.
     local batchSize = CLIPBOARD_RENDER_BATCH_SIZE
     local last = math.min(#matches, offset + batchSize)
     for position = offset + 1, last do
         local index = matches[position]
+        renderedCardUids[cardUid(menuData[index])] = true
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
     visibleIndices = matches
@@ -2105,23 +2401,29 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
   { slot: 'pasteAll', label: '🧴 Paste All the rows above this row in the order from early to late, including this row' },
   { slot: 'copy', label: '📋 Copy' },
+  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
 ];
-function contextMenuSpec(isPinned) {
+function contextMenuSpec(isPinned, isImage) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
-    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label,
+    // A clipboard image is the only item backed by a file, so "Paste path" is
+    // offered on image cards only. The slot is always built and hidden by
+    // display, so the button set and the stable slots never change.
+    visible: spec.imageOnly !== true || isImage === true
   }));
 }
 function buildContextMenu(menu) {
-  contextMenuSpec(false).forEach(part => {
+  contextMenuSpec(false, false).forEach(part => {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('data-context-slot', part.slot);
     button.dataset.contextAction = part.action;
     button.textContent = part.label;
     button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+    button.style.display = part.visible ? 'block' : 'none';
     button.addEventListener('mouseenter', () => { button.style.background = '#3a4250'; });
     button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
     menu.appendChild(button);
@@ -2133,12 +2435,13 @@ function buildContextMenu(menu) {
 // card, or any shared menu state.
 function applyContextMenuTarget(menu, item) {
   if (!menu || !item) return null;
-  const spec = contextMenuSpec(item.dataset.pinned === 'true');
+  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image');
   spec.forEach(part => {
     const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
     if (!button) return;
     button.dataset.contextAction = part.action;
     button.textContent = part.label;
+    button.style.display = part.visible ? 'block' : 'none';
   });
   return spec;
 }
@@ -2183,6 +2486,8 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
     bridge('pasteAllFrom', rowIndex, '');
   } else if (action === 'copy') {
     bridge('copyHistoryEntry', rowIndex, '');
+  } else if (action === 'pastePath') {
+    bridge('pastePath', rowIndex, '');
   } else if (action === 'pin' || action === 'unpin') {
     bridge(action, rowIndex, '');
   } else if (action === 'preview' && openManualPreview) {
@@ -2315,10 +2620,83 @@ local function pasteHistoryEntry(index)
     end)
 end
 
+-- The file that backs a clipboard image. A pinned image records the ordinary
+-- record it was copied from in `sourcePath`, so a pinned card reports the same
+-- path the ordinary card does; `imagePath` is the pinned copy and is the
+-- fallback when the pin has no recorded source (the file still exists, in the
+-- pinned collection).
+local function firstNonEmptyString(...)
+    -- table.pack, not a table constructor: the leading candidates are routinely
+    -- nil, and ipairs stops at the first hole.
+    local values = table.pack(...)
+    for index = 1, values.n do
+        local value = values[index]
+        if type(value) == "string" and value ~= "" then return value end
+    end
+    return nil
+end
+
+local function imageEntryPath(entry)
+    if not entry then return nil end
+    local source = entry.historyEntry or entry
+    return firstNonEmptyString(source.sourcePath, source.imagePath, entry.sourcePath, entry.imagePath)
+end
+
+-- "Paste path" puts the image file path on the pasteboard as plain text and
+-- pastes it into the app that had focus before the panel opened, so a terminal
+-- or editor receives a usable path to the clipboard image.
+local function pasteHistoryEntryPath(index)
+    -- Metadata only: a card's file path is recorded on the entry, so this never
+    -- loads the image payload just to report where the file lives.
+    local choice = index and menuData and menuData[index]
+    if not choice then
+        hs.alert.show("Unable to read this clipboard item")
+        return
+    end
+    if choice.type ~= "image" then
+        hs.alert.show("Only image items have a file path")
+        return
+    end
+    local path = imageEntryPath(choice)
+    if not path then
+        hs.alert.show("No image file path is available for this item")
+        return
+    end
+    if not fs.attributes(path) then
+        logger.w("Clipboard image path is no longer readable: " .. path)
+        hs.alert.show("The image file for this item no longer exists")
+        return
+    end
+    pasteboard_watcher:stop()
+    local copyOK = pasteboard.setContents(path) ~= false
+    if not copyOK then
+        pasteboard_watcher:start()
+        hs.alert.show("Unable to copy this image path")
+        return
+    end
+    if clipboard_webview then clipboard_webview:hide() end
+    hs.timer.doAfter(0.15, function()
+        -- Restore focus to the app that was active before the history panel opened.
+        if previousApplication and previousApplication:isRunning() then
+            previousApplication:activate(true)
+        end
+        hs.timer.doAfter(0.35, function()
+            hs.eventtap.keyStroke({"cmd"}, "v", 0)
+            hs.timer.doAfter(0.6, function()
+                restoreNewestClipContent()
+                pasteboard_watcher:start()
+                menuData = {}
+                previousApplication = nil
+            end)
+        end)
+    end)
+end
+
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
     local previousMenuDataCount=append and #menuData or 0
+    local allStreamHasMore=false
 
     if clipboardPinnedFilter then
         -- The pinned collection is its own result set: never reuse the
@@ -2362,15 +2740,17 @@ local function updateClipboardPanel(query,kind,offset,append)
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     else
-        -- All: reuse the session-wide mixed ordinary cache and merge in every
-        -- pinned record. Only the ordinary side paginates, so Load More extends
-        -- it by another 32 mixed records while Text/Images switches in memory.
-        local required=append and (allHistoryCacheLoaded+CLIPBOARD_RENDER_BATCH_SIZE)
+        -- All: one stream over ordinary history and pinned records, ordered by
+        -- clipboard timestamp. Load more extends the existing stream, so the
+        -- rendered list stays append-only and Text/Images switch in memory.
+        if not append then resetAllStreamState() end
+        local required=append and (previousMenuDataCount+CLIPBOARD_RENDER_BATCH_SIZE)
             or math.max(CLIPBOARD_RENDER_BATCH_SIZE,allHistoryCacheLoaded)
-        local merged,loaded=loadUnifiedAllEntries(required,"all")
-        menuData=merged
-        browseCursor=loaded
+        local entries,_,more=extendAllStream(required)
+        menuData=entries
+        browseCursor=#entries
         browseMode="all"
+        allStreamHasMore=more
     end
 
     local matches={}
@@ -2382,14 +2762,20 @@ local function updateClipboardPanel(query,kind,offset,append)
     end
 
     local cards={}
+    if not append then renderedCardUids={} end
     for _,matchedIndex in ipairs(matches) do
-        if not append or matchedIndex>previousMenuDataCount then
-            cards[#cards+1]=historyItemHTML(menuData[matchedIndex],matchedIndex)
+        local entry=menuData[matchedIndex]
+        local uid=cardUid(entry)
+        -- Identity, not list position: a card already in the DOM is never added
+        -- again, and a card that belongs in the list is never skipped because a
+        -- re-sorted page moved its index.
+        if not renderedCardUids[uid] then
+            renderedCardUids[uid]=true
+            cards[#cards+1]=historyItemHTML(entry,matchedIndex)
         end
     end
     local html=table.concat(cards,"\n")
-    local hasMore=query=="" and not clipboardDateFilter and not clipboardPinnedFilter
-        and (not allHistoryTotalCount or allHistoryCacheLoaded<allHistoryTotalCount)
+    local hasMore=query=="" and not clipboardDateFilter and not clipboardPinnedFilter and allStreamHasMore
     local loadMore=hasMore and '<div class="load-more-wrap"><button class="action" data-action="loadMore" data-index="'..browseCursor..'">Load more</button></div>' or ""
     if #matches==0 then html='<div id="no-matches" class="empty">No matching clipboard items</div>' end
     html=html..loadMore
@@ -2401,15 +2787,12 @@ local function updateClipboardPanel(query,kind,offset,append)
         js="var m=document.getElementById('clipboard-items');var main=document.querySelector('main');var b=main.querySelector(':scope > .load-more-wrap');if(b)b.remove();m.innerHTML="..jsStringLiteral(html)..";var last=m.querySelector('.load-more-wrap');if(last)last.remove();if(last)main.appendChild(last);"
     end
 
-    -- Pinned and All results are the complete filtered collection, so #matches is
-    -- the exact count; an exhausted ordinary All cache yields the unified total.
+    -- The count is the size of the collection that is presented: the unified
+    -- All stream (which holds every pinned event exactly once), the pinned
+    -- collection, a date scope, or a search result set.
     local visibleCount=#matches
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
-    elseif query=="" and not clipboardPinnedFilter and not clipboardDateFilter
-        and allHistoryTotalCount and allHistoryCacheLoaded>=allHistoryTotalCount then
-        -- Unified All total: ordinary records plus pins, duplicates counted once.
-        visibleCount=unifiedTotal(kind)
     end
     js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
@@ -2520,6 +2903,8 @@ function handleClipboardPanelMessage(message)
         end
     elseif body.action == "paste" then
         pasteHistoryEntry(tonumber(body.index))
+    elseif body.action == "pastePath" then
+        pasteHistoryEntryPath(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
     elseif body.action == "pin" or body.action == "unpin" then
@@ -2986,8 +3371,11 @@ function showClipboardHistory()
     allHistoryCacheLoaded=0
     allHistoryTotalCount=nil
     invalidatePinnedIndex()
-    menuData=ensureAllHistoryCache(CLIPBOARD_RENDER_BATCH_SIZE)
-    browseCursor=allHistoryCacheLoaded
+    -- The first paint must be the unified All collection. Rendering the ordinary
+    -- cache alone dropped every pinned record - and with it every pin marker -
+    -- from the panel that opens on the hotkey, which is exactly the view users
+    -- compared against the Pin filter.
+    openAllPanelPage(CLIPBOARD_RENDER_BATCH_SIZE)
 
     local function showAfterHTMLLoaded()
         if clipboard_webview ~= view then return end
@@ -3019,7 +3407,6 @@ function showClipboardHistory()
         hs.timer.doAfter(0.15, showAfterHTMLLoaded)
         return
     end
-
     -- The document is already loaded, so update only the visible batch.
     local cardsHTML, matchingCount, renderedCount = renderClipboardBatch("", "all", 0)
     local loadMoreHTML = persistentHistoryCount() > renderedCount and
@@ -3053,6 +3440,9 @@ end
 -- Restore disk state before starting the watcher, so previous history is
 -- available immediately after Hammerspoon/Sux-Mac starts.
 runDailyCleanupIfNeeded()
+-- Ordinary records need their ids before the pinned migration can link a pin
+-- back to the record it was pinned from, so the daily indexes are migrated first.
+migrateDailyHistoryIndexes()
 ensurePinnedStorage()
 migratePinnedHistory()
 if not fs.attributes(PINNED_HISTORY_PATH) then writePinnedHistory({}) end
@@ -3092,6 +3482,8 @@ pkg.__test = {
     readDayHistory = readDayHistory,
     writeDayHistory = writeDayHistory,
     persistClipboardEntry = persistClipboardEntry,
+    nextRecordId = nextRecordId,
+    migrateDailyHistoryIndexes = migrateDailyHistoryIndexes,
     insertCacheEntry = insertCacheEntry,
     restorePersistentHistory = restorePersistentHistory,
     removeExpiredHistoryDirectories = removeExpiredHistoryDirectories,
@@ -3106,6 +3498,13 @@ pkg.__test = {
     hydratePinnedEntry = hydratePinnedEntry,
     hydrateEntry = hydrateEntry,
     invalidatePinnedIndex = invalidatePinnedIndex,
+    effectivePinnedId = effectivePinnedId,
+    cardUid = cardUid,
+    openAllPanelPage = openAllPanelPage,
+    extendAllStream = extendAllStream,
+    resetAllStreamState = resetAllStreamState,
+    pasteHistoryEntryPath = pasteHistoryEntryPath,
+    imageEntryPath = imageEntryPath,
     searchPinnedHistory = searchPinnedHistory,
     searchPersistentHistory = searchPersistentHistory,
     clipboardEntryMatches = clipboardEntryMatches,
@@ -3129,6 +3528,13 @@ pkg.__test = {
             searchCacheQuery = searchResultsCache and searchResultsCache.query,
             searchCacheKind = searchResultsCache and searchResultsCache.kind,
             searchCacheCount = searchResultsCache and #searchResultsCache.entries,
+            allStreamLength = allStreamState and #allStreamState.entries or 0,
+            allStreamExhausted = allStreamState and allStreamState.exhausted == true,
+            renderedCards = (function()
+                local count = 0
+                for _ in pairs(renderedCardUids) do count = count + 1 end
+                return count
+            end)(),
             allCacheCollection = allSearchCache and allSearchCache.collection,
             allCacheQuery = allSearchCache and allSearchCache.query,
             allCacheKind = allSearchCache and allSearchCache.kind,

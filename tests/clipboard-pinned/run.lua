@@ -961,7 +961,7 @@ test("All merges ordinary and pinned records into one deduplicated collection", 
     check_equal(environment.t.panelState().menuCount, 6, "a date scope is ordinary history only")
 end)
 
-test("Load more extends the unified All collection without duplicating pins", function()
+test("Load more extends the unified All stream in timestamp order without duplicating pins", function()
     local environment = new_environment("all-loadmore")
     local many = {}
     for index = 1, 40 do many[index] = "bulk note " .. index .. " codex" end
@@ -972,30 +972,183 @@ test("Load more extends the unified All collection without duplicating pins", fu
     environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
     environment.t.updateClipboardPanel("", "all", 0, false)
     local state = environment.t.panelState()
-    check_equal(state.menuCount, 33, "the first page is 32 ordinary records plus every pin")
+    check_equal(state.menuCount, 32, "the first page is one 32-record unified page, not one page per collection")
+    check_equal(state.renderedCards, 32, "every event on the page has exactly one card")
+    check(state.menuData[1].isPinned, "the newest event is the pinned record, at its own timestamp")
+    check(not state.allStreamExhausted, "more ordinary records are still on disk")
 
     local cursor
     for index = #STUB.state.scripts, 1, -1 do
         local script = STUB.state.scripts[index]
-        if script:find("loadMore", 1, true) then
-            cursor = script:match('data%-index=%S-(%d+)')
+        -- The card HTML reaches the page inside a JavaScript string literal, so
+        -- its quotes arrive escaped. A long-bracket string keeps the backslashes.
+        local button = script:find([[data-action=\"loadMore\"]], 1, true)
+        if button then
+            cursor = script:match('data%-index=%S-(%d+)', button)
             if cursor then break end
         end
     end
-    check(cursor, "a Load more control is offered for the ordinary side")
+    check(cursor, "a Load more control is offered while the stream continues")
+    check_equal(tonumber(cursor), 32, "Load more carries the unified stream cursor")
 
     environment.t.handleMessage({ body = { action = "loadMore", index = tonumber(cursor), query = "", kind = "all" } })
     state = environment.t.panelState()
-    check_equal(state.menuCount, 41, "Load more appended the remaining ordinary records")
+    check_equal(state.menuCount, 41, "Load more appended the remaining events of both collections")
+    check_equal(state.renderedCards, 41, "no card was skipped and none was added twice")
     check_equal(panel_count_text(), "41 matching items", "the count covers both collections")
-    local pins, seen = 0, {}
+    check(state.allStreamExhausted, "the stream is finished")
+    local lastScript = STUB.state.scripts[#STUB.state.scripts]
+    check(lastScript.find(lastScript, [[data-action=\"loadMore\"]], 1, true) == nil,
+        "Load more is not offered once every event is presented")
+
+    local pins, seen, previousTs = 0, {}, nil
     for _, entry in ipairs(state.menuData) do
         if entry.isPinned then pins = pins + 1 end
         local key = entry.id or entry.sourceKey
         check(not seen[key], "no card is rendered twice for one event")
         seen[key] = true
+        if previousTs then check(entry.ts <= previousTs, "the collection stays newest-first") end
+        previousTs = entry.ts
     end
     check_equal(pins, 1, "the pinned record appears exactly once after Load more")
+end)
+
+test("the All panel opens on the unified collection, with every pin marker", function()
+    local environment = new_environment("all-open")
+    seed_codex_day(environment)
+    environment.seed_image_day("2026-11-06", "20261106101010", BASE_TS - 86400)
+    environment.pin_first_matching("codex", "text")
+    local images = environment.t.searchPersistentHistory("[image]", "image")
+    check(environment.t.pinClipboardEntry(images[#images]), "the older image is pinned")
+    environment.t.restorePersistentHistory()
+
+    -- The hotkey path: showClipboardPanel() seeds the first page and the panel
+    -- HTML is rendered from it. It used to render the ordinary cache alone, so
+    -- the first paint carried no pinned record and therefore no pin marker - the
+    -- reported difference between the All and the Pin filter.
+    environment.t.openAllPanelPage(32)
+    local html = environment.t.panelHTML()
+    local state = environment.t.panelState()
+    check_equal(state.menuCount, 6, "five text and one image event, each presented once")
+    check_equal(state.browseMode, "all", "the panel opens in the unified All mode")
+    local _, marks = html:gsub('class="pin%-mark"', "")
+    check_equal(marks, 2, "both pinned events carry the corner marker on the first paint")
+    local _, pinnedCards = html:gsub('data%-pinned="true"', "")
+    check_equal(pinnedCards, 2, "the pinned cards are presented as pinned")
+    local _, plainCards = html:gsub('data%-pinned="false"', "")
+    check_equal(plainCards, 4, "ordinary cards carry no marker")
+    local last = state.menuData[state.menuCount]
+    check(last.isPinned and last.type == "image",
+        "the oldest event is the pinned image, ordered by its own timestamp")
+end)
+
+test("ordinary records carry stable ids and a pin links to its source record id", function()
+    local environment = new_environment("record-ids")
+    seed_codex_day(environment)
+    check(environment.t.migrateDailyHistoryIndexes() > 0,
+        "the migration assigns ids to records written before ids existed")
+    local records = environment.t.readDayHistory(DATE)
+    check_equal(#records, 5, "the migration keeps every record")
+    local seen = {}
+    for _, record in ipairs(records) do
+        check(type(record.id) == "string" and record.id ~= "", "a daily record has an id")
+        check(not seen[record.id], "ids are unique inside a day file")
+        seen[record.id] = true
+    end
+    check(read_file(environment.t.historyJSONPath(DATE) .. ".pre-migration.bak") ~= nil,
+        "the previous daily index is kept as a backup")
+    check_equal(environment.t.migrateDailyHistoryIndexes(), 0, "a second migration changes nothing")
+
+    environment.t.restorePersistentHistory()
+    local pinned_entry = environment.pin_first_matching("codex", "text")
+    local pin = environment.t.readPinnedHistory()[1]
+    check_equal(pin.sourceId, pinned_entry.id, "the pin records the source record id")
+    check_equal(environment.t.effectivePinnedId(pinned_entry), pin.id, "the ordinary record resolves to its pin")
+
+    -- Rebuilding the daily index shifts the file position of every record. The
+    -- id, and so the pin link, survives: the join is no longer the array index.
+    local reversed = {}
+    for index = #records, 1, -1 do reversed[#reversed + 1] = records[index] end
+    assert(environment.t.writeDayHistory(DATE, reversed))
+    environment.t.invalidatePinnedIndex()
+    environment.t.restorePersistentHistory()
+    local after = environment.t.searchPersistentHistory("codex", "text")
+    local marked = 0
+    for _, entry in ipairs(after) do
+        if environment.t.effectivePinnedId(entry) == pin.id then marked = marked + 1 end
+    end
+    check_equal(#after, 3, "the rewritten index keeps every record")
+    check_equal(marked, 1, "the pinned event is still recognised after the index is rewritten")
+end)
+
+test("rendering a marked ordinary card never mutates the cached record", function()
+    local environment = new_environment("stale-marker")
+    seed_codex_day(environment)
+    environment.t.migrateDailyHistoryIndexes()
+    environment.t.restorePersistentHistory()
+    local ordinary = environment.t.searchPersistentHistory("codex", "text")
+    local target = ordinary[#ordinary]
+    check(environment.t.pinClipboardEntry(target), "the record is pinned")
+    local pin = environment.t.readPinnedHistory()[1]
+    local sourceId = target.id
+    check_equal(environment.t.effectivePinnedId(target), pin.id, "the ordinary card is marked")
+
+    local card = environment.t.historyItemHTML(target, 1)
+    check(card:find('class="pin-mark"', 1, true), "the card shows the marker")
+    check(card:find('data-pinned="true"', 1, true), "the card offers Unpin")
+    -- The metadata entry is shared by the history caches: a pin marker written
+    -- onto it survives an Unpin as a stale card.
+    check_equal(target.isPinned, nil, "rendering did not turn the shared entry into a pinned record")
+    check_equal(target.id, sourceId, "the record keeps its own id, not the pin id")
+
+    check(environment.t.unpinClipboardEntry(target), "Unpin resolves the ordinary record through its id")
+    card = environment.t.historyItemHTML(target, 1)
+    check(card:find('class="pin-mark"', 1, true) == nil, "no stale marker survives an Unpin")
+    check(card:find('data-pinned="false"', 1, true), "the card offers Pin again")
+    check_equal(#environment.t.readPinnedHistory(), 0, "the pinned copy was removed")
+end)
+
+test("Paste path sends the image file path for the card that asked for it", function()
+    local environment = new_environment("paste-path")
+    seed_codex_day(environment)
+    local imageRecord = environment.seed_image_day(DATE, "20261107103607", BASE_TS + 120)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local menu = environment.t.panelState().menuData
+    local imageIndex, textIndex
+    for index, entry in ipairs(menu) do
+        if entry.type == "image" and not imageIndex then imageIndex = index end
+        if entry.type == "text" and not textIndex then textIndex = index end
+    end
+    check(imageIndex, "the fixture has an image card")
+    check(textIndex, "the fixture has a text card")
+
+    STUB.reset_recorded_state()
+    environment.t.handleMessage({ body = { action = "pastePath", index = imageIndex } })
+    check_equal(STUB.state.pasted_text, imageRecord.imagePath, "the image file path is put on the pasteboard as text")
+
+    -- A pinned image reports the source path it was copied from, so the pasted
+    -- path is the file the user created, not only the pinned copy.
+    check(environment.t.pinClipboardEntry(menu[imageIndex]), "the image is pinned")
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local rebuilt = environment.t.panelState().menuData
+    local pinnedImageIndex
+    for index, entry in ipairs(rebuilt) do
+        if entry.isPinned and entry.type == "image" then pinnedImageIndex = index break end
+    end
+    check(pinnedImageIndex, "the pinned image is in the unified list")
+    STUB.reset_recorded_state()
+    environment.t.handleMessage({ body = { action = "pastePath", index = pinnedImageIndex } })
+    check_equal(STUB.state.pasted_text, imageRecord.imagePath, "the pinned card reports its source path")
+
+    -- A text card has no file: nothing touches the pasteboard, and the user is
+    -- told why.
+    STUB.reset_recorded_state()
+    environment.t.handleMessage({ body = { action = "pastePath", index = textIndex } })
+    check_equal(STUB.state.pasted_text, nil, "a text card puts nothing on the pasteboard")
+    local alerts = table.concat(STUB.state.alerts, " | ")
+    check(alerts:find("Only image items have a file path", 1, true), "the refusal is reported: " .. alerts)
 end)
 
 test("pinning from the All view collapses the pair into one pinned card", function()

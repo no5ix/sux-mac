@@ -58,9 +58,13 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 | ordinary | ordinary cross-date/date-scoped/type-filtered search, counts, cards, and empty-result behavior stay intact |
 | marker | the `All` view renders one pinned card per event (`data-pinned="true"`, `📍` marker, pinned id) and no ordinary twin; Unpin restores the ordinary card; date scopes stay ordinary-only and keep the in-place Unpin marker |
 | all unify | `All` merges ordinary text, ordinary images, pinned text, and pinned images into one newest-first collection; counts are the deduplicated totals; `Pin` and date scopes keep their own semantics |
-| all dedup | deduplication is identity-based (`sourceKey`/pinned id), never timestamp-based: two records sharing one `ts` stay two cards |
-| all rebuild | after a daily index is rewritten, the pinned event is still folded into one card by payload identity (text body / image file name + ts), and an unrelated record whose `sourceKey` moved is not hidden |
-| all loadmore | Load more extends the ordinary side while the pinned record appears exactly once and no event is rendered twice |
+| all dedup | folding is identity-first (pinned `sourceId` → source record `id`, full `sourceKey`, legacy 3-part `sourceKey`) with payload identity as the fallback, never timestamp-based: two records sharing one `ts` stay two cards, and a full `sourceKey` is never widened to a prefix that would hide the other |
+| all rebuild | after a daily index is rewritten, the pinned event is still folded into one card — by the record `id` the pin recorded as `sourceId`, and by payload identity (text body / image file name + ts) for pins created before ids existed — and an unrelated record whose `sourceKey` moved is not hidden |
+| all loadmore | the All collection is one timestamp-ordered stream: the first page is 32 unified events, Load more extends it at the stream cursor, every event stays newest-first and appears exactly once, `renderedCards` equals the list length (no card skipped by a re-sorted page, none added twice), and the control is gone on the last page |
+| all open | the panel-open path (`openAllPanelPage` + `panelHTML`) paints the unified collection: every pinned event is present with its `📍` marker and `data-pinned="true"`, ordinary cards carry none, and the oldest event keeps its own timestamp position |
+| record ids | `migrateDailyHistoryIndexes()` assigns unique ids to daily records written before ids existed, keeps a `.pre-migration.bak`, is a no-op on the second run, the pin records the source `id` as `sourceId`, and the link survives a rewritten daily index |
+| stale marker | rendering a marked ordinary card never writes the pin state onto the shared cached metadata entry: the entry keeps `isPinned = nil` and its own `id`, Unpin resolves the record through its id, and no stale marker survives |
+| paste path | `pastePath` on an image card puts the image file path on the pasteboard, a pinned image reports its recorded `sourcePath`, and a text card refuses without touching the pasteboard |
 | all pin | the context-menu Pin action from `All` collapses the pair into one pinned card (count unchanged) and leaves ordinary history intact; Unpin from `All` restores the ordinary card |
 | all search | `All` search spans both collections (including pinned-only content), case-insensitively; `Pin` search stays pinned-only; a date search stays scoped to that date and never includes pins; query survives scope/type switches |
 | all cache | the merged set is cached as `collection="all"`, the ordinary set as `collection="history"`; pin, unpin, and Clear All invalidate the All cache; the Pin path never overwrites the ordinary cache |
@@ -79,7 +83,7 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 exercises the shipped code rather than a copy. It also reads the whole panel
 `<script>` for structural assertions. Covered:
 
-- Context menu: ordinary text/image produce Pin, pinned text/image produce
+- Context menu: the ordered spec is built once (Preview, Paste All, Copy, Paste path, Pin/Unpin) with stable `data-context-slot` buttons, `🗂️ Paste path` is visible on image cards only and is recomputed on every open (it never leaks onto the next text card, and hiding it never adds a button), ordinary text/image produce Pin, pinned text/image produce
   Unpin, opening a pinned menu cannot leave Unpin on the next ordinary card (and
   the reverse), repeated alternating opens stay correct, the pin button stays
   findable after its `data-context-action` is mutated (the shipped leak), the

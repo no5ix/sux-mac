@@ -186,33 +186,75 @@ function test(name, body) {
 const menu = loadMenuModel();
 const actions = (m) => m.querySelectorAll("button").map((b) => b.dataset.contextAction);
 const labels = (m) => m.querySelectorAll("button").map((b) => b.textContent);
+const slots = (m) => m.querySelectorAll("button").map((b) => b.getAttribute("data-context-slot"));
+// Only the visible buttons are the menu a user sees. "Paste path" is a slot on
+// every menu and is hidden for cards that have no file, so the button set and
+// the stable slots never change - only the visibility does.
+const visibleActions = (m) => m.querySelectorAll("button")
+  .filter((b) => b.style.display !== "none")
+  .map((b) => b.dataset.contextAction);
+const ALL_SLOTS = ["preview", "pasteAll", "copy", "pastePath", "pin"];
+// The full spec order always carries the pastePath slot; only its visibility
+// changes. The pin slot's action is the one that flips per card.
+const textMenu = (pinAction) => ["preview", "pasteAll", "copy", pinAction];
+const imageMenu = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
+const specActions = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
+
+test("context menu: every slot is built once, in the documented order", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  assert.deepEqual(slots(m), ALL_SLOTS, "the spec order is the DOM order");
+  assert.deepEqual(actions(m), specActions("pin"), "every slot keeps its action payload, visible or not");
+  assert.deepEqual(visibleActions(m), textMenu("pin"), "a text card has no file path to report");
+});
+
+test("context menu: Paste path is offered on image cards only", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const ordinaryText = card(0, "2026-11-08:100:text:1", false, "text");
+  const ordinaryImage = card(1, "2026-11-08:101:image:2", false, "image");
+  const pinnedImage = card(2, "pin-image", true, "image");
+  const pinnedText = card(3, "pin-text", true, "text");
+
+  assert.deepEqual(visibleActions(m), textMenu("pin"), "text starts hidden");
+  menu.applyContextMenuTarget(m, ordinaryImage);
+  assert.deepEqual(visibleActions(m), imageMenu("pin"), "an image card offers the path");
+  menu.applyContextMenuTarget(m, pinnedImage);
+  assert.deepEqual(visibleActions(m), imageMenu("unpin"), "a pinned image keeps the path action");
+  menu.applyContextMenuTarget(m, ordinaryText);
+  assert.deepEqual(visibleActions(m), textMenu("pin"), "the next text card hides it again");
+  menu.applyContextMenuTarget(m, pinnedText);
+  assert.deepEqual(visibleActions(m), textMenu("unpin"), "a pinned text card has no path");
+  assert.deepEqual(actions(m), specActions("unpin"),
+    "the hidden slot keeps its stable action payload");
+  assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length,
+    "hiding a slot never adds or removes a button");
+});
 
 test("context menu: ordinary text and image items produce Pin", () => {
   const m = menu.buildContextMenu(new El("div"));
   const ordinaryText = card(0, "2026-11-08:100:text:1", false, "text");
   const ordinaryImage = card(1, "2026-11-08:101:image:2", false, "image");
-  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryText).map(p => p.action),
-    ["preview", "pasteAll", "copy", "pin"]);
-  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"]);
-  assert.ok(labels(m)[3].includes("Pin") && !labels(m)[3].includes("Unpin"), labels(m)[3]);
-  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryImage).map(p => p.action),
-    ["preview", "pasteAll", "copy", "pin"]);
-  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"]);
+  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryText).map(p => p.action), specActions("pin"));
+  assert.deepEqual(actions(m), specActions("pin"));
+  assert.deepEqual(visibleActions(m), textMenu("pin"), "a text card does not offer the path");
+  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryImage).map(p => p.action), specActions("pin"));
+  assert.deepEqual(visibleActions(m), imageMenu("pin"), "an image card offers the path");
   // Order and item count are preserved; nothing is duplicated.
-  assert.equal(m.querySelectorAll("button").length, 4);
-  assert.deepEqual(labels(m).map(l => l.slice(0, 2)), ["👁️", "🧴", "📋", "📍"].map(s => s.slice(0, 2)));
+  assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
+  assert.deepEqual(labels(m).map(l => l.slice(0, 2)),
+    ["👁️", "🧴", "📋", "🗂️", "📍"].map(s => s.slice(0, 2)));
 });
 
 test("context menu: pinned text and image items produce Unpin", () => {
   const m = menu.buildContextMenu(new El("div"));
   const pinnedText = card(0, "pin-1", true, "text");
   const pinnedImage = card(1, "pin-2", true, "image");
-  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedText).map(p => p.action),
-    ["preview", "pasteAll", "copy", "unpin"]);
-  assert.ok(labels(m)[3].includes("Unpin"), labels(m)[3]);
-  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedImage).map(p => p.action),
-    ["preview", "pasteAll", "copy", "unpin"]);
-  assert.equal(m.querySelectorAll("button").length, 4);
+  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedText).map(p => p.action), specActions("unpin"));
+  assert.deepEqual(visibleActions(m), textMenu("unpin"));
+  assert.ok(labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.deepEqual(menu.applyContextMenuTarget(m, pinnedImage).map(p => p.action), specActions("unpin"));
+  assert.deepEqual(visibleActions(m), imageMenu("unpin"));
+  assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
 });
 
 test("context menu: opening a pinned menu does not change the next ordinary menu", () => {
@@ -220,10 +262,11 @@ test("context menu: opening a pinned menu does not change the next ordinary menu
   const pinned = card(0, "pin-1", true, "text");
   const ordinary = card(1, "2026-11-08:102:text:3", false, "text");
   menu.applyContextMenuTarget(m, pinned);
-  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "unpin"]);
+  assert.deepEqual(actions(m), specActions("unpin"));
   menu.applyContextMenuTarget(m, ordinary);
-  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pin"], "state leaked from the pinned item");
-  assert.ok(labels(m)[3].includes("Pin") && !labels(m)[3].includes("Unpin"));
+  assert.deepEqual(actions(m), specActions("pin"), "state leaked from the pinned item");
+  assert.deepEqual(visibleActions(m), textMenu("pin"), "the path slot is hidden again");
+  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"));
 });
 
 test("context menu: opening an ordinary menu does not change the next pinned menu", () => {
@@ -232,7 +275,27 @@ test("context menu: opening an ordinary menu does not change the next pinned men
   const ordinary = card(1, "2026-11-08:103:text:4", false, "text");
   menu.applyContextMenuTarget(m, ordinary);
   menu.applyContextMenuTarget(m, pinned);
-  assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "unpin"]);
+  assert.deepEqual(actions(m), specActions("unpin"));
+  assert.deepEqual(visibleActions(m), imageMenu("unpin"));
+});
+
+test("context menu: opening an image menu does not leave Paste path on the next text card", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const sequence = [
+    card(0, "2026-11-08:110:image:1", false, "image"),
+    card(1, "2026-11-08:111:text:2", false, "text"),
+    card(2, "pin-image", true, "image"),
+    card(3, "pin-text", true, "text"),
+    card(0, "2026-11-08:110:image:1", false, "image"),
+    card(1, "2026-11-08:111:text:2", false, "text"),
+  ];
+  for (const item of sequence) {
+    menu.applyContextMenuTarget(m, item);
+    const pinAction = item.dataset.pinned === "true" ? "unpin" : "pin";
+    const expected = item.dataset.kind === "image" ? imageMenu(pinAction) : textMenu(pinAction);
+    assert.deepEqual(visibleActions(m), expected,
+      `uid ${item.dataset.uid} leaked a slot: ${visibleActions(m).join(",")}`);
+  }
 });
 
 test("context menu: repeated alternating pinned and ordinary opens stay correct", () => {
@@ -252,7 +315,7 @@ test("context menu: repeated alternating pinned and ordinary opens stay correct"
   for (const item of sequence) {
     menu.applyContextMenuTarget(m, item);
     const expected = item.dataset.pinned === "true" ? "unpin" : "pin";
-    assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", expected],
+    assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pastePath", expected],
       `uid ${item.dataset.uid} expected ${expected}, got ${actions(m).join(",")}`);
   }
 });
@@ -260,8 +323,10 @@ test("context menu: repeated alternating pinned and ordinary opens stay correct"
 test("context menu: the pin button stays findable after its action is mutated", () => {
   const m = menu.buildContextMenu(new El("div"));
   menu.applyContextMenuTarget(m, card(0, "pin-1", true, "text"));
-  assert.equal(m.querySelectorAll("button").length, 4, "no duplicate buttons were added");
+  assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length, "no duplicate buttons were added");
   assert.ok(m.querySelector('[data-context-slot="pin"]'), "stable slot lookup must survive");
+  assert.ok(m.querySelector('[data-context-slot="pastePath"]'),
+    "the path slot keeps a stable slot too, so a hidden button is never looked up by payload");
   // Documents why the slot is required: the mutable payload is now "unpin", so a
   // lookup keyed on the payload finds nothing (the original leak).
   assert.equal(m.querySelector('[data-context-action="pin"]'), null);
@@ -303,6 +368,20 @@ test("context menu: the click acts on the card that opened the menu", () => {
   menu.handleContextMenuClick(m, state,
     { target: m.querySelector('[data-context-slot="pasteAll"]') }, bridge, () => {}, items);
   assert.deepEqual(calls[3], ["pasteAllFrom", 2]);
+
+  // Paste path is the card's own request: the image card sends its row index.
+  menu.openContextMenu(m, state, items[1], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pastePath"]') }, bridge, () => {}, items);
+  assert.deepEqual(calls[4], ["pastePath", 2], "the image card asked for its own path");
+  menu.openContextMenu(m, state, items[0], { x: 10, y: 10 });
+  menu.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pastePath"]') }, bridge, () => {}, items);
+  // The button is hidden for a text card, so a pointer cannot reach it. If a
+  // payload is sent anyway, the Lua handler is the guard: it refuses a card with
+  // no file and leaves the pasteboard untouched.
+  assert.deepEqual(calls[5], ["pastePath", 1], "the request carries the text card's own index");
+  assert.equal(calls.length, 6, "one click sends one action");
 });
 
 test("context menu: a rebuilt list is resolved by uid, not by a stale index", () => {
