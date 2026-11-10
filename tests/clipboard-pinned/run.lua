@@ -854,23 +854,25 @@ test("the All view shows one pinned card per event; date scopes keep the marker"
     local pin_id = environment.t.readPinnedHistory()[1].id
 
     environment.t.restorePersistentHistory()
-    -- All: the pinned copy replaces the ordinary duplicate, one card per event.
+    -- All: the ordinary record remains the representative, with the pin
+    -- identity attached so rendering shows its marker and offers Unpin.
     environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "text" })
     environment.t.updateClipboardPanel("", "text", 0, false)
     local pinned_seen, pinned_index, duplicates, marked_id
     for index, entry in ipairs(environment.t.panelState().menuData) do
         local card = environment.t.historyItemHTML(entry, index)
-        if entry.id == pin_id then
+        if entry.sourceKey == pinned_entry.sourceKey then
             pinned_seen, pinned_index, marked_id = entry, index, entry.id
+            check(entry.isPinned == true, "the ordinary representative is marked pinned")
             check(card:find('data-pinned="true"', 1, true), "the unified card is pinned (Unpin menu)")
             check(card:find('class="pin-mark"', 1, true), "the unified card carries the pin marker")
-        elseif type(entry.sourceKey) == "string" and entry.sourceKey == pinned_entry.sourceKey then
+        elseif entry.id == pin_id then
             duplicates = (duplicates or 0) + 1
         end
     end
-    check(pinned_seen, "the pinned record is presented in All")
+    check(pinned_seen, "the pinned record is represented by its ordinary history card in All")
     check_equal(marked_id, pin_id, "the card carries the pinned record id")
-    check_equal(duplicates, nil, "the ordinary duplicate is not rendered a second time")
+    check_equal(duplicates, nil, "the pinned-only duplicate is not rendered")
     check_equal(environment.t.panelState().menuCount, 5, "one card per clipboard event")
 
     -- Context-menu Copy and click-to-paste work on the unified card, reading the
