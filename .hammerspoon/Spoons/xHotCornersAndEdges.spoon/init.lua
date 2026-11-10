@@ -193,8 +193,8 @@ function center()
 end
 
 ---- Halves of the screen
---hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "left", hs.fnutils.partial(winresize, "left"))
---hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "right", hs.fnutils.partial(winresize, "right"))
+hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "left", hs.fnutils.partial(winresize, "left"))
+hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "right", hs.fnutils.partial(winresize, "right"))
 ---- Maximized
 hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "up", hs.fnutils.partial(winresize, "max"))
 -- hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "up", hs.fnutils.partial(winresize, "stage_manager_max"))
