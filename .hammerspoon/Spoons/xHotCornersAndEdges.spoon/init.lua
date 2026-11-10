@@ -484,8 +484,8 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--TimerLaunchOrFocusApp("NetEaseMusic")
 		elseif gestureOrMouseClick == 'rightMouse' then
 			-- print("cmd[")
-			hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
-			hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", true):post()
+			-- hs.eventtap.event.newKeyEvent({"cmd"}, "[", false):post()
 			--winresize("left")
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			-- if gestureType == hs.eventtap.event.types.smartMagnify then
@@ -519,15 +519,15 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			--winresize("right")
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local win = hs.window.focusedWindow()
-				if win ~= nil then
-					win:moveToScreen(hs.mouse.getCurrentScreen())
-					hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-						winresize("max")
-					end)
-				end
-				return true
-			-- elseif gestureType == hs.eventtap.event.types.rotate then
+				-- local win = hs.window.focusedWindow()
+				-- if win ~= nil then
+				-- 	win:moveToScreen(hs.mouse.getCurrentScreen())
+				-- 	hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+				-- 		winresize("max")
+				-- 	end)
+				-- end
+				-- return true
+			elseif gestureType == hs.eventtap.event.types.rotate then
 			-- 	if rotationDegreesSum > 38 then  -- counter-clockwise rotation
 			-- 	elseif rotationDegreesSum < -38 then  -- Clockwise rotation
 			-- 		local win = hs.window.focusedWindow()
