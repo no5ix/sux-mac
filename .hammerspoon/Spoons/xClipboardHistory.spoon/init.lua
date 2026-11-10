@@ -1905,7 +1905,7 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All</button>
-<button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">Pin</button>
+<button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">📍</button>
 ]] .. (function()
     local buttons={}
     for ago=0,6 do
