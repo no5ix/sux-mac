@@ -564,12 +564,12 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			elseif gestureType == hs.eventtap.event.types.rotate then
 				-- print("rotationDegreesSum=" .. tostring(rotationDegreesSum))
 				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-					hs.eventtap.keyStroke({"cmd"}, "w")
+					hs.eventtap.keyStroke({"cmd"}, "q")
 				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
 					local app = hs.application.frontmostApplication()
 						-- print("app:name()=" .. app:name())
 				    -- if EDITOR_BROWSER_APPS[app:name()] then
-						hs.eventtap.keyStroke({"cmd"}, "q")
+						hs.eventtap.keyStroke({"cmd"}, "w")
 					-- else
 					-- 	local win = hs.window.focusedWindow()
 					-- 	if win then
