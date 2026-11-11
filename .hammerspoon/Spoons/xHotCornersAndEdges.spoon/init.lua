@@ -203,9 +203,9 @@ hs.hotkey.bind({ "ctrl", "alt", "cmd", "shift" }, "down", function()
 	local win = hs.window.focusedWindow()
 	if win ~= nil then
 		win:moveToScreen(hs.mouse.getCurrentScreen())
-		-- hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-		-- 	winresize("max")
-		-- end)
+		hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+			winresize("max")
+		end)
 	end
 end)
 ----------------------------------------------------------------
