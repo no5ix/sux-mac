@@ -61,14 +61,14 @@ function winresize(how)
 
     if how == "left" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 1 / 27, 0, 13 / 27, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标
+			newrect = { 1 / 27, 0, 13 / 27, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标, a table {X,Y,W,H} creates a rect
 		else
         	newrect = hs.layout.left50
 			-- hs.eventtap.keyStroke({"fn", "ctrl"}, "left", 0)  -- 不能用这个, 实测fn在hs其实并不能当做modifier, 虽然他的doc说可以
 		end
     elseif how == "right" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 14 / 27, 0, 13 / 27, 1 }
+			newrect = { 14 / 27, 0, 13 / 27 + 0.001, 1 }
 		else
 			newrect = hs.layout.right50
 		end
@@ -78,7 +78,7 @@ function winresize(how)
         newrect = { 0, 0.5, 1, 0.5 }
     elseif how == "max" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 1 / 27, 0, 26 / 27, 1 }
+			newrect = { 1 / 27, 0, 26 / 27 + 0.001, 1 }  -- this 0.001 is to avoid the window being slightly off the right edge of the screen due to rounding errors
 		else
 			newrect = hs.layout.maximized
 		end
@@ -87,7 +87,7 @@ function winresize(how)
     elseif how == "middle_third_h" or how == "hthird-1" then
         newrect = { 1 / 3, 0, 1 / 3, 1 }
     elseif how == "right_third" or how == "hthird-2" then
-        newrect = { 2 / 3, 0, 1 / 3, 1 }
+        newrect = { 2 / 3, 0, 1 / 3 + 0.001, 1 }
     elseif how == "top_third" or how == "vthird-0" then
         newrect = { 0, 0, 1, 1 / 3 }
     elseif how == "middle_third_v" or how == "vthird-1" then
@@ -97,9 +97,9 @@ function winresize(how)
     elseif how == "stage_manager_left" then
         newrect = { 1 / 27, 0, 13 / 27, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标
     elseif how == "stage_manager_right" then
-        newrect = { 14 / 27, 0, 13 / 27, 1 }
+        newrect = { 14 / 27, 0, 13 / 27 + 0.001, 1 }
     elseif how == "stage_manager_max" then
-        newrect = { 1 / 27, 0, 26 / 27, 1 }
+        newrect = { 1 / 27, 0, 26 / 27 + 0.001, 1 }
     end
 
     win:move(newrect)
