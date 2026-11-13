@@ -1760,30 +1760,32 @@ test("image-path paste keeps text content and resolves images to file paths", fu
 end)
 
 
-test("pin and unpin refresh preserves selected clipboard UIDs and order", function()
+test("pin and unpin refresh reapplies the WebView selection Set to rebuilt cards", function()
     local source = shell("cat " .. shquote(SPOON_PATH))
     local refreshStart = source:find("function updateClipboardPanel(query,kind,offset,append)", 1, true)
     local refreshEnd = source:find("\\nlocal closeClipboardPanel", refreshStart, true)
     check(refreshStart ~= nil and refreshEnd ~= nil, "panel refresh function exists")
     local refresh = source:sub(refreshStart, refreshEnd)
-    check(refresh:find("selected = selectedClipboardUids", 1, true) ~= nil,
-        "panel refresh serializes Lua's selected UID map")
-    check(refresh:find("order = selectedClipboardOrder", 1, true) ~= nil,
-        "panel refresh serializes the original selection order")
-    check(refresh:find("window.applyClipboardSelectionFromLua", 1, true) ~= nil,
-        "panel refresh reapplies selection state after rebuilding cards")
+    check(refresh:find("window.syncClipboardMultiSelection", 1, true) ~= nil,
+        "panel refresh reapplies the persistent WebView selection Set after rebuilding cards")
     check(refresh:find("window.resetMultiSelection", 1, true) == nil,
         "panel refresh does not clear the WebView multi-selection")
     check(refresh:find("window.resetClipboardSelection", 1, true) == nil,
-        "panel refresh does not clear card selection/focus after reapplying UIDs")
+        "panel refresh does not clear card selection/focus")
+
+    local syncStart = source:find("function syncClipboardMultiSelection()", 1, true)
+    local syncEnd = source:find("window.resetMultiSelection = syncClipboardMultiSelection", syncStart, true)
+    local sync = source:sub(syncStart, syncEnd)
+    check(sync:find("selectedClipboardUids.has(uid)", 1, true) ~= nil,
+        "new card nodes receive selection state from the persistent UID Set")
+    check(source:find("window.syncClipboardMultiSelection = syncClipboardMultiSelection", 1, true) ~= nil,
+        "selection sync helper is exported for Lua-triggered refreshes")
 
     local pinAction = source:find('elseif body.action == "pin" or body.action == "unpin" then', 1, true)
     local nextAction = source:find('elseif body.action == "copyHistoryEntry" then', pinAction, true)
     local pinHandler = source:sub(pinAction, nextAction)
     check(pinHandler:find("updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)", 1, true) ~= nil,
         "pin/unpin refreshes the current result collection")
-    check(pinHandler:find("selectedUid = choice and cardUid(choice)", 1, true) ~= nil,
-        "pin/unpin captures the clicked record's stable UID before refreshing")
 end)
 
 -------------------------------------------------------------------------------
