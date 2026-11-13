@@ -690,6 +690,12 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
   assert.ok(panelScript.includes("search.addEventListener('input'"), "typing in search stays native");
   assert.ok(!/data-context-action=/.test(panelScript),
     "menu buttons must not be keyed by the mutable payload attribute");
+  assert.ok(!panelScript.includes('Click to paste'), "cards no longer render Click to paste labels");
+  assert.ok(panelScript.includes("Paste from Oldest to Current"), "the old range-paste action has the concise label");
+  assert.ok(panelScript.includes("✅ Paste All Selected"), "the selected paste action has the required label");
+  assert.ok(panelScript.includes("selectedClipboardUids"), "multi-selection is backed by stable identities");
+  assert.ok(panelScript.includes("multi-select-mark"), "selected cards render a checkmark");
+
 });
 
 test("navigation: nav model uses DOM order only, never grid geometry", () => {
