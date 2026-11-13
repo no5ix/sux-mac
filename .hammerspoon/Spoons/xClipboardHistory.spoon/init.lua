@@ -1689,7 +1689,7 @@ local function historyItemHTML(entry, index)
     local cardIsPinned = pinnedId ~= nil
     local uid = escapeHTML(cardUid(entry))
     local indicators = '<div class="card-indicators">' ..
-        '<span class="multi-select-mark" aria-hidden="true" style="display:none">✓</span>' ..
+        '<span class="multi-select-mark" aria-hidden="true" style="visibility:hidden">✓</span>' ..
         (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '') ..
         '</div>'
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
@@ -1897,10 +1897,16 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 /* Pinned cards carry a corner marker beside the type label. It is decorative
    and click-through, so selection, click-to-paste, keyboard navigation, and the
    context menu keep working exactly as on ordinary cards. */
+/* Reserve a fixed slot for each indicator. Selection only changes the
+   checkmark visibility; the pin never shifts when a pinned card is selected. */
 .card-indicators { position:absolute; top:9px; right:10px; z-index:2; display:flex; align-items:center; gap:5px; pointer-events:none; user-select:none; }
-.pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
-.multi-select-mark { width:20px; height:20px; display:none; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:13px; font-weight:700; line-height:1; box-shadow:0 1px 4px rgba(0,0,0,.35); }
-.item .meta { padding-right:48px; }
+.card-indicators > .multi-select-mark,
+.card-indicators > .pin-mark { flex:0 0 20px; width:20px; height:20px; box-sizing:border-box; }
+.card-indicators > .multi-select-mark { display:inline-flex; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:13px; font-weight:700; line-height:1; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+.card-indicators > .multi-select-mark[style*="display: none"] { display:inline-flex !important; visibility:hidden; }
+.card-indicators > .multi-select-mark[style*="display: inline-flex"] { visibility:visible; }
+.card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
+.item .meta { padding-right:52px; }
 .item.multi-selected { border-color:var(--selected-border); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
@@ -2555,7 +2561,7 @@ function syncClipboardMultiSelection() {
     item.classList.toggle('multi-selected', selected);
     const mark = item.querySelector('.multi-select-mark');
     if (mark) {
-      mark.style.display = selected ? 'inline-flex' : 'none';
+      mark.style.visibility = selected ? 'visible' : 'hidden';
       mark.setAttribute('aria-label', selected ? 'Selected' : 'Not selected');
     }
   });
