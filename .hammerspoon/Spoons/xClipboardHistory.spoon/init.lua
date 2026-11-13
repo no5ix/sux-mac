@@ -1942,7 +1942,9 @@ end)() .. [[
 <script>
 const bridge = (action, index, query, kind, dateKey, uid) => {
   try {
-    window.webkit.messageHandlers.clipboardHistory.postMessage({ action, index, query, kind, dateKey, uid });
+    window.webkit.messageHandlers.clipboardHistory.postMessage({
+      action, index, query, kind, dateKey, uid
+    });
   } catch (_) {}
 };
 document.addEventListener('click', event => {
