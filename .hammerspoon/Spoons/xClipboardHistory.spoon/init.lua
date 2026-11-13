@@ -2932,7 +2932,15 @@ local function updateClipboardPanel(query,kind,offset,append)
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     end
-    js=js.."if(window.resetMultiSelection)window.resetMultiSelection();"..
+    -- Re-render the current Lua selection instead of clearing it. Refreshes
+    -- caused by pin/unpin can reorder/replace card DOM nodes, but selected UIDs
+    -- remain valid and their checkmarks must survive the rebuild.
+    local selectedStateJson = json.encode({
+        selected = selectedClipboardUids,
+        order = selectedClipboardOrder
+    }) or "{}"
+    js=js.."if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua("..
+        jsStringLiteral(selectedStateJson)..");"..
         "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
@@ -3088,7 +3096,15 @@ function handleClipboardPanelMessage(message)
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
         if not ok then
             hs.alert.show(body.action=="pin" and "Unable to pin this clipboard item" or "Unable to unpin this clipboard item")
-        else updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false);
+        else
+            local selectedUid = choice and cardUid(choice)
+            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
+            -- The refreshed panel restores the complete selection snapshot.
+            -- Keep this explicit UID intact even if the pin operation changed
+            -- which backing collection supplied the item.
+            if selectedUid and selectedClipboardUids[selectedUid] then
+                selectedClipboardUids[selectedUid] = true
+            end
         --     hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item")
         end
     elseif body.action == "copyHistoryEntry" then
