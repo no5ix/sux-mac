@@ -871,6 +871,42 @@ test("pasteSelected message resolves through the local forward declaration", fun
         "the selected record is passed to the shared paste executor")
 end)
 
+test("selected clipboard UID remains resolvable after pinning and unpinning", function()
+    local environment = new_environment("selection-pin-identity")
+    seed_codex_day(environment)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+
+    local ordinary = environment.t.panelState().menuData[1]
+    local originalUid = environment.t.cardUid(ordinary)
+    check(environment.t.pinClipboardEntry(ordinary), "ordinary clipboard item pins successfully")
+
+    local pinnedEntries = environment.t.loadPinnedEntries()
+    local pinned
+    for _, entry in ipairs(pinnedEntries) do
+        if entry.sourceId == ordinary.id then pinned = entry; break end
+    end
+    check(pinned ~= nil, "pinned record retains its original source ID")
+    check_equal(environment.t.cardUid(pinned), originalUid,
+        "pinning does not change the item's selection UID")
+
+    local selected = environment.t.resolveSelectedClipboardEntries(hs.json.encode({ originalUid }))
+    check(selected ~= nil and #selected == 1,
+        "the pre-pin selected UID resolves to the pinned record")
+
+    check(environment.t.unpinClipboardEntry(pinned), "selected clipboard item unpins successfully")
+    environment.t.invalidatePinnedIndex()
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local afterUnpin
+    for _, entry in ipairs(environment.t.panelState().menuData) do
+        if environment.t.cardUid(entry) == originalUid then afterUnpin = entry; break end
+    end
+    check(afterUnpin ~= nil, "the ordinary record returns with the same selection UID")
+    check_equal(environment.t.cardUid(afterUnpin), originalUid,
+        "unpinning preserves the original selection UID")
+end)
+
 test("selected paste supports chronological and explicit selection order", function()
     local environment = new_environment("multi-select-order")
     environment.seed_text_day(DATE, { "A oldest", "B middle", "C newest" }, BASE_TS)
