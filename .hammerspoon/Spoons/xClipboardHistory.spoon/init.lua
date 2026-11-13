@@ -2688,6 +2688,7 @@ local function updateClipboardPanel(query,kind,offset,append)
 end
 
 local closeClipboardPanel
+local pasteSelectedClipboardItems
 
 function handleClipboardPanelMessage(message)
     local body = message and message.body
@@ -3207,7 +3208,7 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     end)
 end
 
-local function pasteSelectedClipboardItems(serializedUids)
+pasteSelectedClipboardItems = function(serializedUids)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
         hs.alert.show("No clipboard-history items are selected."); return false
