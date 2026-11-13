@@ -2131,6 +2131,17 @@ let committedSearchQuery = '';
 // The Lua table stores the authoritative stable-ID selection; this Set mirrors it in the WebView.
 const selectedClipboardUids = new Set();
 const selectedClipboardOrder = [];
+const clipboardUidKinds = new Map();
+function rememberClipboardCardKinds() {
+  rows().forEach(item => {
+    const uid = item.dataset.uid || '';
+    if (uid) clipboardUidKinds.set(uid, item.dataset.kind || '');
+  });
+}
+function hasSelectedImage() {
+  rememberClipboardCardKinds();
+  return selectedClipboardOrder.some(uid => clipboardUidKinds.get(uid) === 'image');
+}
 let previousSearchQuery = '';
 let lastNonSearchDateKey = null;
 let lastNonSearchWasAllDates = true;
@@ -2564,6 +2575,7 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
 }
 /* END CONTEXT MENU MODEL */
 function syncClipboardMultiSelection() {
+  rememberClipboardCardKinds();
   rows().forEach(item => {
     const uid = item.dataset.uid || '', selected = selectedClipboardUids.has(uid);
     item.dataset.selected = String(selected);
@@ -2600,10 +2612,9 @@ document.addEventListener('contextmenu', event => {
   const item = event.target.closest ? event.target.closest('.item') : null;
   if (!item) return;
   event.preventDefault();
-  const hasSelectedImage = rows().some(row =>
-    row.dataset.kind === 'image' && selectedClipboardUids.has(row.dataset.uid || ''));
+  const selectedContainsImage = hasSelectedImage();
   openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY },
-    selectedClipboardUids.size > 0, hasSelectedImage || item.dataset.kind === 'image');
+    selectedClipboardUids.size > 0, selectedContainsImage || item.dataset.kind === 'image');
   selectRow(rows().indexOf(item));
 });
 contextMenu.addEventListener('click', event => {
