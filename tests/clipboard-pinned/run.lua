@@ -847,6 +847,53 @@ test("ordinary history search, dates, and cards keep working", function()
         "a query with no matches returns an empty set")
 end)
 
+test("multi-selection uses stable UIDs and survives filter changes", function()
+    local environment = new_environment("multi-select")
+    seed_codex_day(environment)
+    environment.seed_image_day(DATE, "20261107103607", BASE_TS + 120)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local state = environment.t.panelState()
+    local selectedEntries = { state.menuData[1], state.menuData[3] }
+    local selectedUids = {}
+    for _, entry in ipairs(selectedEntries) do
+        selectedUids[#selectedUids + 1] = environment.t.cardUid(entry)
+        environment.t.handleMessage({
+            body = { action = "selectItem", uid = environment.t.cardUid(entry) }
+        })
+    end
+    check_equal(count_matching(selectedUids, function(uid)
+        return environment.t.selectedClipboardUids[uid] == true
+    end), 2, "two stable IDs are selected")
+    for _, entry in ipairs(selectedEntries) do
+        local card = environment.t.historyItemHTML(entry, 1)
+        check(card:find('Click to paste', 1, true) == nil, "card no longer includes Click to paste")
+    end
+
+    -- Switch to an unrelated type/date/search view; the hidden selections remain.
+    environment.t.updateClipboardPanel("no matches here", "all", 0, false)
+    check_equal(count_matching(selectedUids, function(uid)
+        return environment.t.selectedClipboardUids[uid] == true
+    end), 2, "selection survives filter changes")
+
+    -- Resolve the IDs back to records in oldest-to-newest order across mixed types.
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local serialized = hs.json.encode(selectedUids)
+    local resolved = environment.t.resolveSelectedClipboardEntries(serialized)
+    check(resolved ~= nil, "selected records resolve after returning to All")
+    check_equal(#resolved, 2, "exactly the selected records are resolved")
+    check((resolved[1].rowTs or resolved[1].ts) <= (resolved[2].rowTs or resolved[2].ts),
+        "selected records are ordered oldest-to-newest")
+
+    -- A stale UID must not paste an unrelated card or fall back to its old index.
+    check(environment.t.resolveSelectedClipboardEntries(hs.json.encode({ "missing-record-uid" })) == nil,
+        "stale selections are rejected")
+    environment.t.handleMessage({ body = { action = "deselectItem", uid = selectedUids[1] } })
+    check(environment.t.selectedClipboardUids[selectedUids[1]] == nil, "Deselect clears only its own UID")
+    check(environment.t.selectedClipboardUids[selectedUids[2]] == true, "other selections remain");
+end)
+
 test("the All view shows one pinned card per event; date scopes keep the marker", function()
     local environment = new_environment("marker")
     seed_codex_day(environment)
