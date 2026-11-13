@@ -2466,34 +2466,42 @@ const CONTEXT_MENU_ITEMS = [
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
   const imageActionsAvailable = isImage === true || hasSelectedImage === true;
   const visible = CONTEXT_MENU_ITEMS.map(spec => {
-    if (spec.divider === true) {
-      return spec.visibleWhenImageActions === true ? imageActionsAvailable : true;
-    }
+    if (spec.divider === true) return false;
     return (spec.imageOnly !== true || isImage === true) &&
       (spec.selectedOnly !== true || hasSelection === true) &&
       (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable));
   });
-  // A divider is visible only when there is a visible action after it and
-  // another visible menu item before it. This prevents orphan separators
-  // when the image-only section is hidden for a text record.
-  for (let index = 0; index < CONTEXT_MENU_ITEMS.length; index += 1) {
-    const spec = CONTEXT_MENU_ITEMS[index];
-    if (spec.divider !== true) continue;
-    const hasVisibleBefore = visible.slice(0, index).some(value => value);
-    const nextDivider = CONTEXT_MENU_ITEMS.findIndex((item, itemIndex) => itemIndex > index && item.divider === true);
-    const hasVisibleAfter = visible.slice(index + 1, nextDivider < 0 ? undefined : nextDivider).some(value => value);
-    // Dividers only separate visible groups. The regular divider before
-    // Select is unconditional when both groups are present; the image divider
-    // is conditional on a visible image-specific item.
-    visible[index] = hasVisibleBefore && hasVisibleAfter &&
-      (spec.visibleWhenImageActions !== true || imageActionsAvailable);
+
+  const selectDividerIndex = CONTEXT_MENU_ITEMS.findIndex(spec => spec.slot === 'divider-before-select');
+  const imageDividerIndex = CONTEXT_MENU_ITEMS.findIndex(spec => spec.slot === 'divider-before-images');
+
+  // This separator divides the always-present ordinary actions from the
+  // selection section. Its visibility must not depend on image actions.
+  if (selectDividerIndex >= 0) {
+    const hasOrdinaryAction = visible.slice(0, selectDividerIndex).some(Boolean);
+    const hasSelectionAction = visible.slice(selectDividerIndex + 1,
+      imageDividerIndex >= 0 ? imageDividerIndex : undefined).some(Boolean);
+    visible[selectDividerIndex] = hasOrdinaryAction && hasSelectionAction;
   }
+
+  // The second separator is only needed when at least one image-specific
+  // action is visible after it.
+  if (imageDividerIndex >= 0) {
+    const hasSelectionAction = visible.slice(
+      selectDividerIndex >= 0 ? selectDividerIndex + 1 : 0,
+      imageDividerIndex
+    ).some(Boolean);
+    const hasImageAction = visible.slice(imageDividerIndex + 1).some(Boolean);
+    visible[imageDividerIndex] = hasSelectionAction && hasImageAction;
+  }
+
   return CONTEXT_MENU_ITEMS.map((spec, index) => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
       spec.slot === 'select' ? (isSelected ? (spec.deselectLabel || '❌ Deselect') : spec.label) : spec.label,
-    visible: visible[index]
+    visible: visible[index],
+    divider: spec.divider === true
   }));
 }
 function buildContextMenu(menu) {
