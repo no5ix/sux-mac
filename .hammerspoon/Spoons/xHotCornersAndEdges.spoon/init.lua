@@ -59,16 +59,28 @@ function winresize(how)
     --local windowLayout
     local newrect
 
+	local totalStageMgrAvailableScreenWidthUnit = 37  -- for example, split the screen into 37 units, and the left area is 1 unit, the right area is 19 units, and the middle area is 17 units
+	local rightEdgeOffset = 0.001 -- this rightEdgeOffset is to avoid the window being slightly off the right edge of the screen due to rounding errors
+	local StageMgrAvailableHalfScreenWidthUnit = (totalStageMgrAvailableScreenWidthUnit - 1) / 2 
+	local leftStartX = 1 / totalStageMgrAvailableScreenWidthUnit
+	local leftWidth = StageMgrAvailableHalfScreenWidthUnit / totalStageMgrAvailableScreenWidthUnit
+	local rightStartX = (StageMgrAvailableHalfScreenWidthUnit + 1) / totalStageMgrAvailableScreenWidthUnit
+	local rightWidth = StageMgrAvailableHalfScreenWidthUnit / totalStageMgrAvailableScreenWidthUnit + rightEdgeOffset
+	local totalStageMgrAvailableScreenWidth = (totalStageMgrAvailableScreenWidthUnit - 1) / totalStageMgrAvailableScreenWidthUnit + rightEdgeOffset
+
+
+	-- a table {X,Y,W,H} creates a rect
+
     if how == "left" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 1 / 27, 0, 13 / 27, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标, a table {X,Y,W,H} creates a rect
+			newrect = { leftStartX, 0, leftWidth, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标, a table {X,Y,W,H} creates a rect
 		else
         	newrect = hs.layout.left50
 			-- hs.eventtap.keyStroke({"fn", "ctrl"}, "left", 0)  -- 不能用这个, 实测fn在hs其实并不能当做modifier, 虽然他的doc说可以
 		end
     elseif how == "right" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 14 / 27, 0, 13 / 27 + 0.001, 1 }
+			newrect = { rightStartX, 0, rightWidth, 1 }
 		else
 			newrect = hs.layout.right50
 		end
@@ -78,7 +90,7 @@ function winresize(how)
         newrect = { 0, 0.5, 1, 0.5 }
     elseif how == "max" then
 		if pkg.isStageManagerEnabled then
-			newrect = { 1 / 27, 0, 26 / 27 + 0.001, 1 }  -- this 0.001 is to avoid the window being slightly off the right edge of the screen due to rounding errors
+			newrect = { leftStartX, 0, totalStageMgrAvailableScreenWidth, 1 }  
 		else
 			newrect = hs.layout.maximized
 		end
@@ -94,12 +106,6 @@ function winresize(how)
         newrect = { 0, 1 / 3, 1, 1 / 3 }
     elseif how == "bottom_third" or how == "vthird-2" then
         newrect = { 0, 2 / 3, 1, 1 / 3 }
-    elseif how == "stage_manager_left" then
-        newrect = { 1 / 27, 0, 13 / 27, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标
-    elseif how == "stage_manager_right" then
-        newrect = { 14 / 27, 0, 13 / 27 + 0.001, 1 }
-    elseif how == "stage_manager_max" then
-        newrect = { 1 / 27, 0, 26 / 27 + 0.001, 1 }
     end
 
     win:move(newrect)
