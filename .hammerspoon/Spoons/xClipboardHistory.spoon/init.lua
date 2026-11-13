@@ -2693,7 +2693,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     -- survives filters and list rebuilds, and Lua remains the source of truth;
     -- re-syncing the card decorations must not clear that Set.
     js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
-        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
+        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items");
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
