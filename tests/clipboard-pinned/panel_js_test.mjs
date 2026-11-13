@@ -731,6 +731,12 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "Lua handles the atomic toggle action");
   assert.ok(source.includes("local state = { selected = selectedClipboardUids, order = selectedClipboardOrder }"),
     "Lua returns a single authoritative selection snapshot");
+  assert.ok(source.includes("error.localizedDescription or error.localizedFailureReason"),
+    "WebView NSError logging includes a readable failure description");
+  assert.ok(source.includes('"domain=" .. tostring(error.domain)'),
+    "WebView NSError logging includes the error domain");
+  assert.ok(source.includes('"code=" .. tostring(error.code)'),
+    "WebView NSError logging includes the error code");
   assert.ok(panelScript.includes("if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"),
     "ordinary list refreshes must preserve and re-render the current selection");
   assert.ok(!panelScript.includes("if(window.resetMultiSelection)window.resetMultiSelection();\".."),
