@@ -44,20 +44,23 @@ end
 
 -- faster version of the above
 local function startMacScreenshot()
-    if captureTask and captureTask:isRunning() then
-        hs.alert.show("Screenshot capture is already running")
-        return
-    end
+    hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "4", 0)
 
-    captureTask = hs.task.new("/usr/sbin/screencapture", function(exitCode)
-        captureTask = nil
-        if exitCode == 0 then
-            -- hs.alert.show("Screenshot copied to clipboard")
-        end -- Nonzero is often just the user cancelling the selection.
-    end, {"-i", "-c", "-x"})
+    -- on macOS 27, the below code couldn't copy a screenshot to the clipboard, so I commented it out and used the keyboard shortcut instead
+    -- if captureTask and captureTask:isRunning() then
+    --     hs.alert.show("Screenshot capture is already running")
+    --     return
+    -- end
 
-    if captureTask then captureTask:start()
-    else hs.alert.show("Could not start screencapture") end
+    -- captureTask = hs.task.new("/usr/sbin/screencapture", function(exitCode)
+    --     captureTask = nil
+    --     if exitCode == 0 then
+    --         -- hs.alert.show("Screenshot copied to clipboard")
+    --     end -- Nonzero is often just the user cancelling the selection.
+    -- end, {"-i", "-c", "-x"})
+
+    -- if captureTask then captureTask:start()
+    -- else hs.alert.show("Could not start screencapture") end
 end
 
 local function startPreferredScreenshot()
