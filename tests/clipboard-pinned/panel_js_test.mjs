@@ -31,6 +31,7 @@ function block(begin, end) {
 }
 
 const menuModel = block("/* BEGIN CONTEXT MENU MODEL", "/* END CONTEXT MENU MODEL */");
+const multiSelectionBinding = source.slice(source.indexOf('function syncClipboardMultiSelection()'), source.indexOf("const contextMenu = document.createElement('div');"));
 const navModel = block("/* BEGIN KEYBOARD NAVIGATION MODEL", "/* END KEYBOARD NAVIGATION MODEL */");
 const navBinding = block("/* BEGIN KEYBOARD NAVIGATION BINDING", "/* END KEYBOARD NAVIGATION BINDING */");
 
@@ -166,9 +167,9 @@ function loadNavigation(cards) {
 function loadMenuModel() {
   const document = { createElement: (tag) => new El(tag) };
   const window = makeWindow();
-  return new Function("document", "window",
-    `${menuModel}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick };`)(
-    document, window);
+  return new Function("document", "window", "rows", "selectedClipboardUids",
+    `${menuModel}\n${multiSelectionBinding}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick, syncClipboardMultiSelection };`)(
+    document, window, () => [], new Set());
 }
 
 // ------------------------------------------------------------------- tests --
