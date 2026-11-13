@@ -2453,20 +2453,26 @@ function applyClipboardSelectionFromLua(serializedState) {
   const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);
   selectedClipboardUids.clear();
   selectedClipboardOrder.length = 0;
+  Object.keys(selected).forEach(uid => {
+    if (selected[uid]) selectedClipboardUids.add(uid);
+  });
   order.forEach(uid => {
-    if (selected[uid]) {
-      selectedClipboardUids.add(uid);
+    if (selectedClipboardUids.has(uid) && !selectedClipboardOrder.includes(uid)) {
       selectedClipboardOrder.push(uid);
     }
   });
-  // Include selected UIDs absent from the order array defensively.
-  Object.keys(selected).forEach(uid => {
-    if (selected[uid] && !selectedClipboardUids.has(uid)) {
-      selectedClipboardUids.add(uid);
-      selectedClipboardOrder.push(uid);
-    }
+  selectedClipboardUids.forEach(uid => {
+    if (!selectedClipboardOrder.includes(uid)) selectedClipboardOrder.push(uid);
   });
   syncClipboardMultiSelection();
+  // Keep the context menu correct even when the same card is right-clicked
+  // repeatedly without rebuilding the list.
+  if (contextState.uid) {
+    const contextItem = rows().find(item => item.dataset.uid === contextState.uid);
+    if (contextItem) {
+      applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0);
+    }
+  }
 }
 window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;
 window.resetMultiSelection = syncClipboardMultiSelection;
