@@ -2370,7 +2370,7 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
     slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') :
       spec.slot === 'toggleSelection' ? 'toggleSelection' : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
-      spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
+      spec.slot === 'toggleSelection' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
     visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
   }));
 }
