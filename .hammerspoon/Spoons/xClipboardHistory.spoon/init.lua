@@ -2941,7 +2941,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     }) or "{}"
     js=js.."if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua("..
         jsStringLiteral(selectedStateJson)..");"..
-        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
+        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
