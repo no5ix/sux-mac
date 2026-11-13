@@ -265,6 +265,25 @@ test("context menu: pinned text and image items produce Unpin", () => {
   assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
 });
 
+test("multi-selection binding adds and removes lower-left checkmarks by stable UID", () => {
+  const cards = [card(0, "multi-a", false, "text"), card(1, "multi-b", true, "image")];
+  const model = loadMenuModel();
+  model.setRows(cards);
+  model.selectedClipboardUids.add("multi-a");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[0].dataset.selected, "true");
+  assert.ok(cards[0].classList.contains("multi-selected"));
+  assert.equal(cards[0].querySelector(".multi-select-mark").textContent, "✓");
+  assert.equal(cards[1].querySelector(".multi-select-mark"), null);
+  model.selectedClipboardUids.add("multi-b");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[1].querySelector(".multi-select-mark").textContent, "✓");
+  model.selectedClipboardUids.delete("multi-a");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[0].querySelector(".multi-select-mark"), null);
+  assert.equal(cards[1].querySelector(".multi-select-mark").textContent, "✓");
+});
+
 test("context menu: selection action and selected-paste visibility track the target", () => {
   const m = menu.buildContextMenu(new El("div"));
   const uid = "item-to-select";
