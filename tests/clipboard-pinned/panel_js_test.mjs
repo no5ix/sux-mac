@@ -439,6 +439,9 @@ test("context menu: the click acts on the card that opened the menu", () => {
   menu.handleContextMenuClick(m, state, { target: selectedButton },
     bridge, () => {}, [selectedText, selectedImage], selected);
   assert.deepEqual(calls[7], ["pasteSelected", 0], "Paste All Selected does not depend on the right-clicked row");
+  const selectionOrderButton = m.querySelector('[data-context-slot="pasteSelectedOrder"]');
+  menu.handleContextMenuClick(m, state, { target: selectionOrderButton }, bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[8], ["pasteSelectedOrder", 0], "selection order uses a separate action");
   const orderButton = m.querySelector('[data-context-slot="pasteSelectedOrder"]');
   menu.handleContextMenuClick(m, state, { target: orderButton }, bridge, () => {}, [selectedText, selectedImage], selected);
   assert.deepEqual(calls[8], ["pasteSelectedOrder", 0], "selection-order paste has a distinct bridge action");
