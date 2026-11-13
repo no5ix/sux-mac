@@ -231,6 +231,25 @@ test("context menu hover uses delegated mouseover and mouseout highlighting", ()
   assert.ok(panelScript.includes("button.style.background = 'transparent'"));
 });
 
+
+test("context menu: right-clicked item controls the Select/Deselect label", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const unselected = card(0, "label-unselected", false, "text");
+  const selected = card(1, "label-selected", false, "text");
+
+  menu.applyContextMenuTarget(m, unselected, false);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "✅ Select");
+
+  menu.selectedClipboardUids.add("label-selected");
+  menu.applyContextMenuTarget(m, selected, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "❌ Deselect");
+
+  // Another unselected card must still show Select while a different card
+  // remains selected in the global multi-selection.
+  menu.applyContextMenuTarget(m, unselected, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "✅ Select");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
