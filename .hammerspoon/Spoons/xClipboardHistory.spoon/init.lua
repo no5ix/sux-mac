@@ -2360,14 +2360,15 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'select', label: '✅ Select', selectedLabel: '❌ Deselect' },
+  { slot: 'toggleSelection', label: '✅ Select', selectedLabel: '❌ Deselect' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
-    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') :
+      spec.slot === 'toggleSelection' ? 'toggleSelection' : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
       spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
     visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
@@ -2423,13 +2424,9 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
-  else if (action === 'select' || action === 'deselect') {
+  else if (action === 'toggleSelection') {
     const uid = target.dataset.uid || '';
-    if (uid) {
-      // Lua owns the selection state. Do not optimistically mutate this Set:
-      // the bridge response will replace it with the authoritative state.
-      bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
-    }
+    if (uid) bridge('toggleSelection', rowIndex, '', '', '', uid);
   }
   else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
@@ -2449,13 +2446,22 @@ function syncClipboardMultiSelection() {
     } else if (!selected && mark) mark.remove();
   });
 }
-function applyClipboardSelectionFromLua(serializedSelection) {
-  let selected;
-  try { selected = JSON.parse(serializedSelection || '{}'); } catch (_) { selected = {}; }
+function applyClipboardSelectionFromLua(serializedState) {
+  let state;
+  try { state = JSON.parse(serializedState || '{}'); } catch (_) { state = {}; }
+  const selected = state && state.selected && typeof state.selected === 'object' ? state.selected : {};
+  const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);
   selectedClipboardUids.clear();
   selectedClipboardOrder.length = 0;
-  Object.keys(selected).forEach(uid => {
+  order.forEach(uid => {
     if (selected[uid]) {
+      selectedClipboardUids.add(uid);
+      selectedClipboardOrder.push(uid);
+    }
+  });
+  // Include selected UIDs absent from the order array defensively.
+  Object.keys(selected).forEach(uid => {
+    if (selected[uid] && !selectedClipboardUids.has(uid)) {
       selectedClipboardUids.add(uid);
       selectedClipboardOrder.push(uid);
     }
@@ -2713,34 +2719,28 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
-    elseif body.action == "selectItem" or body.action == "deselectItem" then
-        -- The WebView sends a stable UID for both operations. Do not require
-        -- the selected record to be present in current menuData: filters,
-        -- pinned scopes, search results, and pagination can replace that list.
+    elseif body.action == "toggleSelection" then
+        -- Toggle by stable identity only. Never depend on the current rendered
+        -- menuData: the card may have come from a pinned, filtered, or paginated view.
         local requestedUid = tostring(body.uid or "")
         if requestedUid ~= "" then
-            if body.action == "selectItem" then
-                if not selectedClipboardUids[requestedUid] then
-                    selectedClipboardUids[requestedUid] = true
-                    selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
-                end
-            else
+            if selectedClipboardUids[requestedUid] then
                 selectedClipboardUids[requestedUid] = nil
                 for index = #selectedClipboardOrder, 1, -1 do
                     if selectedClipboardOrder[index] == requestedUid then
                         table.remove(selectedClipboardOrder, index)
                     end
                 end
+            else
+                selectedClipboardUids[requestedUid] = true
+                selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
             end
-            -- Rebuild card indicators from Lua's authoritative state.
             if clipboard_webview then
-                local selectedJson = json.encode(selectedClipboardUids) or "{}"
-                -- Hammerspoon's WebView bridge exposes evaluateJavaScript's
-                -- completion callback; use it to report any JS-side failure
-                -- instead of silently leaving the menu's selected state stale.
+                local state = { selected = selectedClipboardUids, order = selectedClipboardOrder }
+                local stateJson = json.encode(state) or "{}"
                 clipboard_webview:evaluateJavaScript(
                     "if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua(" ..
-                    jsStringLiteral(selectedJson) .. ");",
+                    jsStringLiteral(stateJson) .. ");",
                     function(_, error)
                         if error then logger.e("Unable to sync clipboard selection to WebView: " .. tostring(error)) end
                     end
