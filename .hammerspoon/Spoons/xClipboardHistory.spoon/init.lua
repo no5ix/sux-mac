@@ -2569,6 +2569,7 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
         rowIndex, '', '', '', uid);
     }
   } else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
+  else if (action === 'copyPath') bridge('copyPath', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
   else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
   else if (action === 'preview' && openManualPreview) openManualPreview(target);
@@ -3431,10 +3432,10 @@ local function pasteAllRowsStep(position, direction, pathMode)
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
                     hs.eventtap.keyStroke({"cmd"}, "v", 0)
-                    hs.timer.doAfter(0.4, function() pasteAllRowsStep(position + direction, direction) end)
+                    hs.timer.doAfter(0.4, function() pasteAllRowsStep(position + direction, direction, pathMode) end)
                 end)
             else
-                pasteAllRowsStep(position + direction, direction)
+                pasteAllRowsStep(position + direction, direction, pathMode)
             end
         end)
     end)
