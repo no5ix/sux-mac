@@ -3218,8 +3218,8 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
         hs.alert.show("No clipboard-history rows to paste.")
         return
     end
-    -- Build the batch newest-first. The shared range executor walks backward,
-    -- so its actual paste sequence is oldest-to-newest, ending at startRow.
+    -- menuData is newest-first. Collecting startRow down to index 1 puts the
+    -- clicked row first, followed by progressively newer rows. Walk forward.
     activePasteEntries = {}
     for index = startRow, 1, -1 do
         if menuData[index] then activePasteEntries[#activePasteEntries + 1] = menuData[index] end
@@ -3229,7 +3229,7 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
         if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllWithDelimiterRecursionVersion(1) end)
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1) end)
     end)
 end
 
