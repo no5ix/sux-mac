@@ -721,6 +721,10 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the one toggle action still presents Select and Deselect labels");
   assert.ok(panelScript.includes("spec.slot === 'toggleSelection' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label"),
     "the context-menu label is derived from the selected UID state for the toggle slot");
+  assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = function(serializedState)"),
+    "the Lua selection snapshot is applied after the context menu has been created");
+  assert.ok(panelScript.includes("applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0)"),
+    "the currently open menu refreshes its Select/Deselect label after Lua toggles the UID");
   assert.ok(panelScript.includes("const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);"),
     "Lua sends both authoritative selection membership and explicit ordering");
   assert.ok(source.includes('elseif body.action == "toggleSelection" then'),
