@@ -708,6 +708,15 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the tested context-menu model must remain inside the panel script");
   assert.ok(panelScript.includes("const selectedClipboardUids = new Set();"),
     "the WebView initializes the Set used by selection and context-menu code");
+  assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;"),
+    "the WebView accepts authoritative selection state from Lua after select/deselect");
+  assert.ok(/body\.action === "selectItem" or body\.action === "deselectItem"[\s\S]*?selectedClipboardUids\[requestedUid\] = nil/.test(source),
+    "Lua must remove the UID from its authoritative selection on deselect");
+  const selectionHandlerStart = source.indexOf('elseif body.action == "selectItem" or body.action == "deselectItem" then');
+  const selectionHandlerEnd = source.indexOf('elseif body.action == "pasteSelected" then', selectionHandlerStart);
+  const selectionHandler = source.slice(selectionHandlerStart, selectionHandlerEnd);
+  assert.ok(!selectionHandler.includes("for _, entry in ipairs(menuData"),
+    "deselect must not depend on the UID being in the current filtered menuData");
   assert.ok(panelScript.includes("if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"),
     "ordinary list refreshes must preserve and re-render the current selection");
   assert.ok(!panelScript.includes("if(window.resetMultiSelection)window.resetMultiSelection();\".."),
