@@ -2735,9 +2735,15 @@ function handleClipboardPanelMessage(message)
             -- Rebuild card indicators from Lua's authoritative state.
             if clipboard_webview then
                 local selectedJson = json.encode(selectedClipboardUids) or "{}"
+                -- Hammerspoon's WebView bridge exposes evaluateJavaScript's
+                -- completion callback; use it to report any JS-side failure
+                -- instead of silently leaving the menu's selected state stale.
                 clipboard_webview:evaluateJavaScript(
                     "if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua(" ..
-                    jsStringLiteral(selectedJson) .. ");"
+                    jsStringLiteral(selectedJson) .. ");",
+                    function(_, error)
+                        if error then logger.e("Unable to sync clipboard selection to WebView: " .. tostring(error)) end
+                    end
                 )
             end
         end
