@@ -31,6 +31,7 @@ function block(begin, end) {
 }
 
 const menuModel = block("/* BEGIN CONTEXT MENU MODEL", "/* END CONTEXT MENU MODEL */");
+const multiSelectionBinding = source.slice(source.indexOf('function syncClipboardMultiSelection()'), source.indexOf("const contextMenu = document.createElement('div');"));
 const navModel = block("/* BEGIN KEYBOARD NAVIGATION MODEL", "/* END KEYBOARD NAVIGATION MODEL */");
 const navBinding = block("/* BEGIN KEYBOARD NAVIGATION BINDING", "/* END KEYBOARD NAVIGATION BINDING */");
 
@@ -166,9 +167,15 @@ function loadNavigation(cards) {
 function loadMenuModel() {
   const document = { createElement: (tag) => new El(tag) };
   const window = makeWindow();
-  return new Function("document", "window",
-    `${menuModel}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick };`)(
-    document, window);
+  const state = { cards: [] };
+  const selectedClipboardUids = new Set();
+  const rows = () => state.cards;
+  const api = new Function("document", "window", "rows", "selectedClipboardUids",
+    `${menuModel}\n${multiSelectionBinding}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick, syncClipboardMultiSelection };`)(
+    document, window, rows, selectedClipboardUids);
+  api.selectedClipboardUids = selectedClipboardUids;
+  api.setRows = (cards) => { state.cards = cards; };
+  return api;
 }
 
 // ------------------------------------------------------------------- tests --
@@ -193,12 +200,13 @@ const slots = (m) => m.querySelectorAll("button").map((b) => b.getAttribute("dat
 const visibleActions = (m) => m.querySelectorAll("button")
   .filter((b) => b.style.display !== "none")
   .map((b) => b.dataset.contextAction);
-const ALL_SLOTS = ["preview", "pasteAll", "copy", "pastePath", "pin"];
-// The full spec order always carries the pastePath slot; only its visibility
-// changes. The pin slot's action is the one that flips per card.
-const textMenu = (pinAction) => ["preview", "pasteAll", "copy", pinAction];
-const imageMenu = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
-const specActions = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
+const ALL_SLOTS = ["preview", "pasteAll", "pasteSelected", "pasteSelectedOrder", "select", "copy", "pastePath", "pin"];
+const textMenu = (pinAction, selected = false) =>
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected", "pasteSelectedOrder"] : []), "select", "copy", pinAction];
+const imageMenu = (pinAction, selected = false) =>
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected", "pasteSelectedOrder"] : []), "select", "copy", "pastePath", pinAction];
+const specActions = (pinAction, selected = false) =>
+  ["preview", "pasteAll", "pasteSelected", "pasteSelectedOrder", "select", "copy", "pastePath", pinAction];
 
 test("context menu: every slot is built once, in the documented order", () => {
   const m = menu.buildContextMenu(new El("div"));
@@ -236,13 +244,13 @@ test("context menu: ordinary text and image items produce Pin", () => {
   assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryText).map(p => p.action), specActions("pin"));
   assert.deepEqual(actions(m), specActions("pin"));
   assert.deepEqual(visibleActions(m), textMenu("pin"), "a text card does not offer the path");
-  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.ok(labels(m)[6].includes("Pin") && !labels(m)[6].includes("Unpin"), labels(m)[6]);
   assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryImage).map(p => p.action), specActions("pin"));
   assert.deepEqual(visibleActions(m), imageMenu("pin"), "an image card offers the path");
   // Order and item count are preserved; nothing is duplicated.
   assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
   assert.deepEqual(labels(m).map(l => l.slice(0, 2)),
-    ["👁️", "🧴", "📋", "🗂️", "📍"].map(s => s.slice(0, 2)));
+    ["👁️", "Pa", "✅", "Se", "📋", "🗂️", "📍"].map(s => s.slice(0, 2)));
 });
 
 test("context menu: pinned text and image items produce Unpin", () => {
@@ -251,10 +259,45 @@ test("context menu: pinned text and image items produce Unpin", () => {
   const pinnedImage = card(1, "pin-2", true, "image");
   assert.deepEqual(menu.applyContextMenuTarget(m, pinnedText).map(p => p.action), specActions("unpin"));
   assert.deepEqual(visibleActions(m), textMenu("unpin"));
-  assert.ok(labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.ok(labels(m)[6].includes("Unpin"), labels(m)[6]);
   assert.deepEqual(menu.applyContextMenuTarget(m, pinnedImage).map(p => p.action), specActions("unpin"));
   assert.deepEqual(visibleActions(m), imageMenu("unpin"));
   assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
+});
+
+test("multi-selection binding adds and removes lower-left checkmarks by stable UID", () => {
+  const cards = [card(0, "multi-a", false, "text"), card(1, "multi-b", true, "image")];
+  const model = loadMenuModel();
+  model.setRows(cards);
+  model.selectedClipboardUids.add("multi-a");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[0].dataset.selected, "true");
+  assert.ok(cards[0].classList.contains("multi-selected"));
+  assert.equal(cards[0].querySelector(".multi-select-mark").textContent, "✓");
+  assert.equal(cards[1].querySelector(".multi-select-mark"), null);
+  model.selectedClipboardUids.add("multi-b");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[1].querySelector(".multi-select-mark").textContent, "✓");
+  model.selectedClipboardUids.delete("multi-a");
+  model.syncClipboardMultiSelection();
+  assert.equal(cards[0].querySelector(".multi-select-mark"), null);
+  assert.equal(cards[1].querySelector(".multi-select-mark").textContent, "✓");
+});
+
+test("context menu: selection action and selected-paste visibility track the target", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const uid = "item-to-select";
+  const ordinary = card(0, uid, false, "text");
+  menu.openContextMenu(m, { rowIndex: -1, uid: null }, ordinary, { x: 10, y: 10 }, false);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "none");
+  ordinary.dataset.selected = "true";
+  menu.applyContextMenuTarget(m, ordinary, true);
+  assert.ok(visibleActions(m).includes("pasteSelected"));
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Deselect");
+  ordinary.dataset.selected = "false";
+  menu.applyContextMenuTarget(m, ordinary, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
 });
 
 test("context menu: opening a pinned menu does not change the next ordinary menu", () => {
@@ -266,7 +309,7 @@ test("context menu: opening a pinned menu does not change the next ordinary menu
   menu.applyContextMenuTarget(m, ordinary);
   assert.deepEqual(actions(m), specActions("pin"), "state leaked from the pinned item");
   assert.deepEqual(visibleActions(m), textMenu("pin"), "the path slot is hidden again");
-  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"));
+  assert.ok(labels(m)[6].includes("Pin") && !labels(m)[6].includes("Unpin"));
 });
 
 test("context menu: opening an ordinary menu does not change the next pinned menu", () => {
@@ -315,7 +358,7 @@ test("context menu: repeated alternating pinned and ordinary opens stay correct"
   for (const item of sequence) {
     menu.applyContextMenuTarget(m, item);
     const expected = item.dataset.pinned === "true" ? "unpin" : "pin";
-    assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pastePath", expected],
+    assert.deepEqual(actions(m), specActions(expected),
       `uid ${item.dataset.uid} expected ${expected}, got ${actions(m).join(",")}`);
   }
 });
@@ -382,6 +425,26 @@ test("context menu: the click acts on the card that opened the menu", () => {
   // no file and leaves the pasteboard untouched.
   assert.deepEqual(calls[5], ["pastePath", 1], "the request carries the text card's own index");
   assert.equal(calls.length, 6, "one click sends one action");
+
+  const selectedText = card(1, "sel-text", false, "text");
+  const selectedImage = card(2, "sel-image", false, "image");
+  const selected = ["sel-text", "sel-image"];
+  menu.openContextMenu(m, state, selectedText, { x: 20, y: 20 }, true);
+  assert.ok(visibleActions(m).includes("pasteSelected"), "Paste All Selected is visible when selection exists");
+  assert.equal(labels(m)[3], "Select", "an unselected target offers Select");
+  menu.handleContextMenuClick(m, state, { target: m.querySelector('[data-context-slot="select"]') },
+    bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[6], ["selectItem", 1]);
+  const selectedButton = m.querySelector('[data-context-slot="pasteSelected"]');
+  menu.handleContextMenuClick(m, state, { target: selectedButton },
+    bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[7], ["pasteSelected", 0], "Paste All Selected does not depend on the right-clicked row");
+  const selectionOrderButton = m.querySelector('[data-context-slot="pasteSelectedOrder"]');
+  menu.handleContextMenuClick(m, state, { target: selectionOrderButton }, bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[8], ["pasteSelectedOrder", 0], "selection order uses a separate action");
+  const orderButton = m.querySelector('[data-context-slot="pasteSelectedOrder"]');
+  menu.handleContextMenuClick(m, state, { target: orderButton }, bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[8], ["pasteSelectedOrder", 0], "selection-order paste has a distinct bridge action");
 });
 
 test("context menu: a rebuilt list is resolved by uid, not by a stale index", () => {
@@ -633,6 +696,28 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
   assert.ok(panelScript.includes("search.addEventListener('input'"), "typing in search stays native");
   assert.ok(!/data-context-action=/.test(panelScript),
     "menu buttons must not be keyed by the mutable payload attribute");
+  const scriptOpen = source.indexOf("<script>");
+  const scriptClose = source.indexOf("</script>", scriptOpen);
+  const rightClickListener = source.indexOf("document.addEventListener('contextmenu'", scriptOpen);
+  const contextMenuSetup = source.indexOf("const contextMenu = document.createElement('div');", scriptOpen);
+  assert.ok(rightClickListener > scriptOpen && rightClickListener < scriptClose,
+    "the right-click listener must stay inside the executable panel script");
+  assert.ok(contextMenuSetup > scriptOpen && contextMenuSetup < scriptClose,
+    "the custom context menu must be created inside the executable panel script");
+  assert.ok(source.indexOf("/* BEGIN CONTEXT MENU MODEL") < scriptClose,
+    "the tested context-menu model must remain inside the panel script");
+  assert.ok(panelScript.includes("const selectedClipboardUids = new Set();"),
+    "the WebView initializes the Set used by selection and context-menu code");
+  assert.ok(panelScript.includes("document.addEventListener('contextmenu'"),
+    "the right-click listener is included in executable panel JavaScript");
+  assert.ok(panelScript.includes("action, index, query, kind, dateKey, uid"),
+    "the bridge serializes stable UIDs as a separate message field");
+  assert.ok(!panelScript.includes('Click to paste'), "cards no longer render Click to paste labels");
+  assert.ok(panelScript.includes("Paste from Oldest to Current"), "the old range-paste action has the concise label");
+  assert.ok(panelScript.includes("✅ Paste All Selected"), "the selected paste action has the required label");
+  assert.ok(panelScript.includes("selectedClipboardUids"), "multi-selection is backed by stable identities");
+  assert.ok(panelScript.includes("multi-select-mark"), "selected cards render a checkmark");
+
 });
 
 test("navigation: nav model uses DOM order only, never grid geometry", () => {
