@@ -2431,15 +2431,15 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* END KEYBOARD NAVIGATION BINDING */
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
-  { slot: 'preview', label: 'Preview' },
-  { slot: 'copy', label: 'Copy' },
-  { slot: 'pin', label: 'Pin', pinnedLabel: 'Unpin' },
+  { slot: 'preview', label: '👁️ Preview' },
+  { slot: 'copy', label: '📋 Copy' },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'divider', divider: true },
-  { slot: 'pasteAll', label: 'Paste from Current to First' },
+  { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'select', label: 'Select/Deselect' },
-  { slot: 'pasteSelected', label: 'Paste All Selected', selectedOnly: true },
-  { slot: 'pasteSelectedOrder', label: 'Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'pastePath', label: 'Paste path', imageOnly: true }
+  { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
+  { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
+  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true }
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
