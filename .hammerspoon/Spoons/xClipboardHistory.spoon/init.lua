@@ -2443,7 +2443,8 @@ function buildContextMenu(menu) {
 // card, or any shared menu state.
 function applyContextMenuTarget(menu, item, hasSelection) {
   if (!menu || !item) return null;
-  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image', item.dataset.selected === 'true', hasSelection);
+  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image',
+    selectedClipboardUids.has(item.dataset.uid || ''), hasSelection);
   spec.forEach(part => {
     const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
     if (!button) return;
@@ -2457,6 +2458,7 @@ function openContextMenu(menu, state, item, point, hasSelection) {
   const parsed = Number(item.dataset.index);
   state.rowIndex = Number.isInteger(parsed) ? parsed : 0;
   state.uid = item.dataset.uid || null;
+  item.dataset.selected = String(selectedClipboardUids.has(state.uid || ''));
   applyContextMenuTarget(menu, item, hasSelection);
   menu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
@@ -2487,13 +2489,15 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!button) return false;
   const action = button.dataset.contextAction;
   menu.style.display = 'none';
+  if (action === 'pasteSelected') {
+    bridge('pasteSelected', 0, JSON.stringify(selectedUids || []));
+    return true;
+  }
   const target = findContextRow(state, items);
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') {
     bridge('pasteAllFrom', rowIndex, '');
-  } else if (action === 'pasteSelected') {
-    bridge('pasteSelected', 0, JSON.stringify(selectedUids || []));
   } else if (action === 'select' || action === 'deselect') {
     bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, target.dataset.uid || '');
   } else if (action === 'copy') {
@@ -2836,13 +2840,19 @@ function handleClipboardPanelMessage(message)
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
     elseif body.action == "selectItem" or body.action == "deselectItem" then
-        local index = tonumber(body.index)
-        local entry = index and menuData[index]
         local requestedUid = tostring(body.uid or "")
-        if entry and requestedUid ~= "" and cardUid(entry) == requestedUid then
-            if body.action == "selectItem" then selectedClipboardUids[requestedUid] = true
-            else selectedClipboardUids[requestedUid] = nil end
-            if clipboard_webview then clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();") end
+        if requestedUid ~= "" then
+            local found
+            for _, entry in ipairs(menuData or {}) do
+                if cardUid(entry) == requestedUid then found = true; break end
+            end
+            if found then
+                if body.action == "selectItem" then selectedClipboardUids[requestedUid] = true
+                else selectedClipboardUids[requestedUid] = nil end
+                if clipboard_webview then
+                    clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
+                end
+            end
         end
     elseif body.action == "pasteSelected" then
         pasteSelectedClipboardItems(body.query)
@@ -3361,13 +3371,18 @@ local function pasteSelectedClipboardItems(serializedUids)
     end
     local wanted, entries, seen = {}, {}, {}
     for _, uid in ipairs(requested) do if type(uid) == "string" and uid ~= "" then wanted[uid] = true end end
-    for _, entry in ipairs(menuData or {}) do
+    -- Resolve from the complete session cache, not only the visible filter.
+    local candidates = {}
+    for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
+    for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
+    for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
+    for _, entry in ipairs(candidates) do
         local uid = cardUid(entry)
         if wanted[uid] and not seen[uid] then entries[#entries + 1] = entry; seen[uid] = true end
     end
     local expected = 0; for _ in pairs(wanted) do expected = expected + 1 end
     if #entries == 0 or #entries ~= expected then
-        hs.alert.show("Some selected clipboard items are no longer available. Please select them again.")
+        hs.alert.show("Some selected clipboard items are no longer available in this session.")
         return false
     end
     -- All selected items are resolved by stable UID and sorted by original
