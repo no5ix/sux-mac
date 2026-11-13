@@ -2426,14 +2426,8 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   else if (action === 'select' || action === 'deselect') {
     const uid = target.dataset.uid || '';
     if (uid) {
-      if (action === 'select') {
-        if (!selectedClipboardUids.has(uid)) { selectedClipboardUids.add(uid); selectedClipboardOrder.push(uid); }
-      } else {
-        selectedClipboardUids.delete(uid);
-        const orderIndex = selectedClipboardOrder.indexOf(uid);
-        if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
-      }
-      syncClipboardMultiSelection();
+      // Lua owns the selection state. Do not optimistically mutate this Set:
+      // the bridge response will replace it with the authoritative state.
       bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
     }
   }
