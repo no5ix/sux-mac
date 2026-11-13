@@ -1898,6 +1898,8 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
    context menu keep working exactly as on ordinary cards. */
 .pin-mark { position:absolute; top:9px; right:10px; font-size:15px; line-height:1.1; pointer-events:none; user-select:none; }
 .multi-select-mark { position:absolute; left:10px; bottom:9px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:14px; font-weight:700; line-height:1; pointer-events:none; user-select:none; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+.item.multi-selected .text-preview { padding-bottom:22px; }
+.image-item.multi-selected .preview { margin-bottom:22px; }
 .item.multi-selected { border-color:var(--selected-border); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
@@ -2424,7 +2426,7 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   }));
 }
 function buildContextMenu(menu) {
-  contextMenuSpec(false, false).forEach(part => {
+  contextMenuSpec(false, false, false, false).forEach(part => {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('data-context-slot', part.slot);
@@ -2490,7 +2492,9 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   const action = button.dataset.contextAction;
   menu.style.display = 'none';
   if (action === 'pasteSelected') {
-    bridge('pasteSelected', 0, JSON.stringify(selectedUids || []));
+    if (selectedUids && selectedUids.length) {
+      bridge('pasteSelected', 0, JSON.stringify(selectedUids));
+    }
     return true;
   }
   const target = findContextRow(state, items);
@@ -3389,7 +3393,7 @@ local function pasteSelectedClipboardItems(serializedUids)
     -- timestamp (newest first here; the shared recursive routine pastes oldest first).
     table.sort(entries, function(left, right)
         local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
-        if lt ~= rt then return lt > rt end
+        if lt ~= rt then return lt < rt end
         return cardUid(left) < cardUid(right)
     end)
     activePasteEntries = entries
