@@ -708,6 +708,39 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the tested context-menu model must remain inside the panel script");
   assert.ok(panelScript.includes("const selectedClipboardUids = new Set();"),
     "the WebView initializes the Set used by selection and context-menu code");
+  assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;"),
+    "the WebView accepts authoritative selection state from Lua after select/deselect");
+  const toggleClickStart = panelScript.indexOf("else if (action === 'toggleSelection')");
+  const toggleClickEnd = panelScript.indexOf("else if (action === 'copy')", toggleClickStart);
+  const toggleClickHandler = panelScript.slice(toggleClickStart, toggleClickEnd);
+  assert.ok(toggleClickHandler.includes("bridge('toggleSelection'"),
+    "selection changes must use one atomic UID toggle action");
+  assert.ok(!toggleClickHandler.includes("selectedClipboardUids.delete(uid)"),
+    "the WebView must not optimistically change selection before Lua responds");
+  assert.ok(panelScript.includes("{ slot: 'toggleSelection', label: '✅ Select', selectedLabel: '❌ Deselect' }"),
+    "the one toggle action still presents Select and Deselect labels");
+  assert.ok(panelScript.includes("spec.slot === 'toggleSelection' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label"),
+    "the context-menu label is derived from the selected UID state for the toggle slot");
+  assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = function(serializedState)"),
+    "the Lua selection snapshot is applied after the context menu has been created");
+  assert.ok(panelScript.includes("applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0)"),
+    "the currently open menu refreshes its Select/Deselect label after Lua toggles the UID");
+  assert.ok(panelScript.includes("const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);"),
+    "Lua sends both authoritative selection membership and explicit ordering");
+  assert.ok(source.includes('elseif body.action == "toggleSelection" then'),
+    "Lua handles the atomic toggle action");
+  assert.ok(source.includes("local state = { selected = selectedClipboardUids, order = selectedClipboardOrder }"),
+    "Lua returns a single authoritative selection snapshot");
+  assert.ok(source.includes("error.localizedDescription or error.localizedFailureReason"),
+    "WebView NSError logging includes a readable failure description");
+  assert.ok(source.includes('"domain=" .. tostring(error.domain)'),
+    "WebView NSError logging includes the error domain");
+  assert.ok(source.includes('"code=" .. tostring(error.code)'),
+    "WebView NSError logging includes the error code");
+  assert.ok(panelScript.includes("if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"),
+    "ordinary list refreshes must preserve and re-render the current selection");
+  assert.ok(!panelScript.includes("if(window.resetMultiSelection)window.resetMultiSelection();\".."),
+    "ordinary list refreshes must not clear the selection Set after select/deselect");
   assert.ok(panelScript.includes("document.addEventListener('contextmenu'"),
     "the right-click listener is included in executable panel JavaScript");
   assert.ok(panelScript.includes("action, index, query, kind, dateKey, uid"),

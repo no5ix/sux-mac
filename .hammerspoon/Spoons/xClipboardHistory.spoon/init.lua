@@ -2360,16 +2360,17 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'select', label: '✅ Select', selectedLabel: '❌ Deselect' },
+  { slot: 'toggleSelection', label: '✅ Select', selectedLabel: '❌ Deselect' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
-    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') :
+      spec.slot === 'toggleSelection' ? 'toggleSelection' : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
-      spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
+      spec.slot === 'toggleSelection' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
     visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
   }));
 }
@@ -2423,19 +2424,9 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
-  else if (action === 'select' || action === 'deselect') {
+  else if (action === 'toggleSelection') {
     const uid = target.dataset.uid || '';
-    if (uid) {
-      if (action === 'select') {
-        if (!selectedClipboardUids.has(uid)) { selectedClipboardUids.add(uid); selectedClipboardOrder.push(uid); }
-      } else {
-        selectedClipboardUids.delete(uid);
-        const orderIndex = selectedClipboardOrder.indexOf(uid);
-        if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
-      }
-      syncClipboardMultiSelection();
-      bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
-    }
+    if (uid) bridge('toggleSelection', rowIndex, '', '', '', uid);
   }
   else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
@@ -2455,12 +2446,40 @@ function syncClipboardMultiSelection() {
     } else if (!selected && mark) mark.remove();
   });
 }
+function applyClipboardSelectionFromLua(serializedState) {
+  let state;
+  try { state = JSON.parse(serializedState || '{}'); } catch (_) { state = {}; }
+  const selected = state && state.selected && typeof state.selected === 'object' ? state.selected : {};
+  const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);
+  selectedClipboardUids.clear();
+  selectedClipboardOrder.length = 0;
+  Object.keys(selected).forEach(uid => {
+    if (selected[uid]) selectedClipboardUids.add(uid);
+  });
+  order.forEach(uid => {
+    if (selectedClipboardUids.has(uid) && !selectedClipboardOrder.includes(uid)) {
+      selectedClipboardOrder.push(uid);
+    }
+  });
+  selectedClipboardUids.forEach(uid => {
+    if (!selectedClipboardOrder.includes(uid)) selectedClipboardOrder.push(uid);
+  });
+  syncClipboardMultiSelection();
+}
+window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;
 window.resetMultiSelection = syncClipboardMultiSelection;
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 document.body.appendChild(contextMenu);
 const contextState = { rowIndex: -1, uid: null };
+window.applyClipboardSelectionFromLua = function(serializedState) {
+  applyClipboardSelectionFromLua(serializedState);
+  if (contextState.uid) {
+    const contextItem = rows().find(item => item.dataset.uid === contextState.uid);
+    if (contextItem) applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0);
+  }
+};
 document.addEventListener('contextmenu', event => {
   const item = event.target.closest ? event.target.closest('.item') : null;
   if (!item) return;
@@ -2689,8 +2708,11 @@ local function updateClipboardPanel(query,kind,offset,append)
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     end
-    js=js.."if(window.resetMultiSelection)window.resetMultiSelection();"..
-        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
+    -- Preserve selections across ordinary panel refreshes. The WebView Set
+    -- survives filters and list rebuilds, and Lua remains the source of truth;
+    -- re-syncing the card decorations must not clear that Set.
+    js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
+        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items");
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
@@ -2702,28 +2724,51 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
-    elseif body.action == "selectItem" or body.action == "deselectItem" then
+    elseif body.action == "toggleSelection" then
+        -- Toggle by stable identity only. Never depend on the current rendered
+        -- menuData: the card may have come from a pinned, filtered, or paginated view.
         local requestedUid = tostring(body.uid or "")
         if requestedUid ~= "" then
-            local found
-            for _, entry in ipairs(menuData or {}) do
-                if cardUid(entry) == requestedUid then found = true; break end
+            if selectedClipboardUids[requestedUid] then
+                selectedClipboardUids[requestedUid] = nil
+                for index = #selectedClipboardOrder, 1, -1 do
+                    if selectedClipboardOrder[index] == requestedUid then
+                        table.remove(selectedClipboardOrder, index)
+                    end
+                end
+            else
+                selectedClipboardUids[requestedUid] = true
+                selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
             end
-            if found then
-                if body.action == "selectItem" then
-                    if not selectedClipboardUids[requestedUid] then
-                        selectedClipboardUids[requestedUid] = true
-                        selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
+            if clipboard_webview then
+                local state = { selected = selectedClipboardUids, order = selectedClipboardOrder }
+                local stateJson = json.encode(state) or "{}"
+                clipboard_webview:evaluateJavaScript(
+                    "if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua(" ..
+                    jsStringLiteral(stateJson) .. ");",
+                    function(result, error)
+                        if error then
+                            -- NSError is exposed to Lua as a table. tostring()
+                            -- only prints "table: 0x...", which hides the actual
+                            -- WebKit failure and makes successful nil results
+                            -- indistinguishable from execution errors.
+                            local details = {}
+                            if type(error) == "table" then
+                                local description = error.localizedDescription or error.localizedFailureReason
+                                    or error.localizedRecoverySuggestion
+                                if description then details[#details + 1] = tostring(description) end
+                                if error.domain then details[#details + 1] = "domain=" .. tostring(error.domain) end
+                                if error.code ~= nil then details[#details + 1] = "code=" .. tostring(error.code) end
+                                if error.userInfo then details[#details + 1] = "userInfo=" .. hs.inspect(error.userInfo) end
+                            else
+                                details[#details + 1] = tostring(error)
+                            end
+                            logger.e("Unable to sync clipboard selection to WebView: " ..
+                                (#details > 0 and table.concat(details, "; ") or hs.inspect(error)) ..
+                                "; result=" .. hs.inspect(result))
+                        end
                     end
-                else
-                    selectedClipboardUids[requestedUid] = nil
-                    for index = #selectedClipboardOrder, 1, -1 do
-                        if selectedClipboardOrder[index] == requestedUid then table.remove(selectedClipboardOrder, index); break end
-                    end
-                end
-                if clipboard_webview then
-                    clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
-                end
+                )
             end
         end
     elseif body.action == "pasteSelected" then
