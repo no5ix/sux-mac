@@ -427,11 +427,13 @@ test("context menu separators have unique slots and independent visibility", () 
   const textTarget = card(0, "select-divider-text", false, "text");
   menu.applyContextMenuTarget(m, textTarget, false, false);
   assert.equal(m.querySelector('[data-context-slot="divider-before-select"]').style.display, "block",
-    "divider above Select remains visible");
+    "divider above Select is visible for an unselected text record");
   assert.equal(m.querySelector('[data-context-slot="divider-before-images"]').style.display, "none",
     "hidden image section has no trailing divider");
 
   menu.applyContextMenuTarget(m, card(1, "select-divider-image", false, "image"), false, false);
+  assert.equal(m.querySelector('[data-context-slot="divider-before-select"]').style.display, "block",
+    "divider above Select remains visible for an image record");
   assert.equal(m.querySelector('[data-context-slot="divider-before-images"]').style.display, "block",
     "image section divider appears for an image record");
 });
