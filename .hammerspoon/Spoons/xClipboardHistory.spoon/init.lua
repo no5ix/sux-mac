@@ -2285,6 +2285,176 @@ search.addEventListener('focus', () => {
   // returns to it.
   navState.navIndex = -1;
 });
+
+/* BEGIN KEYBOARD NAVIGATION MODEL */
+function navClamp(index, count) {
+  if (!(count > 0)) return -1;
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return 0;
+  return Math.min(index, count - 1);
+}
+function navTransition(state, uids, forward) {
+  const count = uids.length;
+  const remembered = navClamp(state.lastCardIndex, count);
+  const out = { navIndex: state.navIndex, lastCardIndex: remembered, uid: null, target: 'search' };
+  if (state.navIndex < 0) {
+    if (forward && count > 0) {
+      out.navIndex = remembered; out.lastCardIndex = remembered; out.uid = uids[remembered]; out.target = 'card';
+    }
+    return out;
+  }
+  const next = forward ? state.navIndex + 1 : state.navIndex - 1;
+  if (next < 0 || next >= count) {
+    out.navIndex = -1; out.uid = null; out.target = 'search'; return out;
+  }
+  out.navIndex = next; out.lastCardIndex = next; out.uid = uids[next]; out.target = 'card';
+  return out;
+}
+function navReconcile(state, uids) {
+  const count = uids.length;
+  const navIndex = typeof state.navIndex === 'number' ? state.navIndex : -1;
+  const out = { navIndex: navIndex < 0 ? -1 : navClamp(navIndex, count), lastCardIndex: -1, uid: null };
+  if (typeof state.uid === 'string' && state.uid) {
+    const found = uids.indexOf(state.uid);
+    if (found >= 0) { out.uid = state.uid; out.lastCardIndex = found; if (navIndex >= 0) out.navIndex = found; return out; }
+  }
+  const fallback = navClamp(typeof state.lastCardIndex === 'number' ? state.lastCardIndex : navIndex, count);
+  out.lastCardIndex = fallback; out.uid = fallback >= 0 ? uids[fallback] : null;
+  return out;
+}
+/* END KEYBOARD NAVIGATION MODEL */
+/* BEGIN KEYBOARD NAVIGATION BINDING */
+const navState = { navIndex: -1, lastCardIndex: -1, uid: null };
+function cardUids() {
+  return rows().map((node, position) => node.dataset.uid || ('idx:' + (node.dataset.index || position)));
+}
+function navMove(forward) {
+  const next = navTransition(navState, cardUids(), forward);
+  Object.assign(navState, next);
+  const scrollX = window.scrollX, scrollY = window.scrollY;
+  if (next.target === 'search') {
+    clearRowSelection(); search.focus({ preventScroll: true });
+    if (search.setSelectionRange) { try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {} }
+  } else {
+    const item = rows()[next.navIndex];
+    if (item) { selectRow(next.navIndex, true); item.focus({ preventScroll: true }); }
+    else { clearRowSelection(); search.focus({ preventScroll: true }); }
+  }
+  window.scrollTo(scrollX, scrollY);
+}
+window.resetClipboardSelection = () => {
+  selectedIndex = 0; clearRowSelection();
+  Object.assign(navState, navReconcile(navState, cardUids()));
+};
+/* END KEYBOARD NAVIGATION BINDING */
+/* BEGIN CONTEXT MENU MODEL */
+const CONTEXT_MENU_ITEMS = [
+  { slot: 'preview', label: '👁️ Preview' },
+  { slot: 'pasteAll', label: 'Paste from Oldest to Current' },
+  { slot: 'pasteSelected', label: '✅ Paste All Selected', selectedOnly: true },
+  { slot: 'select', label: 'Select', selectedLabel: 'Deselect' },
+  { slot: 'copy', label: '📋 Copy' },
+  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
+];
+function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
+  return CONTEXT_MENU_ITEMS.map(spec => ({
+    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
+      spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
+    visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
+  }));
+}
+function buildContextMenu(menu) {
+  contextMenuSpec(false, false, false, false).forEach(part => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.setAttribute('data-context-slot', part.slot);
+    button.dataset.contextAction = part.action; button.textContent = part.label;
+    button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
+    button.style.display = part.visible ? 'block' : 'none'; menu.appendChild(button);
+  });
+  return menu;
+}
+function applyContextMenuTarget(menu, item, hasSelection) {
+  if (!menu || !item) return null;
+  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image',
+    selectedClipboardUids.has(item.dataset.uid || ''), hasSelection);
+  spec.forEach(part => {
+    const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
+    if (!button) return;
+    button.dataset.contextAction = part.action; button.textContent = part.label;
+    button.style.display = part.visible ? 'block' : 'none';
+  });
+  return spec;
+}
+function openContextMenu(menu, state, item, point, hasSelection) {
+  const parsed = Number(item.dataset.index);
+  state.rowIndex = Number.isInteger(parsed) ? parsed : 0;
+  state.uid = item.dataset.uid || null;
+  item.dataset.selected = String(selectedClipboardUids.has(state.uid || ''));
+  applyContextMenuTarget(menu, item, hasSelection);
+  menu.style.display = 'block';
+  const menuWidth = Math.min(460, window.innerWidth - 16), menuHeight = menu.offsetHeight || 64;
+  menu.style.left = Math.max(8, Math.min(point.x, window.innerWidth - menuWidth - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(point.y, window.innerHeight - menuHeight - 8)) + 'px';
+  return state;
+}
+function findContextRow(state, items) {
+  if (state.uid) return items.find(node => node.dataset.uid === state.uid) || null;
+  return items.find(node => Number(node.dataset.index || 0) === state.rowIndex) || null;
+}
+function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items, selectedUids) {
+  const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
+  if (!button) return false;
+  const action = button.dataset.contextAction; menu.style.display = 'none';
+  if (action === 'pasteSelected') {
+    if (selectedUids && selectedUids.length) bridge('pasteSelected', 0, JSON.stringify(selectedUids));
+    return true;
+  }
+  const target = findContextRow(state, items);
+  if (!target) return true;
+  const rowIndex = Number(target.dataset.index || 0);
+  if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
+  else if (action === 'select' || action === 'deselect') bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, target.dataset.uid || '');
+  else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
+  else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
+  else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
+  else if (action === 'preview' && openManualPreview) openManualPreview(target);
+  return true;
+}
+/* END CONTEXT MENU MODEL */
+function syncClipboardMultiSelection() {
+  rows().forEach(item => {
+    const uid = item.dataset.uid || '', selected = selectedClipboardUids.has(uid);
+    item.dataset.selected = String(selected); item.classList.toggle('multi-selected', selected);
+    let mark = item.querySelector('.multi-select-mark');
+    if (selected && !mark) {
+      mark = document.createElement('span'); mark.className = 'multi-select-mark';
+      mark.textContent = '✓'; mark.setAttribute('aria-label', 'Selected'); item.appendChild(mark);
+    } else if (!selected && mark) mark.remove();
+  });
+}
+window.resetMultiSelection = syncClipboardMultiSelection;
+const contextMenu = document.createElement('div');
+contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
+contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
+document.body.appendChild(contextMenu);
+const contextState = { rowIndex: -1, uid: null };
+document.addEventListener('contextmenu', event => {
+  const item = event.target.closest ? event.target.closest('.item') : null;
+  if (!item) return;
+  event.preventDefault();
+  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY }, selectedClipboardUids.size > 0);
+  selectRow(rows().indexOf(item));
+});
+contextMenu.addEventListener('click', event => {
+  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows(), Array.from(selectedClipboardUids))) {
+    event.preventDefault(); event.stopPropagation();
+  }
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('#clipboard-context-menu')) contextMenu.style.display = 'none';
+  if (!event.target.closest('#clipboard-context-menu') && !event.target.closest('#clipboard-preview-overlay')) closeManualPreviews();
+});
 </script></body></html>]]
     return html
 end
