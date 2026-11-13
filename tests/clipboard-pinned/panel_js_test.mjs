@@ -719,6 +719,8 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the WebView must not optimistically change selection before Lua responds");
   assert.ok(panelScript.includes("{ slot: 'toggleSelection', label: '✅ Select', selectedLabel: '❌ Deselect' }"),
     "the one toggle action still presents Select and Deselect labels");
+  assert.ok(panelScript.includes("spec.slot === 'toggleSelection' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label"),
+    "the context-menu label is derived from the selected UID state for the toggle slot");
   assert.ok(panelScript.includes("const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);"),
     "Lua sends both authoritative selection membership and explicit ordering");
   assert.ok(source.includes('elseif body.action == "toggleSelection" then'),
