@@ -847,6 +847,30 @@ test("ordinary history search, dates, and cards keep working", function()
         "a query with no matches returns an empty set")
 end)
 
+test("pasteSelected message resolves through the local forward declaration", function()
+    local environment = new_environment("paste-selected-callback")
+    seed_codex_day(environment)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+
+    local entry = environment.t.panelState().menuData[1]
+    local uid = environment.t.cardUid(entry)
+    environment.t.selectedClipboardUids[uid] = true
+
+    local callback = environment.t.handleMessage
+    check(type(environment.t.pasteSelectedClipboardItems) == "function",
+        "the selected-paste implementation is exposed as a local test seam")
+
+    -- Call the same message action as the WebView bridge. The environment's
+    -- Hammerspoon stubs record the delayed paste rather than sending keystrokes.
+    callback({ body = { action = "pasteSelected", query = hs.json.encode({ uid }) } })
+    check_equal(#environment.t.activePasteEntries, 1,
+        "the callback dispatches to the selected-paste implementation")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid,
+        "the selected record is passed to the shared paste executor")
+end)
+
 test("multi-selection uses stable UIDs and survives filter changes", function()
     local environment = new_environment("multi-select")
     seed_codex_day(environment)
