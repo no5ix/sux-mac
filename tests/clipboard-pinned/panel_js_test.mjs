@@ -193,12 +193,13 @@ const slots = (m) => m.querySelectorAll("button").map((b) => b.getAttribute("dat
 const visibleActions = (m) => m.querySelectorAll("button")
   .filter((b) => b.style.display !== "none")
   .map((b) => b.dataset.contextAction);
-const ALL_SLOTS = ["preview", "pasteAll", "copy", "pastePath", "pin"];
-// The full spec order always carries the pastePath slot; only its visibility
-// changes. The pin slot's action is the one that flips per card.
-const textMenu = (pinAction) => ["preview", "pasteAll", "copy", pinAction];
-const imageMenu = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
-const specActions = (pinAction) => ["preview", "pasteAll", "copy", "pastePath", pinAction];
+const ALL_SLOTS = ["preview", "pasteAll", "pasteSelected", "select", "copy", "pastePath", "pin"];
+const textMenu = (pinAction, selected = false) =>
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected"] : []), "select", "copy", pinAction];
+const imageMenu = (pinAction, selected = false) =>
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected"] : []), "select", "copy", "pastePath", pinAction];
+const specActions = (pinAction, selected = false) =>
+  ["preview", "pasteAll", "pasteSelected", "select", "copy", "pastePath", pinAction];
 
 test("context menu: every slot is built once, in the documented order", () => {
   const m = menu.buildContextMenu(new El("div"));
@@ -242,7 +243,7 @@ test("context menu: ordinary text and image items produce Pin", () => {
   // Order and item count are preserved; nothing is duplicated.
   assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
   assert.deepEqual(labels(m).map(l => l.slice(0, 2)),
-    ["👁️", "🧴", "📋", "🗂️", "📍"].map(s => s.slice(0, 2)));
+    ["👁️", "Pa", "✅", "Se", "📋", "🗂️", "📍"].map(s => s.slice(0, 2)));
 });
 
 test("context menu: pinned text and image items produce Unpin", () => {
@@ -315,7 +316,7 @@ test("context menu: repeated alternating pinned and ordinary opens stay correct"
   for (const item of sequence) {
     menu.applyContextMenuTarget(m, item);
     const expected = item.dataset.pinned === "true" ? "unpin" : "pin";
-    assert.deepEqual(actions(m), ["preview", "pasteAll", "copy", "pastePath", expected],
+    assert.deepEqual(actions(m), specActions(expected),
       `uid ${item.dataset.uid} expected ${expected}, got ${actions(m).join(",")}`);
   }
 });
@@ -382,6 +383,20 @@ test("context menu: the click acts on the card that opened the menu", () => {
   // no file and leaves the pasteboard untouched.
   assert.deepEqual(calls[5], ["pastePath", 1], "the request carries the text card's own index");
   assert.equal(calls.length, 6, "one click sends one action");
+
+  const selectedText = card(1, "sel-text", false, "text");
+  const selectedImage = card(2, "sel-image", false, "image");
+  const selected = ["sel-text", "sel-image"];
+  menu.openContextMenu(m, state, selectedText, { x: 20, y: 20 }, true);
+  assert.ok(visibleActions(m).includes("pasteSelected"), "Paste All Selected is visible when selection exists");
+  assert.equal(labels(m)[3], "Select", "an unselected target offers Select");
+  menu.handleContextMenuClick(m, state, { target: m.querySelector('[data-context-slot="select"]') },
+    bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[6], ["selectItem", 1]);
+  menu.openContextMenu(m, state, selectedImage, { x: 20, y: 20 }, true);
+  menu.handleContextMenuClick(m, state, { target: m.querySelector('[data-context-slot="pasteSelected"]') },
+    bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[7], ["pasteSelected", 0], "Paste All Selected does not depend on the right-clicked row");
 });
 
 test("context menu: a rebuilt list is resolved by uid, not by a stale index", () => {
