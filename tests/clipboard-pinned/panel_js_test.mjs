@@ -238,7 +238,7 @@ test("context menu: ordinary text and image items produce Pin", () => {
   assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryText).map(p => p.action), specActions("pin"));
   assert.deepEqual(actions(m), specActions("pin"));
   assert.deepEqual(visibleActions(m), textMenu("pin"), "a text card does not offer the path");
-  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.ok(labels(m)[6].includes("Pin") && !labels(m)[6].includes("Unpin"), labels(m)[6]);
   assert.deepEqual(menu.applyContextMenuTarget(m, ordinaryImage).map(p => p.action), specActions("pin"));
   assert.deepEqual(visibleActions(m), imageMenu("pin"), "an image card offers the path");
   // Order and item count are preserved; nothing is duplicated.
@@ -253,10 +253,26 @@ test("context menu: pinned text and image items produce Unpin", () => {
   const pinnedImage = card(1, "pin-2", true, "image");
   assert.deepEqual(menu.applyContextMenuTarget(m, pinnedText).map(p => p.action), specActions("unpin"));
   assert.deepEqual(visibleActions(m), textMenu("unpin"));
-  assert.ok(labels(m)[4].includes("Unpin"), labels(m)[4]);
+  assert.ok(labels(m)[6].includes("Unpin"), labels(m)[6]);
   assert.deepEqual(menu.applyContextMenuTarget(m, pinnedImage).map(p => p.action), specActions("unpin"));
   assert.deepEqual(visibleActions(m), imageMenu("unpin"));
   assert.equal(m.querySelectorAll("button").length, ALL_SLOTS.length);
+});
+
+test("context menu: selection action and selected-paste visibility track the target", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const uid = "item-to-select";
+  const ordinary = card(0, uid, false, "text");
+  menu.openContextMenu(m, { rowIndex: -1, uid: null }, ordinary, { x: 10, y: 10 }, false);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "none");
+  ordinary.dataset.selected = "true";
+  menu.applyContextMenuTarget(m, ordinary, true);
+  assert.ok(visibleActions(m).includes("pasteSelected"));
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Deselect");
+  ordinary.dataset.selected = "false";
+  menu.applyContextMenuTarget(m, ordinary, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
 });
 
 test("context menu: opening a pinned menu does not change the next ordinary menu", () => {
@@ -268,7 +284,7 @@ test("context menu: opening a pinned menu does not change the next ordinary menu
   menu.applyContextMenuTarget(m, ordinary);
   assert.deepEqual(actions(m), specActions("pin"), "state leaked from the pinned item");
   assert.deepEqual(visibleActions(m), textMenu("pin"), "the path slot is hidden again");
-  assert.ok(labels(m)[4].includes("Pin") && !labels(m)[4].includes("Unpin"));
+  assert.ok(labels(m)[6].includes("Pin") && !labels(m)[6].includes("Unpin"));
 });
 
 test("context menu: opening an ordinary menu does not change the next pinned menu", () => {
@@ -394,8 +410,8 @@ test("context menu: the click acts on the card that opened the menu", () => {
   menu.handleContextMenuClick(m, state, { target: m.querySelector('[data-context-slot="select"]') },
     bridge, () => {}, [selectedText, selectedImage], selected);
   assert.deepEqual(calls[6], ["selectItem", 1]);
-  menu.openContextMenu(m, state, selectedImage, { x: 20, y: 20 }, true);
-  menu.handleContextMenuClick(m, state, { target: m.querySelector('[data-context-slot="pasteSelected"]') },
+  const selectedButton = m.querySelector('[data-context-slot="pasteSelected"]');
+  menu.handleContextMenuClick(m, state, { target: selectedButton },
     bridge, () => {}, [selectedText, selectedImage], selected);
   assert.deepEqual(calls[7], ["pasteSelected", 0], "Paste All Selected does not depend on the right-clicked row");
 });
