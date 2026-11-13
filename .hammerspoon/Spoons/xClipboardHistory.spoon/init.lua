@@ -1683,31 +1683,31 @@ local function cardUid(entry)
 end
 
 local function historyItemHTML(entry, index)
-    -- The pin marker is resolved for this render only. Cached metadata entries
-    -- are shared by the history caches, so writing the pin state onto the entry
-    -- here would leave a stale marker on the card after an Unpin.
+    -- Use a shared top-right indicator group so a selected pinned card shows
+    -- the selection mark immediately to the left of its pin marker.
     local pinnedId = effectivePinnedId(entry)
     local cardIsPinned = pinnedId ~= nil
-    -- Pinned cards carry a corner marker while the type label and the original
-    -- clipboard timestamp stay unchanged. pointer-events:none keeps the marker
-    -- out of the way of click-to-paste, keyboard selection, and the context menu.
-    local pinMark = cardIsPinned and
-        '<div class="pin-mark" aria-label="Pinned">📍</div>' or ''
-    local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
-    -- data-uid is the stable identity used to reconcile keyboard navigation and
-    -- an open context menu after the list is rebuilt (search, scope change,
-    -- pin/unpin, load more). A pinned event keeps the pinned record id, so the
-    -- marker, the menu, and the keyboard focus survive the fold of a pinned pair.
     local uid = escapeHTML(cardUid(entry))
+    local indicators = '<div class="card-indicators">' ..
+        '<span class="multi-select-mark" aria-hidden="true" style="display:none">✓</span>' ..
+        (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '') ..
+        '</div>'
+    local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     if entry.type == "image" then
-        local imageEntry=entry.historyEntry or entry
-        local thumbnail=thumbnailForEntry(imageEntry)
-        local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(cardIsPinned)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'</div>'
+        local imageEntry = entry.historyEntry or entry
+        local thumbnail = thumbnailForEntry(imageEntry)
+        local preview = thumbnail ~= "" and
+            ('<img class="preview" src="' .. escapeHTML(thumbnail) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">') or
+            '<div class="preview placeholder">Image preview unavailable</div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="' ..
+            index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+            escapeHTML(string.lower("[image] " .. stamp)) .. '">' .. indicators ..
+            '<div class="meta"><div class="stamp">' .. escapeHTML(stamp) .. '</div></div>' ..
+            preview .. '</div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
-    local loaded=hydrateEntry(entry) or entry
-    local content=tostring(loaded.data or loaded.content or "")
+    local loaded = hydrateEntry(entry) or entry
+    local content = tostring(loaded.data or loaded.content or "")
     local previewText = content
     if isImageDataURL(content) or looksLikeImagePayload(content) then
         previewText = "[Image data]"
@@ -1718,15 +1718,15 @@ local function historyItemHTML(entry, index)
             local ok, offset = pcall(utf8Lib.offset, content, TEXT_CARD_PREVIEW_MAX_CHARS + 1)
             if ok and offset then stop = offset - 1 end
         end
-        previewText = content:sub(1, stop) .. "\n… (preview truncated; use the Preview context-menu action for more)"
+        previewText = content:sub(1, stop) .. "\\n… (preview truncated; use the Preview context-menu action for more)"
     end
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
-    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-uid="' .. uid .. '" data-pinned="'..tostring(cardIsPinned)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
-        pinMark .. '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
-        '</div><div class="text-preview">' .. escapeHTML(previewText) ..
-        '</div>' ..
-        '</button>'
+    return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' ..
+        index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+        escapeHTML(string.lower("[text] " .. stamp)) .. '">' .. indicators ..
+        '<div class="stamp">' .. escapeHTML(stamp) .. '</div><div class="text-preview">' ..
+        escapeHTML(previewText) .. '</div></button>'
 end
 
 local function clipboardEntryMatches(entry, query, kind)
@@ -1897,10 +1897,10 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 /* Pinned cards carry a corner marker beside the type label. It is decorative
    and click-through, so selection, click-to-paste, keyboard navigation, and the
    context menu keep working exactly as on ordinary cards. */
-.pin-mark { position:absolute; top:9px; right:10px; font-size:15px; line-height:1.1; pointer-events:none; user-select:none; }
-.multi-select-mark { position:absolute; left:10px; bottom:9px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:14px; font-weight:700; line-height:1; pointer-events:none; user-select:none; box-shadow:0 1px 4px rgba(0,0,0,.35); }
-.item.multi-selected .text-preview { padding-bottom:22px; }
-.image-item.multi-selected .preview { margin-bottom:22px; }
+.card-indicators { position:absolute; top:9px; right:10px; z-index:2; display:flex; align-items:center; gap:5px; pointer-events:none; user-select:none; }
+.pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
+.multi-select-mark { width:20px; height:20px; display:none; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:13px; font-weight:700; line-height:1; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+.item .meta { padding-right:48px; }
 .item.multi-selected { border-color:var(--selected-border); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
@@ -2551,12 +2551,13 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
 function syncClipboardMultiSelection() {
   rows().forEach(item => {
     const uid = item.dataset.uid || '', selected = selectedClipboardUids.has(uid);
-    item.dataset.selected = String(selected); item.classList.toggle('multi-selected', selected);
-    let mark = item.querySelector('.multi-select-mark');
-    if (selected && !mark) {
-      mark = document.createElement('span'); mark.className = 'multi-select-mark';
-      mark.textContent = '✓'; mark.setAttribute('aria-label', 'Selected'); item.appendChild(mark);
-    } else if (!selected && mark) mark.remove();
+    item.dataset.selected = String(selected);
+    item.classList.toggle('multi-selected', selected);
+    const mark = item.querySelector('.multi-select-mark');
+    if (mark) {
+      mark.style.display = selected ? 'inline-flex' : 'none';
+      mark.setAttribute('aria-label', selected ? 'Selected' : 'Not selected');
+    }
   });
 }
 window.resetMultiSelection = syncClipboardMultiSelection;
