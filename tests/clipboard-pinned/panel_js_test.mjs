@@ -178,6 +178,26 @@ function loadMenuModel() {
   return api;
 }
 
+
+test("keyboard navigation restores the grid focus stop and global key routing", () => {
+  const sourceHasGridTabStop = panelScript.includes("resultsPanel.tabIndex = 0");
+  assert.ok(sourceHasGridTabStop, "the results grid is again reachable by Tab");
+  assert.ok(panelScript.includes("function handleClipboardPanelKeydown(event)"),
+    "the panel has one explicit keyboard router");
+  assert.ok(panelScript.includes("document.addEventListener('keydown', handleClipboardPanelKeydown)"),
+    "the router listens at the document level");
+  assert.ok(panelScript.includes("event.key === 'Tab'") &&
+    panelScript.includes("navMove(!event.shiftKey)"),
+    "Tab and Shift+Tab share the sequential result navigation");
+  for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]) {
+    assert.ok(panelScript.includes("'" + key + "'"), key + " is handled");
+  }
+  assert.ok(panelScript.includes("if (key === 'Escape')"),
+    "Escape has an explicit panel-level fallback");
+  assert.ok(!panelScript.includes("resultsPanel.tabIndex = -1"),
+    "the grid is not removed from keyboard focus order");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
