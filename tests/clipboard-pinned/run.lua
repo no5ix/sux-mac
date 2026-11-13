@@ -1740,6 +1740,25 @@ test("clipboard payloads never reach the log", function()
     end
 end)
 
+
+test("image-path paste keeps text content and resolves images to file paths", function()
+    local spoon = shell("cat " .. shquote(SPOON_PATH))
+    check(spoon:find("local function clipboardEntryTextForPathPaste", 1, true) ~= nil,
+        "the path-paste conversion helper exists")
+    check(spoon:find('if entry.type == "text" then', 1, true) ~= nil,
+        "text records retain their text representation")
+    check(spoon:find('if entry.type == "image" then', 1, true) ~= nil,
+        "image records use a separate conversion path")
+    check(spoon:find("local path = clipboardEntryPathText(entry)", 1, true) ~= nil,
+        "image records resolve to their persisted file path")
+    check(spoon:find("pasteboard.setContents(text .. \"\\n\")", 1, true) ~= nil,
+        "path mode writes each converted item as plain text with the normal newline delimiter")
+    check(spoon:find('pasteSelectedClipboardItems(body.query, "chronological", true)', 1, true) ~= nil,
+        "chronological image-path selection action is wired")
+    check(spoon:find('pasteSelectedClipboardItems(body.query, "selection", true)', 1, true) ~= nil,
+        "selection-order image-path action is wired")
+end)
+
 -------------------------------------------------------------------------------
 -- report
 
