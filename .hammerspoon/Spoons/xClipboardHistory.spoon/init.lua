@@ -2438,16 +2438,19 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
-  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'copy', label: '📋 Copy' },
-  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
+  { slot: 'copyPath', label: '📋🖼️ Copy Path', imageOnly: true },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'divider', divider: true },
+  { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
+  { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
+  { slot: 'pasteSelectedPaths', label: '📥🖼️ Paste All Selected', selectedImageOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
+  { slot: 'pasteSelectedOrderPaths', label: '🔢🖼️ Paste All Selected in Selection Order', selectedImageOnly: true },
 ];
-function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
+function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
@@ -2456,7 +2459,8 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
     visible: spec.divider === true
       ? true
       : (spec.imageOnly !== true || isImage === true) &&
-        (spec.selectedOnly !== true || hasSelection === true)
+        (spec.selectedOnly !== true || hasSelection === true) &&
+        (spec.selectedImageOnly !== true || hasSelectedImage === true)
   }));
 }
 function buildContextMenu(menu) {
@@ -2480,12 +2484,12 @@ function buildContextMenu(menu) {
   });
   return menu;
 }
-function applyContextMenuTarget(menu, item, hasSelection) {
+function applyContextMenuTarget(menu, item, hasSelection, hasSelectedImage) {
   if (!menu || !item) return null;
   const spec = contextMenuSpec(item.dataset.pinned === 'true',
     item.dataset.kind === 'image',
     selectedClipboardUids.has(item.dataset.uid || ''),
-    hasSelection);
+    hasSelection, hasSelectedImage);
   spec.forEach(part => {
     const node = menu.querySelector('[data-context-slot="' + part.slot + '"]');
     if (!node) return;
@@ -2499,12 +2503,12 @@ function applyContextMenuTarget(menu, item, hasSelection) {
   });
   return spec;
 }
-function openContextMenu(menu, state, item, point, hasSelection) {
+function openContextMenu(menu, state, item, point, hasSelection, hasSelectedImage) {
   const parsed = Number(item.dataset.index);
   state.rowIndex = Number.isInteger(parsed) ? parsed : 0;
   state.uid = item.dataset.uid || null;
   item.dataset.selected = String(selectedClipboardUids.has(state.uid || ''));
-  applyContextMenuTarget(menu, item, hasSelection);
+  applyContextMenuTarget(menu, item, hasSelection, hasSelectedImage);
   menu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
   const menuHeight = menu.offsetHeight || 64;
@@ -2521,9 +2525,13 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!button) return false;
   const action = button.dataset.contextAction;
   menu.style.display = 'none';
-  if (action === 'pasteSelected' || action === 'pasteSelectedOrder') {
+  if (action === 'pasteSelected' || action === 'pasteSelectedOrder' ||
+      action === 'pasteSelectedPaths' || action === 'pasteSelectedOrderPaths') {
     if (selectedUids && selectedUids.length) {
-      bridge(action === 'pasteSelected' ? 'pasteSelected' : 'pasteSelectedOrder',
+      const ordered = action === 'pasteSelectedOrder' || action === 'pasteSelectedOrderPaths';
+      const pathsOnly = action === 'pasteSelectedPaths' || action === 'pasteSelectedOrderPaths';
+      bridge(pathsOnly ? (ordered ? 'pasteSelectedOrderPaths' : 'pasteSelectedPaths')
+        : (ordered ? 'pasteSelectedOrder' : 'pasteSelected'),
         0, JSON.stringify(selectedUids));
     }
     return true;
@@ -2532,6 +2540,7 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
+  else if (action === 'pasteAllPaths') bridge('pasteAllFromPaths', rowIndex, '');
   else if (action === 'select' || action === 'deselect') {
     const uid = target.dataset.uid || '';
     if (uid) {
@@ -2591,7 +2600,10 @@ document.addEventListener('contextmenu', event => {
   const item = event.target.closest ? event.target.closest('.item') : null;
   if (!item) return;
   event.preventDefault();
-  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY }, selectedClipboardUids.size > 0);
+  const hasSelectedImage = rows().some(row =>
+    row.dataset.kind === 'image' && selectedClipboardUids.has(row.dataset.uid || ''));
+  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY },
+    selectedClipboardUids.size > 0, hasSelectedImage || item.dataset.kind === 'image');
   selectRow(rows().indexOf(item));
 });
 contextMenu.addEventListener('click', event => {
