@@ -2456,7 +2456,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'divider', divider: true },
+  { slot: 'divider', divider: true, visibleWhenImageActions: true },
   { slot: 'pastePath', label: '🖼️ Paste Path', imageOnly: true },
   { slot: 'copyPath', label: '📋🖼️ Copy Path', imageOnly: true },
   { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
@@ -2466,7 +2466,9 @@ const CONTEXT_MENU_ITEMS = [
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
   const imageActionsAvailable = isImage === true || hasSelectedImage === true;
   const visible = CONTEXT_MENU_ITEMS.map(spec => {
-    if (spec.divider === true) return true;
+    if (spec.divider === true) {
+      return spec.visibleWhenImageActions === true ? imageActionsAvailable : true;
+    }
     return (spec.imageOnly !== true || isImage === true) &&
       (spec.selectedOnly !== true || hasSelection === true) &&
       (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable));
