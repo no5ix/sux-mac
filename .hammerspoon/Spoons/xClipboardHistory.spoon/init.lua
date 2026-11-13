@@ -3280,18 +3280,7 @@ local function createClipboardWebview()
 end
 createClipboardWebview()
 
--- Paste clipboard-history rows from the oldest selected item to the newest.
--- The chooser is displayed newest-first, so walk the selected range backwards.
-local function finishPasteAll()
-    restoreNewestClipContent()
-    menuData = {}
-    if clipboard_webview then clipboard_webview:html(clipboardPanelHTML()) end
-    pasteboard_watcher:start()
-    previousApplication = nil
-    collectgarbage("collect")
-    hs.alert.show("The Paste task has finished.")
-end
-
+-- Shared chronological paste executor for range and explicit selections.
 local activePasteEntries = nil
 local function finishPasteAll()
     restoreNewestClipContent()
@@ -3450,7 +3439,10 @@ function showClipboardHistory()
         return
     end
 
-    if not clipboardSessionOpen then dateHistoryCache = {} end
+    if not clipboardSessionOpen then
+        dateHistoryCache = {}
+        selectedClipboardUids = {}
+    end
     clipboardSessionOpen = true
     clipboard_search = ""
     clipboard_type_filter = "all"
@@ -3660,6 +3652,8 @@ pkg.__test = {
             allCacheQuery = allSearchCache and allSearchCache.query,
             allCacheKind = allSearchCache and allSearchCache.kind,
             allCacheCount = allSearchCache and #allSearchCache.entries,
+            selectedCount = (function() local n=0; for _ in pairs(selectedClipboardUids) do n=n+1 end; return n end)(),
+            selectedUids = selectedClipboardUids,
         }
     end,
     setPanelState = function(state)
