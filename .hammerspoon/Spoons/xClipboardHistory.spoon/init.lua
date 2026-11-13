@@ -2462,6 +2462,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pasteSelectedOrderPaths', label: '🔢🖼️ Paste All Selected in Selection Order', selectedImageOnly: true },
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
+  const imageActionsAvailable = isImage === true || hasSelectedImage === true;
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
@@ -2471,7 +2472,7 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
       ? true
       : (spec.imageOnly !== true || isImage === true) &&
         (spec.selectedOnly !== true || hasSelection === true) &&
-        (spec.selectedImageOnly !== true || hasSelectedImage === true)
+        (spec.selectedImageOnly !== true || imageActionsAvailable)
   }));
 }
 function buildContextMenu(menu) {
