@@ -2357,10 +2357,10 @@ window.resetClipboardSelection = () => {
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'pasteAll', label: 'Paste from Oldest to Current' },
-  { slot: 'pasteSelected', label: '✅ Paste All Selected', selectedOnly: true },
-  { slot: 'pasteSelectedOrder', label: '📋 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'select', label: 'Select', selectedLabel: 'Deselect' },
+  { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
+  { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
+  { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
+  { slot: 'select', label: '✅ Select', selectedLabel: '❌ Deselect' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
