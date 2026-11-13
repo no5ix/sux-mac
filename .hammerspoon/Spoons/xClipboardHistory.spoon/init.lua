@@ -3474,6 +3474,7 @@ pkg.__test = {
     selectedClipboardUids = selectedClipboardUids,
     selectedClipboardOrder = selectedClipboardOrder,
     pasteSelectedClipboardItems = pasteSelectedClipboardItems,
+    activePasteEntries = activePasteEntries,
     resolveSelectedClipboardEntries = function(serializedUids)
         local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
         if not ok or type(requested) ~= "table" then return nil end
