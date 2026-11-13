@@ -394,7 +394,10 @@ test("context menu: image-section divider is hidden for text records without sel
   menu.applyContextMenuTarget(m, textTarget, false, false);
   const dividers = m.querySelectorAll('[data-context-slot="divider"]');
   assert.equal(dividers.length, 2, "both divider slots are stable");
-  assert.equal(dividers[0].style.display, "block", "the regular divider remains");
+  assert.equal(dividers[0].style.display, "block", "the regular divider remains above Select");
+  const selectIndex = m.children.findIndex(node => node.getAttribute("data-context-slot") === "select");
+  const regularDividerIndex = m.children.indexOf(dividers[0]);
+  assert.equal(regularDividerIndex + 1, selectIndex, "the regular divider is immediately above Select");
   assert.equal(dividers[1].style.display, "none", "the hidden image section has no orphan divider");
 
   menu.applyContextMenuTarget(m, imageTarget, false, false);
