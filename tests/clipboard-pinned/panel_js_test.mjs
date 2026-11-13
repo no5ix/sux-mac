@@ -708,6 +708,10 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the tested context-menu model must remain inside the panel script");
   assert.ok(panelScript.includes("const selectedClipboardUids = new Set();"),
     "the WebView initializes the Set used by selection and context-menu code");
+  assert.ok(panelScript.includes("if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"),
+    "ordinary list refreshes must preserve and re-render the current selection");
+  assert.ok(!panelScript.includes("if(window.resetMultiSelection)window.resetMultiSelection();\".."),
+    "ordinary list refreshes must not clear the selection Set after select/deselect");
   assert.ok(panelScript.includes("document.addEventListener('contextmenu'"),
     "the right-click listener is included in executable panel JavaScript");
   assert.ok(panelScript.includes("action, index, query, kind, dateKey, uid"),
