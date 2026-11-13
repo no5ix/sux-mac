@@ -1463,6 +1463,18 @@ test("pinned and ordinary cards render with and without the pin marker", functio
             local card = environment.t.historyItemHTML(entry, index)
             local has_mark = card:find('class="pin-mark"', 1, true) ~= nil
             local pinned_attr = card:find('data-pinned="true"', 1, true) ~= nil
+            check(card:find('class="kind"', 1, true) == nil,
+                "TEXT and IMAGE heading labels are removed from cards")
+            check(card:find('class="card-indicators"', 1, true) ~= nil,
+                "every card uses the shared top-right indicator group")
+            check(card:find('class="multi-select-mark"', 1, true) ~= nil,
+                "every card includes a persistent selection indicator")
+            if has_mark then
+                local selection_position = card:find('class="multi-select-mark"', 1, true)
+                local pin_position = card:find('class="pin-mark"', 1, true)
+                check(selection_position and pin_position and selection_position < pin_position,
+                    "the selection checkmark appears immediately before the pin marker")
+            end
             check(card:find('data-action="paste"', 1, true) ~= nil, "the card stays click-to-paste")
             check(card:find('tabindex="0"', 1, true) ~= nil
                 or entry.type == "text", "image cards keep their focusable role")
