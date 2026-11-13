@@ -198,6 +198,39 @@ test("keyboard navigation restores the grid focus stop and global key routing", 
     "the grid is not removed from keyboard focus order");
 });
 
+
+test("context menu layout: divider separates ordinary actions from paste actions", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const slots = m.children.map(node => node.getAttribute("data-context-slot"));
+  assert.deepEqual(slots, [
+    "preview", "copy", "pin", "divider", "pasteAll",
+    "select", "pasteSelected", "pasteSelectedOrder", "pastePath",
+  ]);
+  const divider = m.querySelector('[data-context-slot="divider"]');
+  assert.equal(divider.getAttribute("role"), "separator");
+  assert.ok(divider.style.cssText.includes("height:1px"));
+});
+
+test("context menu layout: selected-paste actions appear only with a nonempty selection", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const target = card(0, "context-layout-uid", false, "text");
+  menu.applyContextMenuTarget(m, target, false);
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteAll"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select/Deselect");
+  menu.applyContextMenuTarget(m, target, true);
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
+});
+
+test("context menu hover uses delegated mouseover and mouseout highlighting", () => {
+  assert.ok(panelScript.includes("contextMenu.addEventListener('mouseover'"));
+  assert.ok(panelScript.includes("contextMenu.addEventListener('mouseout'"));
+  assert.ok(panelScript.includes("button.style.background = '#3a4250'"));
+  assert.ok(panelScript.includes("button.style.background = 'transparent'"));
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
