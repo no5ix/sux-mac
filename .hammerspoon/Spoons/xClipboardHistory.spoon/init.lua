@@ -2432,21 +2432,21 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'copy', label: '📋 Copy' },
-  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
-  { slot: 'divider', divider: true },
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
-  { slot: 'select', label: 'Select/Deselect' },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
+  { slot: 'copy', label: '📋 Copy' },
+  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
+  { slot: 'divider', divider: true },
+  { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true }
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
-      spec.slot === 'select' ? (isSelected ? '❌ Deselect' : '✅ Select') : spec.label,
+      spec.slot === 'select' ? (isSelected ? spec.deselectLabel : spec.label) : spec.label,
     visible: spec.divider === true
       ? true
       : (spec.imageOnly !== true || isImage === true) &&
