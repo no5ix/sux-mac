@@ -72,6 +72,7 @@ local allHistoryCacheLoaded = 0
 local allHistoryTotalCount = nil
 -- Temporary multi-selection keyed by stable card UID; cleared when the panel closes.
 local selectedClipboardUids = {}
+local selectedClipboardOrder = {}
 -- Hold one completed global search per query/type for this open-panel session.
 -- Switching date chips or returning to All Dates reuses these matches instead
 -- of scanning every persisted daily history file again.
@@ -2123,6 +2124,7 @@ const activeTypeFilters = new Set();
 let committedSearchQuery = '';
 // The Lua table stores the authoritative stable-ID selection; this Set mirrors it in the WebView.
 const selectedClipboardUids = new Set();
+const selectedClipboardOrder = [];
 let previousSearchQuery = '';
 let lastNonSearchDateKey = null;
 let lastNonSearchWasAllDates = true;
@@ -2357,6 +2359,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
   { slot: 'pasteAll', label: 'Paste from Oldest to Current' },
   { slot: 'pasteSelected', label: '✅ Paste All Selected', selectedOnly: true },
+  { slot: 'pasteSelectedOrder', label: '📋 Paste All Selected in Selection Order', selectedOnly: true },
   { slot: 'select', label: 'Select', selectedLabel: 'Deselect' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
@@ -2412,8 +2415,8 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
   if (!button) return false;
   const action = button.dataset.contextAction; menu.style.display = 'none';
-  if (action === 'pasteSelected') {
-    if (selectedUids && selectedUids.length) bridge('pasteSelected', 0, JSON.stringify(selectedUids));
+  if (action === 'pasteSelected' || action === 'pasteSelectedOrder') {
+    if (selectedUids && selectedUids.length) bridge(action === 'pasteSelected' ? 'pasteSelected' : 'pasteSelectedOrder', 0, JSON.stringify(selectedUids));
     return true;
   }
   const target = findContextRow(state, items);
@@ -2423,8 +2426,13 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   else if (action === 'select' || action === 'deselect') {
     const uid = target.dataset.uid || '';
     if (uid) {
-      if (action === 'select') selectedClipboardUids.add(uid);
-      else selectedClipboardUids.delete(uid);
+      if (action === 'select') {
+        if (!selectedClipboardUids.has(uid)) { selectedClipboardUids.add(uid); selectedClipboardOrder.push(uid); }
+      } else {
+        selectedClipboardUids.delete(uid);
+        const orderIndex = selectedClipboardOrder.indexOf(uid);
+        if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
+      }
       syncClipboardMultiSelection();
       bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
     }
@@ -2461,7 +2469,7 @@ document.addEventListener('contextmenu', event => {
   selectRow(rows().indexOf(item));
 });
 contextMenu.addEventListener('click', event => {
-  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows(), Array.from(selectedClipboardUids))) {
+  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows(), selectedClipboardOrder.slice())) {
     event.preventDefault(); event.stopPropagation();
   }
 });
@@ -2702,15 +2710,26 @@ function handleClipboardPanelMessage(message)
                 if cardUid(entry) == requestedUid then found = true; break end
             end
             if found then
-                if body.action == "selectItem" then selectedClipboardUids[requestedUid] = true
-                else selectedClipboardUids[requestedUid] = nil end
+                if body.action == "selectItem" then
+                    if not selectedClipboardUids[requestedUid] then
+                        selectedClipboardUids[requestedUid] = true
+                        selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
+                    end
+                else
+                    selectedClipboardUids[requestedUid] = nil
+                    for index = #selectedClipboardOrder, 1, -1 do
+                        if selectedClipboardOrder[index] == requestedUid then table.remove(selectedClipboardOrder, index); break end
+                    end
+                end
                 if clipboard_webview then
                     clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
                 end
             end
         end
     elseif body.action == "pasteSelected" then
-        pasteSelectedClipboardItems(body.query)
+        pasteSelectedClipboardItems(body.query, "chronological")
+    elseif body.action == "pasteSelectedOrder" then
+        pasteSelectedClipboardItems(body.query, "selection")
     elseif body.action == "pinScope" then
         clipboardPinnedFilter=true; clipboardDateFilter=nil; allDatesFilterSelected=false
         clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
@@ -2985,6 +3004,7 @@ closeClipboardPanel = function()
     typeBrowseCursor={text=nil,image=nil}
     menuData={}
     selectedClipboardUids={}
+    selectedClipboardOrder={}
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
@@ -3137,6 +3157,7 @@ local function finishPasteAll()
     restoreNewestClipContent()
     activePasteEntries = nil
     selectedClipboardUids = {}
+    selectedClipboardOrder = {}
     if clipboard_webview then
         clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
         clipboard_webview:html(clipboardPanelHTML())
@@ -3149,11 +3170,13 @@ end
 
 -- Shared chronological paste engine. Its input is newest-first and it walks
 -- backward, preserving the existing range-paste timing and image behavior.
-local function pasteAllRowsStep(position)
-    if not activePasteEntries or position < 1 then finishPasteAll(); return end
+local function pasteAllRowsStep(position, direction)
+    direction = direction or -1
+    local outOfBounds = direction < 0 and position < 1 or direction > 0 and position > #(activePasteEntries or {})
+    if not activePasteEntries or outOfBounds then finishPasteAll(); return end
     local entry = activePasteEntries[position]
     if not entry or (entry.type ~= "text" and entry.type ~= "image") then
-        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position - 1) end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction) end)
         return
     end
     local wroteContent = false
@@ -3168,7 +3191,7 @@ local function pasteAllRowsStep(position)
         collectgarbage("collect")
     end
     if not wroteContent then
-        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position - 1) end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction) end)
         return
     end
     hs.timer.doAfter(0.15, function()
@@ -3178,16 +3201,16 @@ local function pasteAllRowsStep(position)
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
                     hs.eventtap.keyStroke({"cmd"}, "v", 0)
-                    hs.timer.doAfter(0.4, function() pasteAllRowsStep(position - 1) end)
+                    hs.timer.doAfter(0.4, function() pasteAllRowsStep(position + direction, direction) end)
                 end)
             else
-                pasteAllRowsStep(position - 1)
+                pasteAllRowsStep(position + direction, direction)
             end
         end)
     end)
 end
 function pasteAllWithDelimiterRecursionVersion(startRow)
-    pasteAllRowsStep(startRow)
+    pasteAllRowsStep(startRow, -1)
 end
 
 function pasteSomeWithDelimiterFromStartRow(startRow)
@@ -3208,36 +3231,47 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     end)
 end
 
-pasteSelectedClipboardItems = function(serializedUids)
+pasteSelectedClipboardItems = function(serializedUids, orderMode)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
         hs.alert.show("No clipboard-history items are selected."); return false
     end
-    local wanted, entries, seen = {}, {}, {}
+    local wanted, resolvedByUid, seen = {}, {}, {}
     for _, uid in ipairs(requested) do if type(uid) == "string" and uid ~= "" then wanted[uid] = true end end
-    -- Resolve from the complete session cache, not only the visible filter.
     local candidates = {}
     for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
     for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
     for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
     for _, entry in ipairs(candidates) do
         local uid = cardUid(entry)
-        if wanted[uid] and not seen[uid] then entries[#entries + 1] = entry; seen[uid] = true end
+        if wanted[uid] and not seen[uid] then resolvedByUid[uid] = entry; seen[uid] = true end
     end
-    local expected = 0; for _ in pairs(wanted) do expected = expected + 1 end
-    if #entries == 0 or #entries ~= expected then
+    local expected = 0
+    for _ in pairs(wanted) do expected = expected + 1 end
+    local entries = {}
+    if orderMode == "selection" then
+        for _, uid in ipairs(requested) do
+            local entry = resolvedByUid[uid]
+            if entry then entries[#entries + 1] = entry end
+        end
+    else
+        for uid in pairs(wanted) do
+            local entry = resolvedByUid[uid]
+            if entry then entries[#entries + 1] = entry end
+        end
+        table.sort(entries, function(left, right)
+            local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
+            if lt ~= rt then return lt < rt end
+            return cardUid(left) < cardUid(right)
+        end)
+    end
+    if expected == 0 or #entries ~= expected then
         hs.alert.show("Some selected clipboard items are no longer available in this session.")
         return false
     end
-    -- All selected items are resolved by stable UID and sorted by original
-    -- timestamp (newest first here; the shared recursive routine pastes oldest first).
-    table.sort(entries, function(left, right)
-        local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
-        if lt ~= rt then return lt < rt end
-        return cardUid(left) < cardUid(right)
-    end)
     activePasteEntries = entries
     selectedClipboardUids = {}
+    selectedClipboardOrder = {}
     pasteboard_watcher:stop()
     if clipboard_webview then
         clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
@@ -3246,7 +3280,7 @@ pasteSelectedClipboardItems = function(serializedUids)
     hs.alert.show("Please wait for the Paste task to finish.")
     hs.timer.doAfter(0.15, function()
         if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllRowsStep(#activePasteEntries) end)
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1) end)
     end)
     return true
 end
@@ -3293,6 +3327,7 @@ function showClipboardHistory()
     if not clipboardSessionOpen then
         dateHistoryCache = {}
         selectedClipboardUids = {}
+        selectedClipboardOrder = {}
     end
     clipboardSessionOpen = true
     clipboard_search = ""
@@ -3437,6 +3472,7 @@ pkg.__test = {
     effectivePinnedId = effectivePinnedId,
     cardUid = cardUid,
     selectedClipboardUids = selectedClipboardUids,
+    selectedClipboardOrder = selectedClipboardOrder,
     pasteSelectedClipboardItems = pasteSelectedClipboardItems,
     resolveSelectedClipboardEntries = function(serializedUids)
         local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
@@ -3505,6 +3541,7 @@ pkg.__test = {
             allCacheCount = allSearchCache and #allSearchCache.entries,
             selectedCount = (function() local n=0; for _ in pairs(selectedClipboardUids) do n=n+1 end; return n end)(),
             selectedUids = selectedClipboardUids,
+            selectedOrder = selectedClipboardOrder,
         }
     end,
     setPanelState = function(state)
