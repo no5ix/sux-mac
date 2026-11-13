@@ -353,6 +353,38 @@ test("image-path context actions dispatch Copy Path and preserve path mode in ba
   assert.ok(source.includes('pasteSelectedClipboardItems(body.query, "selection", true)'));
 });
 
+
+test("image-specific context menu restores Paste Path and pairs regular/image actions", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const target = card(0, "pair-image", false, "image");
+  menu.applyContextMenuTarget(m, target, false, false);
+  const slots = m.children.map(node => node.getAttribute("data-context-slot"));
+  assert.deepEqual(slots, [
+    "preview", "copy", "copyPath", "pin", "divider",
+    "pasteAll", "pasteAllPaths", "pastePath", "select",
+    "pasteSelected", "pasteSelectedPaths",
+    "pasteSelectedOrder", "pasteSelectedOrderPaths",
+  ]);
+  assert.equal(m.querySelector('[data-context-slot="copyPath"]').textContent, "🗂️ Copy Path");
+  assert.equal(m.querySelector('[data-context-slot="pastePath"]').textContent, "🗂️ Paste Path");
+  assert.equal(m.querySelector('[data-context-slot="copyPath"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pastePath"]').style.display, "block");
+
+  const textTarget = card(1, "pair-text", false, "text");
+  menu.applyContextMenuTarget(m, textTarget, false, false);
+  assert.equal(m.querySelector('[data-context-slot="pastePath"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedPaths"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrderPaths"]').style.display, "none");
+
+  menu.applyContextMenuTarget(m, textTarget, true, true);
+  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedPaths"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrderPaths"]').style.display, "block");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
