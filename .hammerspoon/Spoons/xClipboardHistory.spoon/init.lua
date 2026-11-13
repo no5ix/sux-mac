@@ -1940,8 +1940,10 @@ end)() .. [[
 <main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
 <footer>Tab: next result · Shift+Tab: previous result, then search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
 <script>
-const bridge = (action, index, query, kind, dateKey) => {
-  try { window.webkit.messageHandlers.clipboardHistory.postMessage({action, index, query, kind, dateKey}); } catch (_) {}
+const bridge = (action, index, query, kind, dateKey, uid) => {
+  try {
+    window.webkit.messageHandlers.clipboardHistory.postMessage({ action, index, query, kind, dateKey, uid });
+  } catch (_) {}
 };
 document.addEventListener('click', event => {
   const contextItem = event.target.closest('#clipboard-context-menu');
@@ -2117,6 +2119,8 @@ window.setImageThumbnail = (index, src) => {
 const search = document.getElementById('search');
 const activeTypeFilters = new Set();
 let committedSearchQuery = '';
+// The Lua table stores the authoritative stable-ID selection; this Set mirrors it in the WebView.
+const selectedClipboardUids = new Set();
 let previousSearchQuery = '';
 let lastNonSearchDateKey = null;
 let lastNonSearchWasAllDates = true;
@@ -2414,7 +2418,15 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
-  else if (action === 'select' || action === 'deselect') bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, target.dataset.uid || '');
+  else if (action === 'select' || action === 'deselect') {
+    const uid = target.dataset.uid || '';
+    if (uid) {
+      if (action === 'select') selectedClipboardUids.add(uid);
+      else selectedClipboardUids.delete(uid);
+      syncClipboardMultiSelection();
+      bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
+    }
+  }
   else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
   else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
