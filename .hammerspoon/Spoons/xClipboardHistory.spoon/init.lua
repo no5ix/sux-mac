@@ -70,6 +70,8 @@ local dateHistoryCache = {}
 local allHistoryCache = {}
 local allHistoryCacheLoaded = 0
 local allHistoryTotalCount = nil
+-- Temporary multi-selection keyed by stable card UID; cleared when the panel closes.
+local selectedClipboardUids = {}
 -- Hold one completed global search per query/type for this open-panel session.
 -- Switching date chips or returning to All Dates reuses these matches instead
 -- of scanning every persisted daily history file again.
@@ -1075,6 +1077,7 @@ local function clearClipboardHistory()
     text_clipboard_history = {}
     img_clipboard_history = {}
     menuData = {}
+    selectedClipboardUids = {}
     if fs.attributes(PINNED_ROOT) then
         local function rmTree(p) local a=fs.attributes(p); if not a then return end; if a.mode=="directory" then for c in fs.dir(p) do if c~="." and c~=".." then rmTree(p.."/"..c) end end; os.remove(p) else os.remove(p) end end
         rmTree(PINNED_ROOT)
@@ -1699,7 +1702,7 @@ local function historyItemHTML(entry, index)
         local imageEntry=entry.historyEntry or entry
         local thumbnail=thumbnailForEntry(imageEntry)
         local preview=thumbnail~="" and ('<img class="preview" src="'..escapeHTML(thumbnail)..'" alt="Clipboard image preview" loading="lazy" decoding="async">') or '<div class="preview placeholder">Image preview unavailable</div>'
-        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(cardIsPinned)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'<div class="hint">Click to paste</div></div>'
+        return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="'..index..'" data-uid="'..uid..'" data-pinned="'..tostring(cardIsPinned)..'" data-search="'..escapeHTML(string.lower("[image] "..stamp))..'">'..pinMark..'<div class="meta"><div class="kind">IMAGE</div><div class="stamp">'..escapeHTML(stamp)..'</div></div>'..preview..'</div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
     local loaded=hydrateEntry(entry) or entry
@@ -1721,7 +1724,7 @@ local function historyItemHTML(entry, index)
     return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' .. index .. '" data-uid="' .. uid .. '" data-pinned="'..tostring(cardIsPinned)..'" data-search="' .. escapeHTML(string.lower("[text] " .. stamp)) .. '">' ..
         pinMark .. '<div class="kind">TEXT</div><div class="stamp">' .. escapeHTML(stamp) ..
         '</div><div class="text-preview">' .. escapeHTML(previewText) ..
-        '</div><div class="hint">Click to paste</div>' ..
+        '</div>' ..
         '</button>'
 end
 
@@ -1894,6 +1897,8 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
    and click-through, so selection, click-to-paste, keyboard navigation, and the
    context menu keep working exactly as on ordinary cards. */
 .pin-mark { position:absolute; top:9px; right:10px; font-size:15px; line-height:1.1; pointer-events:none; user-select:none; }
+.multi-select-mark { position:absolute; left:10px; bottom:9px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:14px; font-weight:700; line-height:1; pointer-events:none; user-select:none; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+.item.multi-selected { border-color:var(--selected-border); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
@@ -2399,20 +2404,23 @@ window.resetClipboardSelection = () => {
 // "Unpin" for every following item.
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'pasteAll', label: '🧴 Paste All the rows above this row in the order from early to late, including this row' },
+  { slot: 'pasteAll', label: 'Paste from Oldest to Current' },
+  { slot: 'pasteSelected', label: '✅ Paste All Selected', selectedOnly: true },
+  { slot: 'select', label: 'Select', selectedLabel: 'Deselect' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
 ];
-function contextMenuSpec(isPinned, isImage) {
+function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
-    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label,
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
+      spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
     // A clipboard image is the only item backed by a file, so "Paste path" is
     // offered on image cards only. The slot is always built and hidden by
     // display, so the button set and the stable slots never change.
-    visible: spec.imageOnly !== true || isImage === true
+    visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
   }));
 }
 function buildContextMenu(menu) {
@@ -2433,9 +2441,9 @@ function buildContextMenu(menu) {
 // Recompute every button from the current target. The pinned state comes from
 // the target card only - never from the previously opened menu, the selected
 // card, or any shared menu state.
-function applyContextMenuTarget(menu, item) {
+function applyContextMenuTarget(menu, item, hasSelection) {
   if (!menu || !item) return null;
-  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image');
+  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image', item.dataset.selected === 'true', hasSelection);
   spec.forEach(part => {
     const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
     if (!button) return;
@@ -2445,11 +2453,11 @@ function applyContextMenuTarget(menu, item) {
   });
   return spec;
 }
-function openContextMenu(menu, state, item, point) {
+function openContextMenu(menu, state, item, point, hasSelection) {
   const parsed = Number(item.dataset.index);
   state.rowIndex = Number.isInteger(parsed) ? parsed : 0;
   state.uid = item.dataset.uid || null;
-  applyContextMenuTarget(menu, item);
+  applyContextMenuTarget(menu, item, hasSelection);
   menu.style.display = 'block';
   const menuWidth = Math.min(460, window.innerWidth - 16);
   const menuHeight = menu.offsetHeight || 64;
@@ -2474,7 +2482,7 @@ function findContextRow(state, items) {
   }
   return null;
 }
-function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items) {
+function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items, selectedUids) {
   const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
   if (!button) return false;
   const action = button.dataset.contextAction;
@@ -2484,6 +2492,10 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   const rowIndex = Number(target.dataset.index || 0);
   if (action === 'pasteAll') {
     bridge('pasteAllFrom', rowIndex, '');
+  } else if (action === 'pasteSelected') {
+    bridge('pasteSelected', 0, JSON.stringify(selectedUids || []));
+  } else if (action === 'select' || action === 'deselect') {
+    bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, target.dataset.uid || '');
   } else if (action === 'copy') {
     bridge('copyHistoryEntry', rowIndex, '');
   } else if (action === 'pastePath') {
@@ -2496,6 +2508,23 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   return true;
 }
 /* END CONTEXT MENU MODEL */
+function syncClipboardMultiSelection() {
+  rows().forEach(item => {
+    const uid = item.dataset.uid || '';
+    const selected = selectedClipboardUids.has(uid);
+    item.dataset.selected = String(selected);
+    item.classList.toggle('multi-selected', selected);
+    let mark = item.querySelector('.multi-select-mark');
+    if (selected && !mark) {
+      mark = document.createElement('span');
+      mark.className = 'multi-select-mark';
+      mark.textContent = '✓';
+      mark.setAttribute('aria-label', 'Selected');
+      item.appendChild(mark);
+    } else if (!selected && mark) mark.remove();
+  });
+}
+window.resetMultiSelection = syncClipboardMultiSelection;
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu';
 buildContextMenu(contextMenu);
@@ -2506,11 +2535,11 @@ document.addEventListener('contextmenu', event => {
   const item = event.target.closest ? event.target.closest('.item') : null;
   if (!item) return;
   event.preventDefault();
-  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY });
+  openContextMenu(contextMenu, contextState, item, { x: event.clientX, y: event.clientY }, selectedClipboardUids.size > 0);
   selectRow(rows().indexOf(item));
 });
 contextMenu.addEventListener('click', event => {
-  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows())) {
+  if (handleContextMenuClick(contextMenu, contextState, event, bridge, openManualPreview, rows(), Array.from(selectedClipboardUids))) {
     event.preventDefault();
     event.stopPropagation();
   }
@@ -2794,7 +2823,8 @@ local function updateClipboardPanel(query,kind,offset,append)
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     end
-    js=js.."document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
+    js=js.."if(window.resetMultiSelection)window.resetMultiSelection();"..
+        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
@@ -2805,6 +2835,17 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
+    elseif body.action == "selectItem" or body.action == "deselectItem" then
+        local index = tonumber(body.index)
+        local entry = index and menuData[index]
+        local requestedUid = tostring(body.uid or "")
+        if entry and requestedUid ~= "" and cardUid(entry) == requestedUid then
+            if body.action == "selectItem" then selectedClipboardUids[requestedUid] = true
+            else selectedClipboardUids[requestedUid] = nil end
+            if clipboard_webview then clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();") end
+        end
+    elseif body.action == "pasteSelected" then
+        pasteSelectedClipboardItems(body.query)
     elseif body.action == "pinScope" then
         clipboardPinnedFilter=true; clipboardDateFilter=nil; allDatesFilterSelected=false
         clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
@@ -3078,6 +3119,7 @@ closeClipboardPanel = function()
     browseCursor=0
     typeBrowseCursor={text=nil,image=nil}
     menuData={}
+    selectedClipboardUids={}
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
@@ -3236,61 +3278,60 @@ local function finishPasteAll()
     hs.alert.show("The Paste task has finished.")
 end
 
-local function pasteAllRowsStep(row)
-    if not menuData or row < 1 then
-        finishPasteAll()
-        return
+local activePasteEntries = nil
+local function finishPasteAll()
+    restoreNewestClipContent()
+    activePasteEntries = nil
+    selectedClipboardUids = {}
+    if clipboard_webview then
+        clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
+        clipboard_webview:html(clipboardPanelHTML())
     end
+    pasteboard_watcher:start()
+    previousApplication = nil
+    collectgarbage("collect")
+    hs.alert.show("The Paste task has finished.")
+end
 
-    local entry = menuData[row]
+-- Shared chronological paste engine. Its input is newest-first and it walks
+-- backward, preserving the existing range-paste timing and image behavior.
+local function pasteAllRowsStep(position)
+    if not activePasteEntries or position < 1 then finishPasteAll(); return end
+    local entry = activePasteEntries[position]
     if not entry or (entry.type ~= "text" and entry.type ~= "image") then
-        hs.timer.doAfter(0.05, function()
-            pasteAllRowsStep(row - 1)
-        end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position - 1) end)
         return
     end
-
     local wroteContent = false
     if entry.type == "text" then
-        local loaded=entry.isPinned and hydratePinnedEntry(entry) or entry
+        local loaded = effectivePinnedId(entry) and hydratePinnedEntry(entry) or hydrateEntry(entry) or entry
         wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\n") ~= false
     else
         local image = decodeImage(entry.historyEntry or entry)
-        if image then
-            wroteContent = pasteboard.writeObjects(image) ~= false
-        else
-            hs.alert.show("Skipped an image that could not be decoded.")
-        end
+        if image then wroteContent = pasteboard.writeObjects(image) ~= false
+        else hs.alert.show("Skipped an image that could not be decoded.") end
+        image = nil
+        collectgarbage("collect")
     end
-
     if not wroteContent then
-        hs.timer.doAfter(0.05, function()
-            pasteAllRowsStep(row - 1)
-        end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position - 1) end)
         return
     end
-
-    -- Give the destination app time to consume this clipboard item before it
-    -- is replaced by the next entry.
     hs.timer.doAfter(0.15, function()
         hs.eventtap.keyStroke({"cmd"}, "v", 0)
         hs.timer.doAfter(0.4, function()
             if entry.type == "image" then
-                -- Preserve the existing behavior of separating images with a newline.
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
                     hs.eventtap.keyStroke({"cmd"}, "v", 0)
-                    hs.timer.doAfter(0.4, function()
-                        pasteAllRowsStep(row - 1)
-                    end)
+                    hs.timer.doAfter(0.4, function() pasteAllRowsStep(position - 1) end)
                 end)
             else
-                pasteAllRowsStep(row - 1)
+                pasteAllRowsStep(position - 1)
             end
         end)
     end)
 end
-
 function pasteAllWithDelimiterRecursionVersion(startRow)
     pasteAllRowsStep(startRow)
 end
@@ -3300,22 +3341,55 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
         hs.alert.show("No clipboard-history rows to paste.")
         return
     end
-
+    activePasteEntries = {}
+    for index = startRow, 1, -1 do
+        if menuData[index] then activePasteEntries[#activePasteEntries + 1] = menuData[index] end
+    end
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
-    -- Restore the app that was frontmost before the panel opened before any
-    -- paste keystrokes are sent.
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
-        hs.timer.doAfter(0.35, function()
-            -- The web panel lists newest-first; the recursive routine walks
-            -- selected row -> newest row, which pastes oldest-to-newest.
-            pasteAllWithDelimiterRecursionVersion(startRow)
-        end)
+        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        hs.timer.doAfter(0.35, function() pasteAllWithDelimiterRecursionVersion(#activePasteEntries) end)
     end)
+end
+
+local function pasteSelectedClipboardItems(serializedUids)
+    local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
+    if not ok or type(requested) ~= "table" or #requested == 0 then
+        hs.alert.show("No clipboard-history items are selected."); return false
+    end
+    local wanted, entries, seen = {}, {}, {}
+    for _, uid in ipairs(requested) do if type(uid) == "string" and uid ~= "" then wanted[uid] = true end end
+    for _, entry in ipairs(menuData or {}) do
+        local uid = cardUid(entry)
+        if wanted[uid] and not seen[uid] then entries[#entries + 1] = entry; seen[uid] = true end
+    end
+    local expected = 0; for _ in pairs(wanted) do expected = expected + 1 end
+    if #entries == 0 or #entries ~= expected then
+        hs.alert.show("Some selected clipboard items are no longer available. Please select them again.")
+        return false
+    end
+    -- All selected items are resolved by stable UID and sorted by original
+    -- timestamp (newest first here; the shared recursive routine pastes oldest first).
+    table.sort(entries, function(left, right)
+        local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
+        if lt ~= rt then return lt > rt end
+        return cardUid(left) < cardUid(right)
+    end)
+    activePasteEntries = entries
+    selectedClipboardUids = {}
+    pasteboard_watcher:stop()
+    if clipboard_webview then
+        clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
+        clipboard_webview:hide()
+    end
+    hs.alert.show("Please wait for the Paste task to finish.")
+    hs.timer.doAfter(0.15, function()
+        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(#activePasteEntries) end)
+    end)
+    return true
 end
 
 -- Function to show clipboard history
