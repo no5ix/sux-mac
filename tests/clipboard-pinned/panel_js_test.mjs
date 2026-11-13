@@ -250,6 +250,26 @@ test("context menu: right-clicked item controls the Select/Deselect label", () =
   assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "✅ Select");
 });
 
+
+test("clipboard cards use a top-right shared indicator group without type headings", () => {
+  const cardHtml = source.slice(source.indexOf("local function historyItemHTML(entry, index)"),
+    source.indexOf("\\nlocal function clipboardEntryMatches"));
+  assert.ok(cardHtml.includes('class="card-indicators"'),
+    "each clipboard card builds a shared indicator group");
+  assert.ok(cardHtml.includes('class="multi-select-mark"'),
+    "the selection marker is part of the persistent card markup");
+  assert.ok(cardHtml.includes('class="pin-mark"'),
+    "pinned cards keep their pin indicator");
+  assert.ok(!cardHtml.includes('class="kind"'),
+    "TEXT and IMAGE labels are no longer rendered");
+  assert.ok(panelScript.includes("mark.style.display = selected ? 'inline-flex' : 'none'"),
+    "selection sync toggles the existing marker instead of moving it");
+  assert.ok(panelScript.includes(".card-indicators { position:absolute; top:9px; right:10px;"),
+    "the shared icon group is anchored at the upper-right");
+  assert.ok(panelScript.includes("gap:5px"),
+    "the checkmark and pin have consistent spacing");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
