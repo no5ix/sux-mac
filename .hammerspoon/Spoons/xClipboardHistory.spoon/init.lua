@@ -2224,6 +2224,9 @@ const resultsPanel = document.getElementById('clipboard-items');
 // the user cannot see, so the visible sequence skipped a card.
 resultsPanel.setAttribute('role', 'listbox');
 resultsPanel.setAttribute('aria-label', 'Clipboard history results');
+// Keep the result grid in the native focus order so keyboard users can enter
+// and leave the grid as they did before multi-select was introduced.
+resultsPanel.tabIndex = 0;
 
 let selectedIndex = 0;
 function rows() { return Array.from(document.querySelectorAll('main .item')).filter(item => !item.hidden && item.dataset.action === 'paste'); }
@@ -2340,19 +2343,91 @@ function navMove(forward) {
   Object.assign(navState, next);
   const scrollX = window.scrollX, scrollY = window.scrollY;
   if (next.target === 'search') {
-    clearRowSelection(); search.focus({ preventScroll: true });
-    if (search.setSelectionRange) { try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {} }
+    clearRowSelection();
+    search.focus({ preventScroll: true });
+    if (search.setSelectionRange) {
+      try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {}
+    }
   } else {
     const item = rows()[next.navIndex];
-    if (item) { selectRow(next.navIndex, true); item.focus({ preventScroll: true }); }
-    else { clearRowSelection(); search.focus({ preventScroll: true }); }
+    if (item) {
+      selectRow(next.navIndex, true);
+      item.focus({ preventScroll: true });
+    } else {
+      clearRowSelection();
+      search.focus({ preventScroll: true });
+    }
   }
   window.scrollTo(scrollX, scrollY);
 }
 window.resetClipboardSelection = () => {
-  selectedIndex = 0; clearRowSelection();
+  selectedIndex = 0;
+  clearRowSelection();
   Object.assign(navState, navReconcile(navState, cardUids()));
 };
+function isClipboardPanelKeyboardTarget(target) {
+  return target === document.body || target === resultsPanel ||
+    target === search || Boolean(target && target.classList && target.classList.contains('item') && resultsPanel.contains(target));
+}
+function handleClipboardPanelKeydown(event) {
+  const key = event.key;
+  const target = event.target;
+
+  // Escape first closes transient UI, then clears a search, then closes panel.
+  if (key === 'Escape') {
+    if (contextMenu.style.display !== 'none') {
+      event.preventDefault();
+      contextMenu.style.display = 'none';
+      return;
+    }
+    if (target === search && search.value !== '') return; // search's own handler clears it
+    if (search.value !== '') {
+      event.preventDefault();
+      search.value = '';
+      applyFilters();
+      search.focus({ preventScroll: true });
+      return;
+    }
+    event.preventDefault();
+    bridge('close', 0, '');
+    return;
+  }
+
+  if (!isClipboardPanelKeyboardTarget(target)) return;
+
+  if (key === 'Tab') {
+    event.preventDefault();
+    event.stopPropagation();
+    navMove(!event.shiftKey);
+    return;
+  }
+
+  // Arrow keys navigate the result grid from either the grid, a focused card,
+  // or the search field. In the search field, horizontal arrows retain their
+  // normal text-cursor behavior.
+  if (target === search && (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'Home' || key === 'End')) return;
+  if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(key) &&
+      (target === resultsPanel || (target && target.classList && target.classList.contains('item')) ||
+       (target === search && key === 'ArrowDown'))) {
+    event.preventDefault();
+    if (key === 'ArrowRight') selectRow(selectedIndex + 1, true);
+    else if (key === 'ArrowLeft') selectRow(selectedIndex - 1, true);
+    else {
+      const main = document.querySelector('main');
+      const columns = Math.max(1, Math.round((main ? main.clientWidth : 250) / 250));
+      selectRow(selectedIndex + (key === 'ArrowDown' ? columns : -columns), true);
+    }
+    const selected = rows()[selectedIndex];
+    if (selected) {
+      navState.navIndex = selectedIndex;
+      navState.lastCardIndex = selectedIndex;
+      navState.uid = cardUids()[selectedIndex] || null;
+      selected.focus({ preventScroll: true });
+    }
+    return;
+  }
+}
+document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* END KEYBOARD NAVIGATION BINDING */
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
