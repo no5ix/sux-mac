@@ -167,9 +167,15 @@ function loadNavigation(cards) {
 function loadMenuModel() {
   const document = { createElement: (tag) => new El(tag) };
   const window = makeWindow();
-  return new Function("document", "window", "rows", "selectedClipboardUids",
+  const state = { cards: [] };
+  const selectedClipboardUids = new Set();
+  const rows = () => state.cards;
+  const api = new Function("document", "window", "rows", "selectedClipboardUids",
     `${menuModel}\n${multiSelectionBinding}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick, syncClipboardMultiSelection };`)(
-    document, window, () => [], new Set());
+    document, window, rows, selectedClipboardUids);
+  api.selectedClipboardUids = selectedClipboardUids;
+  api.setRows = (cards) => { state.cards = cards; };
+  return api;
 }
 
 // ------------------------------------------------------------------- tests --
