@@ -318,6 +318,36 @@ test("image-path selected actions dispatch without dropping mixed-selection UIDs
   assert.deepEqual(JSON.parse(calls[1][2]), selectedUids);
 });
 
+
+test("image-path context actions dispatch Copy Path and preserve path mode in batches", () => {
+  const modelSource = source.slice(source.indexOf("/* BEGIN CONTEXT MENU MODEL"),
+    source.indexOf("/* END CONTEXT MENU MODEL */"));
+  assert.ok(modelSource.includes("action === 'copyPath'") &&
+    modelSource.includes("bridge('copyPath', rowIndex, '')"),
+    "Copy Path must dispatch its own action to Lua");
+  assert.ok(source.includes('elseif body.action == "copyPath"') &&
+    source.includes("copyOrPasteImagePathEntry(tonumber(body.index), false)"),
+    "Lua must handle Copy Path and write the resolved path to the pasteboard");
+
+  const engineStart = source.indexOf("local function pasteAllRowsStep");
+  const engineEnd = source.indexOf("\\nfunction pasteAllWithDelimiterRecursionVersion", engineStart);
+  const engine = source.slice(engineStart, engineEnd);
+  assert.ok(engine.includes("local function pasteAllRowsStep(position, direction, pathMode)"));
+  assert.ok(!/pasteAllRowsStep\\(position \\+ direction, direction\\)/.test(engine),
+    "no recursive batch step may drop pathMode");
+  const recursiveSteps = engine.match(/pasteAllRowsStep\\(position \\+ direction, direction, pathMode\\)/g) || [];
+  assert.ok(recursiveSteps.length >= 4,
+    "pathMode must flow through each retry and delayed next-item callback");
+
+  const rangeStart = source.indexOf("function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)");
+  const rangeEnd = source.indexOf("\\npasteSelectedClipboardItems = function", rangeStart);
+  const range = source.slice(rangeStart, rangeEnd);
+  assert.ok(range.includes("pasteAllRowsStep(1, 1, pathMode == true)"),
+    "range image-path paste must start the engine in path mode");
+  assert.ok(source.includes('pasteSelectedClipboardItems(body.query, "chronological", true)'));
+  assert.ok(source.includes('pasteSelectedClipboardItems(body.query, "selection", true)'));
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
