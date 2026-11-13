@@ -2689,7 +2689,10 @@ local function updateClipboardPanel(query,kind,offset,append)
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     end
-    js=js.."if(window.resetMultiSelection)window.resetMultiSelection();"..
+    -- Preserve selections across ordinary panel refreshes. The WebView Set
+    -- survives filters and list rebuilds, and Lua remains the source of truth;
+    -- re-syncing the card decorations must not clear that Set.
+    js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
         "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";if(window.resetClipboardSelection)window.resetClipboardSelection();"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
