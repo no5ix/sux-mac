@@ -272,6 +272,52 @@ test("clipboard cards use a top-right shared indicator group without type headin
     "the checkmark and pin have consistent spacing");
 });
 
+
+test("image-specific context actions follow clicked-image and selected-image state", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const textTarget = card(0, "action-text", false, "text");
+  const imageTarget = card(1, "action-image", false, "image");
+
+  menu.applyContextMenuTarget(m, textTarget, false, false);
+  for (const slot of ["copyPath", "pasteAllPaths", "pasteSelectedPaths", "pasteSelectedOrderPaths"]) {
+    assert.equal(m.querySelector('[data-context-slot="' + slot + '"]').style.display, "none", slot);
+  }
+
+  menu.applyContextMenuTarget(m, imageTarget, false, false);
+  assert.equal(m.querySelector('[data-context-slot="copyPath"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteAllPaths"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedPaths"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrderPaths"]').style.display, "none");
+
+  menu.applyContextMenuTarget(m, textTarget, true, true);
+  assert.equal(m.querySelector('[data-context-slot="copyPath"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteAllPaths"]').style.display, "none");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedPaths"]').style.display, "block");
+  assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrderPaths"]').style.display, "block");
+});
+
+test("image-path selected actions dispatch without dropping mixed-selection UIDs", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const target = card(0, "right-click-text", false, "text");
+  const selectedUids = ["text-first", "image-second", "text-third", "image-fourth"];
+  const calls = [];
+  const state = { rowIndex: 0, uid: target.dataset.uid };
+  const click = (slot) => {
+    const button = m.querySelector('[data-context-slot="' + slot + '"]');
+    button.dataset.contextAction = slot;
+    return menu.handleContextMenuClick(m, state, {
+      target: { closest: () => button },
+    }, (...args) => calls.push(args), null, [target], selectedUids);
+  };
+
+  click("pasteSelectedPaths");
+  assert.equal(calls[0][0], "pasteSelectedPaths");
+  assert.deepEqual(JSON.parse(calls[0][2]), selectedUids);
+  click("pasteSelectedOrderPaths");
+  assert.equal(calls[1][0], "pasteSelectedOrderPaths");
+  assert.deepEqual(JSON.parse(calls[1][2]), selectedUids);
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
