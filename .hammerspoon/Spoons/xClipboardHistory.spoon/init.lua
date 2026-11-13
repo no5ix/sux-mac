@@ -2453,7 +2453,6 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'divider', divider: true },
-  { slot: 'divider', divider: true, beforeSelectionActions: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
@@ -2483,8 +2482,9 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
     const hasVisibleBefore = visible.slice(0, index).some(value => value);
     const nextDivider = CONTEXT_MENU_ITEMS.findIndex((item, itemIndex) => itemIndex > index && item.divider === true);
     const hasVisibleAfter = visible.slice(index + 1, nextDivider < 0 ? undefined : nextDivider).some(value => value);
-    // The separator before Select is always shown when Select is visible.
-    // The final separator only appears when an image-specific item is visible.
+    // Dividers only separate visible groups. The regular divider before
+    // Select is unconditional when both groups are present; the image divider
+    // is conditional on a visible image-specific item.
     visible[index] = hasVisibleBefore && hasVisibleAfter &&
       (spec.visibleWhenImageActions !== true || imageActionsAvailable);
   }
