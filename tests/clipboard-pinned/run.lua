@@ -871,6 +871,36 @@ test("pasteSelected message resolves through the local forward declaration", fun
         "the selected record is passed to the shared paste executor")
 end)
 
+test("selected paste supports chronological and explicit selection order", function()
+    local environment = new_environment("multi-select-order")
+    environment.seed_text_day(DATE, { "A oldest", "B middle", "C newest" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local by_content = {}
+    for _, entry in ipairs(environment.t.panelState().menuData) do by_content[entry.content] = entry end
+    local uid_b = environment.t.cardUid(by_content["B middle"])
+    local uid_a = environment.t.cardUid(by_content["A oldest"])
+    local uid_c = environment.t.cardUid(by_content["C newest"])
+    local requested = hs.json.encode({ uid_b, uid_a, uid_c })
+
+    environment.t.pasteSelectedClipboardItems(requested, "selection")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid_b,
+        "selection mode begins with B")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[2]), uid_a,
+        "selection mode keeps A second")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[3]), uid_c,
+        "selection mode keeps C third")
+
+    environment.t.pasteSelectedClipboardItems(requested, "chronological")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid_a,
+        "chronological mode starts with oldest A")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[2]), uid_b,
+        "chronological mode puts B second")
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries[3]), uid_c,
+        "chronological mode ends with newest C")
+end)
+
 test("multi-selection uses stable UIDs and survives filter changes", function()
     local environment = new_environment("multi-select")
     seed_codex_day(environment)
