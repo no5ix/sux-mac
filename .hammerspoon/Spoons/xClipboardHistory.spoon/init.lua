@@ -2445,7 +2445,8 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
-    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label,
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
+      spec.slot === 'select' ? (isSelected ? '❌ Deselect' : '✅ Select') : spec.label,
     visible: spec.divider === true
       ? true
       : (spec.imageOnly !== true || isImage === true) &&
