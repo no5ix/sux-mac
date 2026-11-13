@@ -3408,10 +3408,10 @@ local function pasteAllRowsStep(position, direction, pathMode)
             hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction, pathMode) end)
             return
         end
-        wroteContent = pasteboard.setContents(text .. "\\n") ~= false
+        wroteContent = pasteboard.setContents(text .. "\n") ~= false
     elseif entry.type == "text" then
         local loaded = effectivePinnedId(entry) and hydratePinnedEntry(entry) or hydrateEntry(entry) or entry
-        wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\\n") ~= false
+        wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\n") ~= false
     else
         local image = decodeImage(entry.historyEntry or entry)
         if image then wroteContent = pasteboard.writeObjects(image) ~= false
