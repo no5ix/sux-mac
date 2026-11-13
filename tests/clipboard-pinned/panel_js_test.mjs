@@ -410,6 +410,25 @@ test("context menu: image-section divider is hidden for text records without sel
   assert.equal(dividers[1].style.display, "none", "text-only selection hides the image section divider");
 });
 
+
+test("context menu divider separates ordinary actions from Select", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const slots = m.children.map(node => node.getAttribute("data-context-slot"));
+  const firstDivider = slots.indexOf("divider");
+  const selectIndex = slots.indexOf("select");
+  assert.ok(firstDivider >= 0 && firstDivider < selectIndex,
+    "the first divider is immediately above the Select action");
+  assert.equal(slots.filter(slot => slot === "divider").length, 3,
+    "the menu keeps separate ordinary, selection, and image-section separators");
+
+  const textTarget = card(0, "select-divider-text", false, "text");
+  menu.applyContextMenuTarget(m, textTarget, false, false);
+  const dividers = m.querySelectorAll('[data-context-slot="divider"]');
+  assert.equal(dividers[0].style.display, "block", "ordinary/selection divider remains visible");
+  assert.equal(dividers[1].style.display, "block", "selection/image divider remains visible above Select group");
+  assert.equal(dividers[2].style.display, "none", "hidden image section has no trailing divider");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
