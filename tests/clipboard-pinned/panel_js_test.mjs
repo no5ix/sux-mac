@@ -200,13 +200,13 @@ const slots = (m) => m.querySelectorAll("button").map((b) => b.getAttribute("dat
 const visibleActions = (m) => m.querySelectorAll("button")
   .filter((b) => b.style.display !== "none")
   .map((b) => b.dataset.contextAction);
-const ALL_SLOTS = ["preview", "pasteAll", "pasteSelected", "select", "copy", "pastePath", "pin"];
+const ALL_SLOTS = ["preview", "pasteAll", "pasteSelected", "pasteSelectedOrder", "select", "copy", "pastePath", "pin"];
 const textMenu = (pinAction, selected = false) =>
-  ["preview", "pasteAll", ...(selected ? ["pasteSelected"] : []), "select", "copy", pinAction];
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected", "pasteSelectedOrder"] : []), "select", "copy", pinAction];
 const imageMenu = (pinAction, selected = false) =>
-  ["preview", "pasteAll", ...(selected ? ["pasteSelected"] : []), "select", "copy", "pastePath", pinAction];
+  ["preview", "pasteAll", ...(selected ? ["pasteSelected", "pasteSelectedOrder"] : []), "select", "copy", "pastePath", pinAction];
 const specActions = (pinAction, selected = false) =>
-  ["preview", "pasteAll", "pasteSelected", "select", "copy", "pastePath", pinAction];
+  ["preview", "pasteAll", "pasteSelected", "pasteSelectedOrder", "select", "copy", "pastePath", pinAction];
 
 test("context menu: every slot is built once, in the documented order", () => {
   const m = menu.buildContextMenu(new El("div"));
@@ -439,6 +439,9 @@ test("context menu: the click acts on the card that opened the menu", () => {
   menu.handleContextMenuClick(m, state, { target: selectedButton },
     bridge, () => {}, [selectedText, selectedImage], selected);
   assert.deepEqual(calls[7], ["pasteSelected", 0], "Paste All Selected does not depend on the right-clicked row");
+  const orderButton = m.querySelector('[data-context-slot="pasteSelectedOrder"]');
+  menu.handleContextMenuClick(m, state, { target: orderButton }, bridge, () => {}, [selectedText, selectedImage], selected);
+  assert.deepEqual(calls[8], ["pasteSelectedOrder", 0], "selection-order paste has a distinct bridge action");
 });
 
 test("context menu: a rebuilt list is resolved by uid, not by a stale index", () => {
