@@ -2746,8 +2746,27 @@ function handleClipboardPanelMessage(message)
                 clipboard_webview:evaluateJavaScript(
                     "if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua(" ..
                     jsStringLiteral(stateJson) .. ");",
-                    function(_, error)
-                        if error then logger.e("Unable to sync clipboard selection to WebView: " .. tostring(error)) end
+                    function(result, error)
+                        if error then
+                            -- NSError is exposed to Lua as a table. tostring()
+                            -- only prints "table: 0x...", which hides the actual
+                            -- WebKit failure and makes successful nil results
+                            -- indistinguishable from execution errors.
+                            local details = {}
+                            if type(error) == "table" then
+                                local description = error.localizedDescription or error.localizedFailureReason
+                                    or error.localizedRecoverySuggestion
+                                if description then details[#details + 1] = tostring(description) end
+                                if error.domain then details[#details + 1] = "domain=" .. tostring(error.domain) end
+                                if error.code ~= nil then details[#details + 1] = "code=" .. tostring(error.code) end
+                                if error.userInfo then details[#details + 1] = "userInfo=" .. hs.inspect(error.userInfo) end
+                            else
+                                details[#details + 1] = tostring(error)
+                            end
+                            logger.e("Unable to sync clipboard selection to WebView: " ..
+                                (#details > 0 and table.concat(details, "; ") or hs.inspect(error)) ..
+                                "; result=" .. hs.inspect(result))
+                        end
                     end
                 )
             end
