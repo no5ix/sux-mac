@@ -1605,6 +1605,35 @@ test("the context menu is resolved per card and never shared between cards", fun
     check(html:find("<footer>Tab: next result", 1, true) ~= nil, "the footer documents the sequential Tab model")
 end)
 
+test("clipboard selection toggles the same UID on and off", function()
+    local environment = new_environment("selection-toggle")
+    environment.seed_text_day(DATE, { "first selectable entry", "second selectable entry" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+
+    local entry = environment.t.panelState().menuData[1]
+    local uid = environment.t.cardUid(entry)
+    check(type(uid) == "string" and uid ~= "", "fixture entry has a stable UID")
+
+    environment.t.handleMessage({ body = { action = "toggleSelection", uid = uid } })
+    local selected = environment.t.panelState()
+    check_equal(selected.selectedCount, 1, "first toggle selects the card")
+    check(selected.selectedUids[uid] == true, "Lua records the UID as selected")
+    check_equal(#selected.selectedOrder, 1, "selection order contains the selected UID")
+    check_equal(selected.selectedOrder[1], uid, "selection order uses the same UID")
+
+    environment.t.handleMessage({ body = { action = "toggleSelection", uid = uid } })
+    local deselected = environment.t.panelState()
+    check_equal(deselected.selectedCount, 0, "second toggle deselects the same card")
+    check(deselected.selectedUids[uid] == nil, "Lua removes the UID from the selection map")
+    check_equal(#deselected.selectedOrder, 0, "deselect removes the UID from selection order")
+
+    local latestScript = STUB.state.scripts[#STUB.state.scripts] or ""
+    check(latestScript:find("applyClipboardSelectionFromLua", 1, true) ~= nil,
+        "Lua sends the resulting selection snapshot to the WebView")
+end)
+
 test("context menu actions act on the card that requested them", function()
     local environment = new_environment("context-actions")
     seed_codex_day(environment)
