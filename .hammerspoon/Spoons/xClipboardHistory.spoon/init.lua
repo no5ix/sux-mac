@@ -2450,11 +2450,12 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
   { slot: 'copy', label: '📋 Copy' },
-  { slot: 'copyPath', label: '📋🖼️ Copy Path', imageOnly: true },
+  { slot: 'copyPath', label: '🗂️ Copy Path', imageOnly: true },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'divider', divider: true },
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
+  { slot: 'pastePath', label: '🗂️ Paste Path', imageOnly: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedPaths', label: '📥🖼️ Paste All Selected', selectedImageOnly: true },
@@ -2472,7 +2473,7 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
       ? true
       : (spec.imageOnly !== true || isImage === true) &&
         (spec.selectedOnly !== true || hasSelection === true) &&
-        (spec.selectedImageOnly !== true || imageActionsAvailable)
+        (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable))
   }));
 }
 function buildContextMenu(menu) {
