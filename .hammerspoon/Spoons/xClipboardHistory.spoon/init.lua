@@ -651,6 +651,7 @@ local function pinnedRecordFields(record)
         id = record.id,
         pinnedAt = record.pinnedAt,
         sourceKey = record.sourceKey,
+        sourceId = record.sourceId,
     }
     if record.type == "text" then
         if type(record.content) == "string" then
@@ -676,6 +677,11 @@ local function pinnedMetadata(record)
     if not entry then return nil end
     entry.isPinned = true
     entry.pinnedAt = tonumber(record.pinnedAt) or entry.ts
+    -- Keep the original ordinary-history identity for selection across pin
+    -- and unpin transitions. The pin record's own ID is storage identity only.
+    if type(record.sourceId) == "string" and record.sourceId ~= "" then
+        entry.sourceId = record.sourceId
+    end
     -- The ordinary file path a pin was copied from, used only as a content
     -- identity when matching a pin back to its ordinary record.
     if type(record.sourcePath) == "string" then entry.sourcePath = record.sourcePath end
@@ -1677,8 +1683,17 @@ end
 -- record identity otherwise. The renderer and the append guard must agree, so
 -- both read this one function.
 local function cardUid(entry)
-    local pinnedId = effectivePinnedId(entry)
-    if pinnedId ~= nil then return tostring(pinnedId) end
+    -- Selection identity must survive pin/unpin. A pinned copy has its own
+    -- storage ID, but its sourceId/sourceKey identifies the same clipboard
+    -- event as the ordinary history record shown before it was pinned.
+    if entry and entry.isPinned then
+        if type(entry.sourceId) == "string" and entry.sourceId ~= "" then
+            return tostring(entry.sourceId)
+        end
+        if type(entry.sourceKey) == "string" and entry.sourceKey ~= "" then
+            return tostring(entry.sourceKey)
+        end
+    end
     return tostring(unifiedIdentity(entry))
 end
 
