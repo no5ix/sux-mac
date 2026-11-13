@@ -2725,6 +2725,69 @@ local function pasteHistoryEntryPath(index)
     end)
 end
 
+
+-- Resolve the text representation used by image-path paste actions. Text
+-- entries remain their original content; image entries become their persisted
+-- file paths. Paths are validated before the clipboard changes.
+local function clipboardEntryPathText(entry)
+    if not entry or entry.type ~= "image" then return nil end
+    local path = imageEntryPath(entry)
+    if not path or not fs.attributes(path) then return nil end
+    return path
+end
+
+local function clipboardEntryTextForPathPaste(entry)
+    if not entry then return nil, "Clipboard entry is unavailable" end
+    if entry.type == "text" then
+        local loaded = effectivePinnedId(entry) and hydratePinnedEntry(entry) or hydrateEntry(entry) or entry
+        return tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "")
+    end
+    if entry.type == "image" then
+        local path = clipboardEntryPathText(entry)
+        if not path then return nil, "An image file path is missing or unavailable" end
+        return path
+    end
+    return nil, "Unsupported clipboard entry type"
+end
+
+local function copyOrPasteImagePathEntry(index, shouldPaste)
+    local entry = index and menuData and menuData[index]
+    if not entry then
+        hs.alert.show("Unable to read this clipboard item")
+        return false
+    end
+    local text, problem = clipboardEntryTextForPathPaste(entry)
+    if not text then
+        hs.alert.show(problem)
+        return false
+    end
+    pasteboard_watcher:stop()
+    if pasteboard.setContents(text) == false then
+        pasteboard_watcher:start()
+        hs.alert.show("Unable to write clipboard text")
+        return false
+    end
+    if not shouldPaste then
+        pasteboard_watcher:start()
+        hs.alert.show("Copied to clipboard — press Cmd+V to paste")
+        return true
+    end
+    if clipboard_webview then clipboard_webview:hide() end
+    hs.timer.doAfter(0.15, function()
+        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        hs.timer.doAfter(0.35, function()
+            hs.eventtap.keyStroke({"cmd"}, "v", 0)
+            hs.timer.doAfter(0.6, function()
+                restoreNewestClipContent()
+                pasteboard_watcher:start()
+                menuData = {}
+                previousApplication = nil
+            end)
+        end)
+    end)
+    return true
+end
+
 local function updateClipboardPanel(query,kind,offset,append)
     query=tostring(query or "")
     if kind~="text" and kind~="image" and kind~="none" then kind="all" end
@@ -2868,6 +2931,14 @@ function handleClipboardPanelMessage(message)
         pasteSelectedClipboardItems(body.query, "chronological")
     elseif body.action == "pasteSelectedOrder" then
         pasteSelectedClipboardItems(body.query, "selection")
+    elseif body.action == "pasteSelectedPaths" then
+        pasteSelectedClipboardItems(body.query, "chronological", true)
+    elseif body.action == "pasteSelectedOrderPaths" then
+        pasteSelectedClipboardItems(body.query, "selection", true)
+    elseif body.action == "pasteAllFromPaths" then
+        pasteSomeWithDelimiterFromStartRow(tonumber(body.index), true)
+    elseif body.action == "copyPath" then
+        copyOrPasteImagePathEntry(tonumber(body.index), false)
     elseif body.action == "pinScope" then
         clipboardPinnedFilter=true; clipboardDateFilter=nil; allDatesFilterSelected=false
         clipboard_search=tostring(body.query or ""); clipboard_type_filter=body.kind or "all"
@@ -3308,19 +3379,28 @@ end
 
 -- Shared chronological paste engine. Its input is newest-first and it walks
 -- backward, preserving the existing range-paste timing and image behavior.
-local function pasteAllRowsStep(position, direction)
+local function pasteAllRowsStep(position, direction, pathMode)
     direction = direction or -1
     local outOfBounds = direction < 0 and position < 1 or direction > 0 and position > #(activePasteEntries or {})
     if not activePasteEntries or outOfBounds then finishPasteAll(); return end
     local entry = activePasteEntries[position]
     if not entry or (entry.type ~= "text" and entry.type ~= "image") then
-        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction) end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction, pathMode) end)
         return
     end
     local wroteContent = false
-    if entry.type == "text" then
+    if pathMode then
+        local text, problem = clipboardEntryTextForPathPaste(entry)
+        if not text then
+            logger.w("Skipping clipboard entry in image-path paste: " .. tostring(problem))
+            hs.alert.show(problem or "Unable to read clipboard entry")
+            hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction, pathMode) end)
+            return
+        end
+        wroteContent = pasteboard.setContents(text .. "\\n") ~= false
+    elseif entry.type == "text" then
         local loaded = effectivePinnedId(entry) and hydratePinnedEntry(entry) or hydrateEntry(entry) or entry
-        wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\n") ~= false
+        wroteContent = pasteboard.setContents(tostring(loaded and (loaded.data or loaded.content) or entry.data or entry.content or "") .. "\\n") ~= false
     else
         local image = decodeImage(entry.historyEntry or entry)
         if image then wroteContent = pasteboard.writeObjects(image) ~= false
@@ -3329,13 +3409,13 @@ local function pasteAllRowsStep(position, direction)
         collectgarbage("collect")
     end
     if not wroteContent then
-        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction) end)
+        hs.timer.doAfter(0.05, function() pasteAllRowsStep(position + direction, direction, pathMode) end)
         return
     end
     hs.timer.doAfter(0.15, function()
         hs.eventtap.keyStroke({"cmd"}, "v", 0)
         hs.timer.doAfter(0.4, function()
-            if entry.type == "image" then
+            if entry.type == "image" and not pathMode then
                 pasteboard.setContents("\n")
                 hs.timer.doAfter(0.15, function()
                     hs.eventtap.keyStroke({"cmd"}, "v", 0)
@@ -3351,7 +3431,7 @@ function pasteAllWithDelimiterRecursionVersion(startRow)
     pasteAllRowsStep(startRow, -1)
 end
 
-function pasteSomeWithDelimiterFromStartRow(startRow)
+function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
     if type(startRow) ~= "number" or startRow < 1 or not menuData or #menuData == 0 then
         hs.alert.show("No clipboard-history rows to paste.")
         return
@@ -3367,11 +3447,11 @@ function pasteSomeWithDelimiterFromStartRow(startRow)
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
         if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1) end)
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
     end)
 end
 
-pasteSelectedClipboardItems = function(serializedUids, orderMode)
+pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
         hs.alert.show("No clipboard-history items are selected."); return false
@@ -3409,6 +3489,15 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode)
         hs.alert.show("Some selected clipboard items are no longer available in this session.")
         return false
     end
+    if pathMode then
+        for _, entry in ipairs(entries) do
+            local _, problem = clipboardEntryTextForPathPaste(entry)
+            if problem then
+                hs.alert.show(problem)
+                return false
+            end
+        end
+    end
     activePasteEntries = entries
     selectedClipboardUids = {}
     selectedClipboardOrder = {}
@@ -3420,7 +3509,7 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode)
     hs.alert.show("Please wait for the Paste task to finish.")
     hs.timer.doAfter(0.15, function()
         if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1) end)
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
     end)
     return true
 end
