@@ -418,15 +418,14 @@ test("context menu divider separates ordinary actions from Select", () => {
   const selectIndex = slots.indexOf("select");
   assert.ok(firstDivider >= 0 && firstDivider < selectIndex,
     "the first divider is immediately above the Select action");
-  assert.equal(slots.filter(slot => slot === "divider").length, 3,
-    "the menu keeps separate ordinary, selection, and image-section separators");
+  assert.equal(slots.filter(slot => slot === "divider").length, 2,
+    "the menu has one divider above Select and one optional image-section divider");
 
   const textTarget = card(0, "select-divider-text", false, "text");
   menu.applyContextMenuTarget(m, textTarget, false, false);
   const dividers = m.querySelectorAll('[data-context-slot="divider"]');
-  assert.equal(dividers[0].style.display, "block", "ordinary/selection divider remains visible");
-  assert.equal(dividers[1].style.display, "block", "selection/image divider remains visible above Select group");
-  assert.equal(dividers[2].style.display, "none", "hidden image section has no trailing divider");
+  assert.equal(dividers[0].style.display, "block", "divider above Select remains visible");
+  assert.equal(dividers[1].style.display, "none", "hidden image section has no trailing divider");
 });
 
 // ------------------------------------------------------------------- tests --
