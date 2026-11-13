@@ -2431,42 +2431,64 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* END KEYBOARD NAVIGATION BINDING */
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
-  { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
-  { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
-  { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'select', label: '✅ Select', selectedLabel: '❌ Deselect' },
-  { slot: 'copy', label: '📋 Copy' },
-  { slot: 'pastePath', label: '🗂️ Paste path', imageOnly: true },
-  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' }
+  { slot: 'preview', label: 'Preview' },
+  { slot: 'copy', label: 'Copy' },
+  { slot: 'pin', label: 'Pin', pinnedLabel: 'Unpin' },
+  { slot: 'divider', divider: true },
+  { slot: 'pasteAll', label: 'Paste from Current to First' },
+  { slot: 'select', label: 'Select/Deselect' },
+  { slot: 'pasteSelected', label: 'Paste All Selected', selectedOnly: true },
+  { slot: 'pasteSelectedOrder', label: 'Paste All Selected in Selection Order', selectedOnly: true },
+  { slot: 'pastePath', label: 'Paste path', imageOnly: true }
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection) {
   return CONTEXT_MENU_ITEMS.map(spec => ({
-    slot: spec.slot, action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
-    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
-      spec.slot === 'select' ? (isSelected ? spec.selectedLabel : spec.label) : spec.label,
-    visible: (spec.imageOnly !== true || isImage === true) && (spec.selectedOnly !== true || hasSelection === true)
+    slot: spec.slot,
+    action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) : spec.label,
+    visible: spec.divider === true
+      ? true
+      : (spec.imageOnly !== true || isImage === true) &&
+        (spec.selectedOnly !== true || hasSelection === true)
   }));
 }
 function buildContextMenu(menu) {
   contextMenuSpec(false, false, false, false).forEach(part => {
+    if (part.slot === 'divider') {
+      const divider = document.createElement('div');
+      divider.setAttribute('data-context-slot', 'divider');
+      divider.setAttribute('role', 'separator');
+      divider.style.cssText = 'height:1px;margin:7px 8px;background:rgba(220,225,235,.28);';
+      menu.appendChild(divider);
+      return;
+    }
     const button = document.createElement('button');
-    button.type = 'button'; button.setAttribute('data-context-slot', part.slot);
-    button.dataset.contextAction = part.action; button.textContent = part.label;
-    button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;';
-    button.style.display = part.visible ? 'block' : 'none'; menu.appendChild(button);
+    button.type = 'button';
+    button.setAttribute('data-context-slot', part.slot);
+    button.dataset.contextAction = part.action;
+    button.textContent = part.label;
+    button.style.cssText = 'display:block;width:100%;padding:10px 12px;border:0;border-radius:5px;background:transparent;color:#f5f6f8;text-align:left;font:13px -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;cursor:pointer;transition:background-color .12s ease,color .12s ease;';
+    button.style.display = part.visible ? 'block' : 'none';
+    menu.appendChild(button);
   });
   return menu;
 }
 function applyContextMenuTarget(menu, item, hasSelection) {
   if (!menu || !item) return null;
-  const spec = contextMenuSpec(item.dataset.pinned === 'true', item.dataset.kind === 'image',
-    selectedClipboardUids.has(item.dataset.uid || ''), hasSelection);
+  const spec = contextMenuSpec(item.dataset.pinned === 'true',
+    item.dataset.kind === 'image',
+    selectedClipboardUids.has(item.dataset.uid || ''),
+    hasSelection);
   spec.forEach(part => {
-    const button = menu.querySelector('[data-context-slot="' + part.slot + '"]');
-    if (!button) return;
-    button.dataset.contextAction = part.action; button.textContent = part.label;
-    button.style.display = part.visible ? 'block' : 'none';
+    const node = menu.querySelector('[data-context-slot="' + part.slot + '"]');
+    if (!node) return;
+    if (part.slot === 'divider') {
+      node.style.display = part.visible ? 'block' : 'none';
+      return;
+    }
+    node.dataset.contextAction = part.action;
+    node.textContent = part.label;
+    node.style.display = part.visible ? 'block' : 'none';
   });
   return spec;
 }
@@ -2477,7 +2499,8 @@ function openContextMenu(menu, state, item, point, hasSelection) {
   item.dataset.selected = String(selectedClipboardUids.has(state.uid || ''));
   applyContextMenuTarget(menu, item, hasSelection);
   menu.style.display = 'block';
-  const menuWidth = Math.min(460, window.innerWidth - 16), menuHeight = menu.offsetHeight || 64;
+  const menuWidth = Math.min(460, window.innerWidth - 16);
+  const menuHeight = menu.offsetHeight || 64;
   menu.style.left = Math.max(8, Math.min(point.x, window.innerWidth - menuWidth - 8)) + 'px';
   menu.style.top = Math.max(8, Math.min(point.y, window.innerHeight - menuHeight - 8)) + 'px';
   return state;
@@ -2489,9 +2512,13 @@ function findContextRow(state, items) {
 function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items, selectedUids) {
   const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
   if (!button) return false;
-  const action = button.dataset.contextAction; menu.style.display = 'none';
+  const action = button.dataset.contextAction;
+  menu.style.display = 'none';
   if (action === 'pasteSelected' || action === 'pasteSelectedOrder') {
-    if (selectedUids && selectedUids.length) bridge(action === 'pasteSelected' ? 'pasteSelected' : 'pasteSelectedOrder', 0, JSON.stringify(selectedUids));
+    if (selectedUids && selectedUids.length) {
+      bridge(action === 'pasteSelected' ? 'pasteSelected' : 'pasteSelectedOrder',
+        0, JSON.stringify(selectedUids));
+    }
     return true;
   }
   const target = findContextRow(state, items);
@@ -2501,18 +2528,19 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   else if (action === 'select' || action === 'deselect') {
     const uid = target.dataset.uid || '';
     if (uid) {
-      if (action === 'select') {
-        if (!selectedClipboardUids.has(uid)) { selectedClipboardUids.add(uid); selectedClipboardOrder.push(uid); }
-      } else {
+      if (selectedClipboardUids.has(uid)) {
         selectedClipboardUids.delete(uid);
         const orderIndex = selectedClipboardOrder.indexOf(uid);
         if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
+      } else {
+        selectedClipboardUids.add(uid);
+        selectedClipboardOrder.push(uid);
       }
       syncClipboardMultiSelection();
-      bridge(action === 'select' ? 'selectItem' : 'deselectItem', rowIndex, '', '', '', uid);
+      bridge(selectedClipboardUids.has(uid) ? 'selectItem' : 'deselectItem',
+        rowIndex, '', '', '', uid);
     }
-  }
-  else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
+  } else if (action === 'copy') bridge('copyHistoryEntry', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
   else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
   else if (action === 'preview' && openManualPreview) openManualPreview(target);
@@ -2533,6 +2561,21 @@ function syncClipboardMultiSelection() {
 window.resetMultiSelection = syncClipboardMultiSelection;
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
+// Keep hover feedback on the actual persistent menu buttons. Delegation also
+// covers buttons whose labels/actions change when the menu is reopened.
+contextMenu.addEventListener('mouseover', event => {
+  const button = event.target.closest && event.target.closest('button[data-context-slot]');
+  if (!button || !contextMenu.contains(button)) return;
+  button.style.background = '#3a4250';
+  button.style.color = '#ffffff';
+});
+contextMenu.addEventListener('mouseout', event => {
+  const button = event.target.closest && event.target.closest('button[data-context-slot]');
+  const related = event.relatedTarget;
+  if (!button || (related && button.contains(related))) return;
+  button.style.background = 'transparent';
+  button.style.color = '#f5f6f8';
+});
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 document.body.appendChild(contextMenu);
 const contextState = { rowIndex: -1, uid: null };
