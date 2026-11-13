@@ -385,6 +385,28 @@ test("image-specific context menu restores Paste Path and pairs regular/image ac
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrderPaths"]').style.display, "block");
 });
 
+
+test("context menu: image-section divider is hidden for text records without selected images", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const textTarget = card(0, "divider-text", false, "text");
+  const imageTarget = card(1, "divider-image", false, "image");
+
+  menu.applyContextMenuTarget(m, textTarget, false, false);
+  const dividers = m.querySelectorAll('[data-context-slot="divider"]');
+  assert.equal(dividers.length, 2, "both divider slots are stable");
+  assert.equal(dividers[0].style.display, "block", "the regular divider remains");
+  assert.equal(dividers[1].style.display, "none", "the hidden image section has no orphan divider");
+
+  menu.applyContextMenuTarget(m, imageTarget, false, false);
+  assert.equal(dividers[1].style.display, "block", "an image target exposes the image section divider");
+
+  menu.applyContextMenuTarget(m, textTarget, true, true);
+  assert.equal(dividers[1].style.display, "block", "selected image actions expose their section divider");
+
+  menu.applyContextMenuTarget(m, textTarget, true, false);
+  assert.equal(dividers[1].style.display, "none", "text-only selection hides the image section divider");
+});
+
 // ------------------------------------------------------------------- tests --
 
 const results = [];
