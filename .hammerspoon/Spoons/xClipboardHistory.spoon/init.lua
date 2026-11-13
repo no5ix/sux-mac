@@ -3455,6 +3455,16 @@ function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
     for index = startRow, 1, -1 do
         if menuData[index] then activePasteEntries[#activePasteEntries + 1] = menuData[index] end
     end
+    if pathMode then
+        for _, entry in ipairs(activePasteEntries) do
+            local text, problem = clipboardEntryTextForPathPaste(entry)
+            if not text then
+                activePasteEntries = nil
+                hs.alert.show(problem or "Unable to resolve a clipboard item")
+                return
+            end
+        end
+    end
     hs.alert.show("Please wait for the Paste task to finish.")
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
@@ -3504,9 +3514,9 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     end
     if pathMode then
         for _, entry in ipairs(entries) do
-            local _, problem = clipboardEntryTextForPathPaste(entry)
-            if problem then
-                hs.alert.show(problem)
+            local text, problem = clipboardEntryTextForPathPaste(entry)
+            if not text then
+                hs.alert.show(problem or "Unable to resolve a selected clipboard item")
                 return false
             end
         end
