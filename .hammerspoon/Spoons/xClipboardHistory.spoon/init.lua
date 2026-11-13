@@ -2465,16 +2465,28 @@ const CONTEXT_MENU_ITEMS = [
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
   const imageActionsAvailable = isImage === true || hasSelectedImage === true;
-  return CONTEXT_MENU_ITEMS.map(spec => ({
+  const visible = CONTEXT_MENU_ITEMS.map(spec => {
+    if (spec.divider === true) return true;
+    return (spec.imageOnly !== true || isImage === true) &&
+      (spec.selectedOnly !== true || hasSelection === true) &&
+      (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable));
+  });
+  // A divider is visible only when there is a visible action after it and
+  // another visible menu item before it. This prevents orphan separators
+  // when the image-only section is hidden for a text record.
+  for (let index = 0; index < CONTEXT_MENU_ITEMS.length; index += 1) {
+    if (CONTEXT_MENU_ITEMS[index].divider !== true) continue;
+    const hasVisibleBefore = visible.slice(0, index).some(value => value);
+    const hasVisibleAfter = visible.slice(index + 1).some((value, offset) =>
+      value && !CONTEXT_MENU_ITEMS.slice(index + 1, index + 2 + offset).some(item => item.divider === true));
+    visible[index] = hasVisibleBefore && hasVisibleAfter;
+  }
+  return CONTEXT_MENU_ITEMS.map((spec, index) => ({
     slot: spec.slot,
     action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
-      spec.slot === 'select' ? (isSelected ? spec.deselectLabel : spec.label) : spec.label,
-    visible: spec.divider === true
-      ? true
-      : (spec.imageOnly !== true || isImage === true) &&
-        (spec.selectedOnly !== true || hasSelection === true) &&
-        (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable))
+      spec.slot === 'select' ? (isSelected ? (spec.deselectLabel || '❌ Deselect') : spec.label) : spec.label,
+    visible: visible[index]
   }));
 }
 function buildContextMenu(menu) {
