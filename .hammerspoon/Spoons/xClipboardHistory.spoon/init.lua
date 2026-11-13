@@ -2449,17 +2449,18 @@ document.addEventListener('keydown', handleClipboardPanelKeydown);
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
-  { slot: 'copy', label: '📋 Copy' },
-  { slot: 'copyPath', label: '🗂️ Copy Path', imageOnly: true },
-  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
-  { slot: 'divider', divider: true },
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
-  { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
-  { slot: 'pastePath', label: '🗂️ Paste Path', imageOnly: true },
+  { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
+  { slot: 'copy', label: '📋 Copy' },
+  { slot: 'divider', divider: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
-  { slot: 'pasteSelectedPaths', label: '📥🖼️ Paste All Selected', selectedImageOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
+  { slot: 'divider', divider: true },
+  { slot: 'pastePath', label: '🖼️ Paste Path', imageOnly: true },
+  { slot: 'copyPath', label: '📋🖼️ Copy Path', imageOnly: true },
+  { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
+  { slot: 'pasteSelectedPaths', label: '📥🖼️ Paste All Selected', selectedImageOnly: true },
   { slot: 'pasteSelectedOrderPaths', label: '🔢🖼️ Paste All Selected in Selection Order', selectedImageOnly: true },
 ];
 function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
