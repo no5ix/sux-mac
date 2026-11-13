@@ -690,6 +690,16 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
   assert.ok(panelScript.includes("search.addEventListener('input'"), "typing in search stays native");
   assert.ok(!/data-context-action=/.test(panelScript),
     "menu buttons must not be keyed by the mutable payload attribute");
+  const scriptOpen = source.indexOf("<script>");
+  const scriptClose = source.indexOf("</script>", scriptOpen);
+  const rightClickListener = source.indexOf("document.addEventListener('contextmenu'", scriptOpen);
+  const contextMenuSetup = source.indexOf("const contextMenu = document.createElement('div');", scriptOpen);
+  assert.ok(rightClickListener > scriptOpen && rightClickListener < scriptClose,
+    "the right-click listener must stay inside the executable panel script");
+  assert.ok(contextMenuSetup > scriptOpen && contextMenuSetup < scriptClose,
+    "the custom context menu must be created inside the executable panel script");
+  assert.ok(source.indexOf("/* BEGIN CONTEXT MENU MODEL") < scriptClose,
+    "the tested context-menu model must remain inside the panel script");
   assert.ok(!panelScript.includes('Click to paste'), "cards no longer render Click to paste labels");
   assert.ok(panelScript.includes("Paste from Oldest to Current"), "the old range-paste action has the concise label");
   assert.ok(panelScript.includes("✅ Paste All Selected"), "the selected paste action has the required label");
