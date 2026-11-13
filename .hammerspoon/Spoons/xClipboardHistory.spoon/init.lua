@@ -3593,6 +3593,34 @@ pkg.__test = {
     invalidatePinnedIndex = invalidatePinnedIndex,
     effectivePinnedId = effectivePinnedId,
     cardUid = cardUid,
+    selectedClipboardUids = selectedClipboardUids,
+    pasteSelectedClipboardItems = pasteSelectedClipboardItems,
+    resolveSelectedClipboardEntries = function(serializedUids)
+        local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
+        if not ok or type(requested) ~= "table" then return nil end
+        local wanted, entries, seen = {}, {}, {}
+        for _, uid in ipairs(requested) do
+            if type(uid) == "string" and uid ~= "" then wanted[uid] = true end
+        end
+        local candidates = {}
+        for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
+        for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
+        for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
+        for _, entry in ipairs(candidates) do
+            local uid = cardUid(entry)
+            if wanted[uid] and not seen[uid] then entries[#entries + 1] = entry; seen[uid] = true end
+        end
+        local expected = 0
+        for _ in pairs(wanted) do expected = expected + 1 end
+        if expected == 0 or #entries ~= expected then return nil end
+        table.sort(entries, function(left, right)
+            local lt = tonumber(left.rowTs or left.ts) or 0
+            local rt = tonumber(right.rowTs or right.ts) or 0
+            if lt ~= rt then return lt < rt end
+            return cardUid(left) < cardUid(right)
+        end)
+        return entries
+    end,
     openAllPanelPage = openAllPanelPage,
     extendAllStream = extendAllStream,
     resetAllStreamState = resetAllStreamState,
