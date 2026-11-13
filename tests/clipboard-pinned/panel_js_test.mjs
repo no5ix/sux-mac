@@ -710,6 +710,15 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the WebView initializes the Set used by selection and context-menu code");
   assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;"),
     "the WebView accepts authoritative selection state from Lua after select/deselect");
+  const deselectClickStart = panelScript.indexOf("else if (action === 'select' || action === 'deselect')");
+  const deselectClickEnd = panelScript.indexOf("else if (action === 'copy')", deselectClickStart);
+  const deselectClickHandler = panelScript.slice(deselectClickStart, deselectClickEnd);
+  assert.ok(deselectClickHandler.includes("bridge(action === 'select' ? 'selectItem' : 'deselectItem'"),
+    "selection actions must be sent to Lua");
+  assert.ok(!deselectClickHandler.includes("selectedClipboardUids.delete(uid)"),
+    "the WebView must not optimistically mutate selection before Lua responds");
+  assert.ok(!deselectClickHandler.includes("syncClipboardMultiSelection()"),
+    "selection indicators are repainted only after the Lua response");
   assert.ok(/body\.action === "selectItem" or body\.action === "deselectItem"[\s\S]*?selectedClipboardUids\[requestedUid\] = nil/.test(source),
     "Lua must remove the UID from its authoritative selection on deselect");
   const selectionHandlerStart = source.indexOf('elseif body.action == "selectItem" or body.action == "deselectItem" then');
