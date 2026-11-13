@@ -2618,6 +2618,7 @@ function syncClipboardMultiSelection() {
     }
   });
 }
+window.syncClipboardMultiSelection = syncClipboardMultiSelection;
 window.resetMultiSelection = syncClipboardMultiSelection;
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
@@ -2932,15 +2933,10 @@ local function updateClipboardPanel(query,kind,offset,append)
     if query=="" and clipboardDateFilter then
         visibleCount=persistentHistoryCount(clipboardDateFilter,kind)
     end
-    -- Re-render the current Lua selection instead of clearing it. Refreshes
-    -- caused by pin/unpin can reorder/replace card DOM nodes, but selected UIDs
-    -- remain valid and their checkmarks must survive the rebuild.
-    local selectedStateJson = json.encode({
-        selected = selectedClipboardUids,
-        order = selectedClipboardOrder
-    }) or "{}"
-    js=js.."if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua("..
-        jsStringLiteral(selectedStateJson)..");"..
+    -- The WebView's selectedClipboardUids Set survives an innerHTML rebuild.
+    -- Reapply it to the newly created card nodes after rendering; do not reset
+    -- the Set or the keyboard selection state during a pin/unpin refresh.
+    js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
         "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
