@@ -2452,11 +2452,11 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'copy', label: '📋 Copy' },
-  { slot: 'divider', divider: true },
+  { slot: 'divider-before-select', divider: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
-  { slot: 'divider', divider: true, visibleWhenImageActions: true },
+  { slot: 'divider-before-images', divider: true, visibleWhenImageActions: true },
   { slot: 'pastePath', label: '🖼️ Paste Path', imageOnly: true },
   { slot: 'copyPath', label: '📋🖼️ Copy Path', imageOnly: true },
   { slot: 'pasteAllPaths', label: '🧴🖼️ Paste from Current to First', imageOnly: true },
@@ -2498,9 +2498,9 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
 }
 function buildContextMenu(menu) {
   contextMenuSpec(false, false, false, false).forEach(part => {
-    if (part.slot === 'divider') {
+    if (part.divider === true) {
       const divider = document.createElement('div');
-      divider.setAttribute('data-context-slot', 'divider');
+      divider.setAttribute('data-context-slot', part.slot);
       divider.setAttribute('role', 'separator');
       divider.style.cssText = 'height:1px;margin:7px 8px;background:rgba(220,225,235,.28);';
       menu.appendChild(divider);
