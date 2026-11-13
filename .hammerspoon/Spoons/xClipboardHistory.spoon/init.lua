@@ -2455,6 +2455,20 @@ function syncClipboardMultiSelection() {
     } else if (!selected && mark) mark.remove();
   });
 }
+function applyClipboardSelectionFromLua(serializedSelection) {
+  let selected;
+  try { selected = JSON.parse(serializedSelection || '{}'); } catch (_) { selected = {}; }
+  selectedClipboardUids.clear();
+  selectedClipboardOrder.length = 0;
+  Object.keys(selected).forEach(uid => {
+    if (selected[uid]) {
+      selectedClipboardUids.add(uid);
+      selectedClipboardOrder.push(uid);
+    }
+  });
+  syncClipboardMultiSelection();
+}
+window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;
 window.resetMultiSelection = syncClipboardMultiSelection;
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
@@ -2706,27 +2720,31 @@ function handleClipboardPanelMessage(message)
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
     elseif body.action == "selectItem" or body.action == "deselectItem" then
+        -- The WebView sends a stable UID for both operations. Do not require
+        -- the selected record to be present in current menuData: filters,
+        -- pinned scopes, search results, and pagination can replace that list.
         local requestedUid = tostring(body.uid or "")
         if requestedUid ~= "" then
-            local found
-            for _, entry in ipairs(menuData or {}) do
-                if cardUid(entry) == requestedUid then found = true; break end
+            if body.action == "selectItem" then
+                if not selectedClipboardUids[requestedUid] then
+                    selectedClipboardUids[requestedUid] = true
+                    selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
+                end
+            else
+                selectedClipboardUids[requestedUid] = nil
+                for index = #selectedClipboardOrder, 1, -1 do
+                    if selectedClipboardOrder[index] == requestedUid then
+                        table.remove(selectedClipboardOrder, index)
+                    end
+                end
             end
-            if found then
-                if body.action == "selectItem" then
-                    if not selectedClipboardUids[requestedUid] then
-                        selectedClipboardUids[requestedUid] = true
-                        selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
-                    end
-                else
-                    selectedClipboardUids[requestedUid] = nil
-                    for index = #selectedClipboardOrder, 1, -1 do
-                        if selectedClipboardOrder[index] == requestedUid then table.remove(selectedClipboardOrder, index); break end
-                    end
-                end
-                if clipboard_webview then
-                    clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
-                end
+            -- Rebuild card indicators from Lua's authoritative state.
+            if clipboard_webview then
+                local selectedJson = json.encode(selectedClipboardUids) or "{}"
+                clipboard_webview:evaluateJavaScript(
+                    "if(window.applyClipboardSelectionFromLua)window.applyClipboardSelectionFromLua(" ..
+                    jsStringLiteral(selectedJson) .. ");"
+                )
             end
         end
     elseif body.action == "pasteSelected" then
