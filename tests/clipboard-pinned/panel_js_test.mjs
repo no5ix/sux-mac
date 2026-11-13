@@ -304,20 +304,27 @@ test("multi-selection binding adds and removes lower-left checkmarks by stable U
   assert.equal(cards[1].querySelector(".multi-select-mark").textContent, "✓");
 });
 
-test("context menu: selection action and selected-paste visibility track the target", () => {
+test("context menu: label reflects whether the right-clicked item is selected", () => {
   const m = menu.buildContextMenu(new El("div"));
   const uid = "item-to-select";
   const ordinary = card(0, uid, false, "text");
-  menu.openContextMenu(m, { rowIndex: -1, uid: null }, ordinary, { x: 10, y: 10 }, false);
-  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
-  assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "none");
-  ordinary.dataset.selected = "true";
-  menu.applyContextMenuTarget(m, ordinary, true);
+
+  // A right-click on an unselected item must offer Select, regardless of
+  // whether a different card is already part of the multi-selection.
+  menu.selectedClipboardUids.add("some-other-item");
+  menu.openContextMenu(m, { rowIndex: -1, uid: null }, ordinary, { x: 10, y: 10 }, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "✅ Select");
   assert.ok(visibleActions(m).includes("pasteSelected"));
-  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Deselect");
-  ordinary.dataset.selected = "false";
+
+  // Selecting this exact item changes the same menu action to Deselect.
+  menu.selectedClipboardUids.add(uid);
   menu.applyContextMenuTarget(m, ordinary, true);
-  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "Select");
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "❌ Deselect");
+
+  // Removing only this UID restores Select, even while another item remains selected.
+  menu.selectedClipboardUids.delete(uid);
+  menu.applyContextMenuTarget(m, ordinary, true);
+  assert.equal(m.querySelector('[data-context-slot="select"]').textContent, "✅ Select");
 });
 
 test("context menu: opening a pinned menu does not change the next ordinary menu", () => {
