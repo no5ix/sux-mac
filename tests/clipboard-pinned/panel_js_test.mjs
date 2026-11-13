@@ -325,6 +325,9 @@ test("image-path context actions dispatch Copy Path and preserve path mode in ba
   assert.ok(modelSource.includes("action === 'copyPath'") &&
     modelSource.includes("bridge('copyPath', rowIndex, '')"),
     "Copy Path must dispatch its own action to Lua");
+  assert.ok(modelSource.includes("action === 'pasteAllPaths'") &&
+    modelSource.includes("bridge('pasteAllFromPaths', rowIndex, '')"),
+    "Paste from Current to First image variant must dispatch its range action");
   assert.ok(source.includes('elseif body.action == "copyPath"') &&
     source.includes("copyOrPasteImagePathEntry(tonumber(body.index), false)"),
     "Lua must handle Copy Path and write the resolved path to the pasteboard");
@@ -335,6 +338,8 @@ test("image-path context actions dispatch Copy Path and preserve path mode in ba
   assert.ok(engine.includes("local function pasteAllRowsStep(position, direction, pathMode)"));
   assert.ok(!/pasteAllRowsStep\\(position \\+ direction, direction\\)/.test(engine),
     "no recursive batch step may drop pathMode");
+  assert.ok(engine.includes("pasteAllRowsStep(position + direction, direction, pathMode)"),
+    "every next-item callback keeps pathMode");
   const recursiveSteps = engine.match(/pasteAllRowsStep\\(position \\+ direction, direction, pathMode\\)/g) || [];
   assert.ok(recursiveSteps.length >= 4,
     "pathMode must flow through each retry and delayed next-item callback");
