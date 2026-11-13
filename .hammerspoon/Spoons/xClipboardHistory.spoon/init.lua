@@ -2453,6 +2453,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'divider', divider: true },
+  { slot: 'divider', divider: true, beforeSelectionActions: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
   { slot: 'pasteSelected', label: '📥 Paste All Selected', selectedOnly: true },
   { slot: 'pasteSelectedOrder', label: '🔢 Paste All Selected in Selection Order', selectedOnly: true },
@@ -2477,11 +2478,15 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
   // another visible menu item before it. This prevents orphan separators
   // when the image-only section is hidden for a text record.
   for (let index = 0; index < CONTEXT_MENU_ITEMS.length; index += 1) {
-    if (CONTEXT_MENU_ITEMS[index].divider !== true) continue;
+    const spec = CONTEXT_MENU_ITEMS[index];
+    if (spec.divider !== true) continue;
     const hasVisibleBefore = visible.slice(0, index).some(value => value);
-    const hasVisibleAfter = visible.slice(index + 1).some((value, offset) =>
-      value && !CONTEXT_MENU_ITEMS.slice(index + 1, index + 2 + offset).some(item => item.divider === true));
-    visible[index] = hasVisibleBefore && hasVisibleAfter;
+    const nextDivider = CONTEXT_MENU_ITEMS.findIndex((item, itemIndex) => itemIndex > index && item.divider === true);
+    const hasVisibleAfter = visible.slice(index + 1, nextDivider < 0 ? undefined : nextDivider).some(value => value);
+    // The separator before Select is always shown when Select is visible.
+    // The final separator only appears when an image-specific item is visible.
+    visible[index] = hasVisibleBefore && hasVisibleAfter &&
+      (spec.visibleWhenImageActions !== true || imageActionsAvailable);
   }
   return CONTEXT_MENU_ITEMS.map((spec, index) => ({
     slot: spec.slot,
