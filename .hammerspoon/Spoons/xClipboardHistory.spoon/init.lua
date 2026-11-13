@@ -2465,14 +2465,6 @@ function applyClipboardSelectionFromLua(serializedState) {
     if (!selectedClipboardOrder.includes(uid)) selectedClipboardOrder.push(uid);
   });
   syncClipboardMultiSelection();
-  // Keep the context menu correct even when the same card is right-clicked
-  // repeatedly without rebuilding the list.
-  if (contextState.uid) {
-    const contextItem = rows().find(item => item.dataset.uid === contextState.uid);
-    if (contextItem) {
-      applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0);
-    }
-  }
 }
 window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;
 window.resetMultiSelection = syncClipboardMultiSelection;
@@ -2481,6 +2473,13 @@ contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
 contextMenu.style.cssText = 'display:none;position:fixed;z-index:9999;min-width:320px;max-width:460px;padding:5px;background:#252932;border:1px solid #555d6b;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);';
 document.body.appendChild(contextMenu);
 const contextState = { rowIndex: -1, uid: null };
+window.applyClipboardSelectionFromLua = function(serializedState) {
+  applyClipboardSelectionFromLua(serializedState);
+  if (contextState.uid) {
+    const contextItem = rows().find(item => item.dataset.uid === contextState.uid);
+    if (contextItem) applyContextMenuTarget(contextMenu, contextItem, selectedClipboardUids.size > 0);
+  }
+};
 document.addEventListener('contextmenu', event => {
   const item = event.target.closest ? event.target.closest('.item') : null;
   if (!item) return;
