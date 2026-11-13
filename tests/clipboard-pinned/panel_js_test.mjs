@@ -710,22 +710,21 @@ test("navigation: one keydown path drives Tab, other keys keep their handlers", 
     "the WebView initializes the Set used by selection and context-menu code");
   assert.ok(panelScript.includes("window.applyClipboardSelectionFromLua = applyClipboardSelectionFromLua;"),
     "the WebView accepts authoritative selection state from Lua after select/deselect");
-  const deselectClickStart = panelScript.indexOf("else if (action === 'select' || action === 'deselect')");
-  const deselectClickEnd = panelScript.indexOf("else if (action === 'copy')", deselectClickStart);
-  const deselectClickHandler = panelScript.slice(deselectClickStart, deselectClickEnd);
-  assert.ok(deselectClickHandler.includes("bridge(action === 'select' ? 'selectItem' : 'deselectItem'"),
-    "selection actions must be sent to Lua");
-  assert.ok(!deselectClickHandler.includes("selectedClipboardUids.delete(uid)"),
-    "the WebView must not optimistically mutate selection before Lua responds");
-  assert.ok(!deselectClickHandler.includes("syncClipboardMultiSelection()"),
-    "selection indicators are repainted only after the Lua response");
-  assert.ok(/body\.action === "selectItem" or body\.action === "deselectItem"[\s\S]*?selectedClipboardUids\[requestedUid\] = nil/.test(source),
-    "Lua must remove the UID from its authoritative selection on deselect");
-  const selectionHandlerStart = source.indexOf('elseif body.action == "selectItem" or body.action == "deselectItem" then');
-  const selectionHandlerEnd = source.indexOf('elseif body.action == "pasteSelected" then', selectionHandlerStart);
-  const selectionHandler = source.slice(selectionHandlerStart, selectionHandlerEnd);
-  assert.ok(!selectionHandler.includes("for _, entry in ipairs(menuData"),
-    "deselect must not depend on the UID being in the current filtered menuData");
+  const toggleClickStart = panelScript.indexOf("else if (action === 'toggleSelection')");
+  const toggleClickEnd = panelScript.indexOf("else if (action === 'copy')", toggleClickStart);
+  const toggleClickHandler = panelScript.slice(toggleClickStart, toggleClickEnd);
+  assert.ok(toggleClickHandler.includes("bridge('toggleSelection'"),
+    "selection changes must use one atomic UID toggle action");
+  assert.ok(!toggleClickHandler.includes("selectedClipboardUids.delete(uid)"),
+    "the WebView must not optimistically change selection before Lua responds");
+  assert.ok(panelScript.includes("{ slot: 'toggleSelection', label: '✅ Select', selectedLabel: '❌ Deselect' }"),
+    "the one toggle action still presents Select and Deselect labels");
+  assert.ok(panelScript.includes("const order = Array.isArray(state && state.order) ? state.order : Object.keys(selected);"),
+    "Lua sends both authoritative selection membership and explicit ordering");
+  assert.ok(source.includes('elseif body.action == "toggleSelection" then'),
+    "Lua handles the atomic toggle action");
+  assert.ok(source.includes("local state = { selected = selectedClipboardUids, order = selectedClipboardOrder }"),
+    "Lua returns a single authoritative selection snapshot");
   assert.ok(panelScript.includes("if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"),
     "ordinary list refreshes must preserve and re-render the current selection");
   assert.ok(!panelScript.includes("if(window.resetMultiSelection)window.resetMultiSelection();\".."),
