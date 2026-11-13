@@ -411,21 +411,29 @@ test("context menu: image-section divider is hidden for text records without sel
 });
 
 
-test("context menu divider separates ordinary actions from Select", () => {
+test("context menu separators have unique slots and independent visibility", () => {
   const m = menu.buildContextMenu(new El("div"));
   const slots = m.children.map(node => node.getAttribute("data-context-slot"));
-  const firstDivider = slots.indexOf("divider");
+  const selectDivider = slots.indexOf("divider-before-select");
+  const imageDivider = slots.indexOf("divider-before-images");
   const selectIndex = slots.indexOf("select");
-  assert.ok(firstDivider >= 0 && firstDivider < selectIndex,
+  assert.ok(selectDivider >= 0 && selectDivider < selectIndex,
     "the first divider is immediately above the Select action");
-  assert.equal(slots.filter(slot => slot === "divider").length, 2,
-    "the menu has one divider above Select and one optional image-section divider");
+  assert.ok(imageDivider > selectIndex,
+    "the image-section divider follows the selection actions");
+  assert.notEqual(selectDivider, imageDivider,
+    "each divider has a distinct slot identity");
 
   const textTarget = card(0, "select-divider-text", false, "text");
   menu.applyContextMenuTarget(m, textTarget, false, false);
-  const dividers = m.querySelectorAll('[data-context-slot="divider"]');
-  assert.equal(dividers[0].style.display, "block", "divider above Select remains visible");
-  assert.equal(dividers[1].style.display, "none", "hidden image section has no trailing divider");
+  assert.equal(m.querySelector('[data-context-slot="divider-before-select"]').style.display, "block",
+    "divider above Select remains visible");
+  assert.equal(m.querySelector('[data-context-slot="divider-before-images"]').style.display, "none",
+    "hidden image section has no trailing divider");
+
+  menu.applyContextMenuTarget(m, card(1, "select-divider-image", false, "image"), false, false);
+  assert.equal(m.querySelector('[data-context-slot="divider-before-images"]').style.display, "block",
+    "image section divider appears for an image record");
 });
 
 // ------------------------------------------------------------------- tests --
