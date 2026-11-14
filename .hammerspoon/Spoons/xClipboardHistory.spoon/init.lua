@@ -2335,23 +2335,6 @@ function navClamp(index, count) {
   if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return 0;
   return Math.min(index, count - 1);
 }
-function navTransition(state, uids, forward) {
-  const count = uids.length;
-  const remembered = navClamp(state.lastCardIndex, count);
-  const out = { navIndex: state.navIndex, lastCardIndex: remembered, uid: null, target: 'search' };
-  if (state.navIndex < 0) {
-    if (forward && count > 0) {
-      out.navIndex = remembered; out.lastCardIndex = remembered; out.uid = uids[remembered]; out.target = 'card';
-    }
-    return out;
-  }
-  const next = forward ? state.navIndex + 1 : state.navIndex - 1;
-  if (next < 0 || next >= count) {
-    out.navIndex = -1; out.uid = null; out.target = 'search'; return out;
-  }
-  out.navIndex = next; out.lastCardIndex = next; out.uid = uids[next]; out.target = 'card';
-  return out;
-}
 function navReconcile(state, uids) {
   const count = uids.length;
   const navIndex = typeof state.navIndex === 'number' ? state.navIndex : -1;
@@ -2366,31 +2349,65 @@ function navReconcile(state, uids) {
 }
 /* END KEYBOARD NAVIGATION MODEL */
 /* BEGIN KEYBOARD NAVIGATION BINDING */
-const navState = { navIndex: -1, lastCardIndex: -1, uid: null };
+const navState = { navIndex: -1, lastCardIndex: -1, uid: null, area: 'search', filterIndex: 0, lastFilterIndex: 0 };
+const filterButtons = () => Array.from(document.querySelectorAll('.filter-button'));
 function cardUids() {
   return rows().map((node, position) => node.dataset.uid || ('idx:' + (node.dataset.index || position)));
 }
-function navMove(forward) {
-  const next = navTransition(navState, cardUids(), forward);
-  Object.assign(navState, next);
-  const scrollX = window.scrollX, scrollY = window.scrollY;
-  if (next.target === 'search') {
-    clearRowSelection();
-    search.focus({ preventScroll: true });
-    if (search.setSelectionRange) {
-      try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {}
-    }
-  } else {
-    const item = rows()[next.navIndex];
-    if (item) {
-      selectRow(next.navIndex, true);
-      item.focus({ preventScroll: true });
-    } else {
-      clearRowSelection();
-      search.focus({ preventScroll: true });
-    }
+function setFilterFocus(index) {
+  const filters = filterButtons();
+  if (!filters.length) { search.focus({ preventScroll: true }); navState.area = 'search'; return; }
+  navState.filterIndex = Math.max(0, Math.min(filters.length - 1, index));
+  navState.lastFilterIndex = navState.filterIndex;
+  navState.area = 'filters';
+  filters[navState.filterIndex].focus({ preventScroll: true });
+}
+function focusSearch() {
+  navState.area = 'search';
+  clearRowSelection();
+  search.focus({ preventScroll: true });
+  if (search.setSelectionRange) {
+    try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {}
   }
-  window.scrollTo(scrollX, scrollY);
+}
+function focusHistory(index) {
+  const items = rows();
+  if (!items.length) {
+    navState.area = 'history';
+    clearRowSelection();
+    resultsPanel.focus({ preventScroll: true });
+    return;
+  }
+  selectedIndex = Math.max(0, Math.min(items.length - 1, index));
+  navState.navIndex = selectedIndex;
+  navState.lastCardIndex = selectedIndex;
+  navState.uid = cardUids()[selectedIndex] || null;
+  navState.area = 'history';
+  selectRow(selectedIndex, true);
+  items[selectedIndex].focus({ preventScroll: true });
+}
+function navMove(forward) {
+  const next = navReconcile(navState, cardUids());
+  Object.assign(navState, next);
+  if (navState.area === 'search') {
+    if (forward) setFilterFocus(0);
+    return;
+  }
+  if (navState.area === 'filters') {
+    if (forward) focusHistory(navState.lastCardIndex >= 0 ? navState.lastCardIndex : 0);
+    else focusSearch();
+    return;
+  }
+  const nextIndex = forward ? navState.navIndex + 1 : navState.navIndex - 1;
+  if (nextIndex < 0) {
+    // Shift+Tab from the first history item returns to the filter area.
+    setFilterFocus(navState.lastFilterIndex);
+  } else if (nextIndex >= rows().length) {
+    // Keep the existing end-of-results wrap back to search.
+    focusSearch();
+  } else {
+    focusHistory(nextIndex);
+  }
 }
 window.resetClipboardSelection = () => {
   selectedIndex = 0;
@@ -2398,12 +2415,16 @@ window.resetClipboardSelection = () => {
   Object.assign(navState, navReconcile(navState, cardUids()));
 };
 function isClipboardPanelKeyboardTarget(target) {
-  return target === document.body || target === resultsPanel ||
-    target === search || Boolean(target && target.classList && target.classList.contains('item') && resultsPanel.contains(target));
+  return target === document.body || target === resultsPanel || target === search ||
+    Boolean(target && target.classList && target.classList.contains('item') && resultsPanel.contains(target)) ||
+    Boolean(target && target.classList && target.classList.contains('filter-button'));
 }
 function handleClipboardPanelKeydown(event) {
   const key = event.key;
   const target = event.target;
+  const isFilter = Boolean(target && target.classList && target.classList.contains('filter-button'));
+  const isCard = Boolean(target && target.classList && target.classList.contains('item') && resultsPanel.contains(target));
+  const filters = filterButtons();
 
   // Escape first closes transient UI, then clears a search, then closes panel.
   if (key === 'Escape') {
@@ -2412,12 +2433,12 @@ function handleClipboardPanelKeydown(event) {
       contextMenu.style.display = 'none';
       return;
     }
-    if (target === search && search.value !== '') return; // search's own handler clears it
+    if (target === search && search.value !== '') return;
     if (search.value !== '') {
       event.preventDefault();
       search.value = '';
       applyFilters();
-      search.focus({ preventScroll: true });
+      focusSearch();
       return;
     }
     event.preventDefault();
@@ -2434,13 +2455,53 @@ function handleClipboardPanelKeydown(event) {
     return;
   }
 
-  // Arrow keys navigate the result grid from either the grid, a focused card,
-  // or the search field. In the search field, horizontal arrows retain their
-  // normal text-cursor behavior.
-  if (target === search && (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'Home' || key === 'End')) return;
+  if (target === search && key === 'ArrowDown') {
+    event.preventDefault();
+    setFilterFocus(0);
+    return;
+  }
+
+  if (isFilter) {
+    const filterIndex = filters.indexOf(target);
+    if (filterIndex >= 0) {
+      navState.area = 'filters';
+      navState.filterIndex = filterIndex;
+      navState.lastFilterIndex = filterIndex;
+    }
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+      event.preventDefault();
+      setFilterFocus((filterIndex >= 0 ? filterIndex : navState.filterIndex) + (key === 'ArrowRight' ? 1 : -1));
+      return;
+    }
+    if (key === 'ArrowUp') {
+      event.preventDefault();
+      focusSearch();
+      return;
+    }
+    if (key === 'ArrowDown') {
+      event.preventDefault();
+      focusHistory(navState.lastCardIndex >= 0 ? navState.lastCardIndex : 0);
+      return;
+    }
+    // Enter and Space retain native button activation.
+    return;
+  }
+
+  if (isCard && key === 'ArrowUp') {
+    const items = rows();
+    const current = items.indexOf(target);
+    const main = document.querySelector('main');
+    const columns = Math.max(1, Math.round((main ? main.clientWidth : 250) / 250));
+    if (current >= 0 && current < columns) {
+      event.preventDefault();
+      setFilterFocus(navState.lastFilterIndex);
+      return;
+    }
+  }
+
+  // Arrow keys from the history grid retain its existing grid geometry.
   if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(key) &&
-      (target === resultsPanel || (target && target.classList && target.classList.contains('item')) ||
-       (target === search && key === 'ArrowDown'))) {
+      (target === resultsPanel || isCard || (target === search && key === 'ArrowDown'))) {
     event.preventDefault();
     if (key === 'ArrowRight') selectRow(selectedIndex + 1, true);
     else if (key === 'ArrowLeft') selectRow(selectedIndex - 1, true);
@@ -2454,12 +2515,32 @@ function handleClipboardPanelKeydown(event) {
       navState.navIndex = selectedIndex;
       navState.lastCardIndex = selectedIndex;
       navState.uid = cardUids()[selectedIndex] || null;
+      navState.area = 'history';
       selected.focus({ preventScroll: true });
     }
     return;
   }
 }
 document.addEventListener('keydown', handleClipboardPanelKeydown);
+document.querySelector('.actions').setAttribute('role', 'toolbar');
+document.querySelector('.actions').setAttribute('aria-label', 'Clipboard history filters');
+filterButtons().forEach((button, index) => {
+  button.tabIndex = index === 0 ? 0 : -1;
+});
+document.querySelector('.actions').addEventListener('focusin', event => {
+  const index = filterButtons().indexOf(event.target);
+  if (index >= 0) {
+    navState.area = 'filters';
+    navState.filterIndex = index;
+    navState.lastFilterIndex = index;
+  }
+});
+search.addEventListener('focus', () => {
+  navState.area = 'search';
+});
+resultsPanel.addEventListener('focus', () => {
+  navState.area = 'history';
+});
 /* END KEYBOARD NAVIGATION BINDING */
 /* BEGIN CONTEXT MENU MODEL */
 const CONTEXT_MENU_ITEMS = [
