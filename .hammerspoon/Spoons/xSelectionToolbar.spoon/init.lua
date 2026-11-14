@@ -987,7 +987,7 @@ local function runChatGPTWorkflow(text, promptTemplate)
     print("[runChatGPTWorkflow] STEP 3: Scheduling 8-second paste timer...")
 
     local scheduleOk, scheduleError = pcall(function()
-        workflow.pasteTimer = timer.doAfter(8.0, function()
+        workflow.pasteTimer = timer.doAfter(5.0, function()
             workflow.pasteTimer = nil
 
             print("[runChatGPTWorkflow] STEP 4: 8-second paste timer fired")
