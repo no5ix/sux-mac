@@ -1493,8 +1493,17 @@ function obj:start()
 
                     -- Restore only if the clipboard still contains this capture's
                     -- result. Do not overwrite a newer clipboard change.
-                    if oldClipboard ~= nil and pasteboard.changeCount() == newCount then
-                        pasteboard.setContents(oldClipboard)
+                    if oldClipboard ~= nil and newCount ~= oldCount then
+                        -- Only restore if no later clipboard owner has changed
+                        -- the pasteboard since we read this capture's result.
+                        local restoreOk, restoreErr = pcall(function()
+                            if pasteboard.changeCount() == newCount then
+                                pasteboard.setContents(oldClipboard)
+                            end
+                        end)
+                        if not restoreOk then
+                            logger.e("Clipboard restoration failed: " .. tostring(restoreErr))
+                        end
                     end
                 end)
 
