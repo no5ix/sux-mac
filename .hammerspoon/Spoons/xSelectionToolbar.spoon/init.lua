@@ -8,6 +8,8 @@ local timer = require("hs.timer")
 -- Keep ChatGPT workflow timers strongly referenced until each workflow completes.
 local chatGPTWorkflowTimers = {}
 local chatGPTWorkflowSequence = 0
+-- Retain the clipboard fallback one-shot timer until it completes or the Spoon stops.
+local clipboardFallbackTimer = nil
 local json = require("hs.json")
 local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
@@ -1557,11 +1559,10 @@ function obj:start()
 
         print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
 
-        local fallbackTimer
         local callbackOk, callbackErr = pcall(function()
-            fallbackTimer = timer.doAfter(0.22, function()
+            clipboardFallbackTimer = timer.doAfter(0.22, function()
                 -- The one-shot timer has completed; release its retained handle.
-                fallbackTimer = nil
+                clipboardFallbackTimer = nil
 
                 -- Keep the capture pending while the callback owns the clipboard.
                 -- Protected execution ensures any Hammerspoon API error still
@@ -1620,9 +1621,9 @@ function obj:start()
         end)
 
         if not callbackOk then
-            if fallbackTimer then
-                fallbackTimer:stop()
-                fallbackTimer = nil
+            if clipboardFallbackTimer then
+                clipboardFallbackTimer:stop()
+                clipboardFallbackTimer = nil
             end
             pendingCapture = false
             logger.e("Failed to schedule clipboard fallback timer: " .. tostring(callbackErr))
@@ -1772,6 +1773,7 @@ function obj:start()
     return self
 end
 function obj:stop()
+    if clipboardFallbackTimer then clipboardFallbackTimer:stop(); clipboardFallbackTimer = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
