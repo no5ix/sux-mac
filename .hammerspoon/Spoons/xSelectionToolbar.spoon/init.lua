@@ -936,11 +936,16 @@ local function runChatGPTWorkflow(text, promptTemplate)
 
     -- Keep the simple, predictable workflow: open ChatGPT, wait for the page,
     -- paste the prepared prompt, then press Return one second later.
+    print("[runChatGPTWorkflow] - Opening ChatGPT in the default browser...")
     hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
-    timer.doAfter(5.0, function()
+    print("[runChatGPTWorkflow] - Opened ChatGPT in the default browser. Waiting 8 seconds for the page to load...")
+    timer.doAfter(8.0, function()
+        print("[runChatGPTWorkflow] - Pasting prompt into ChatGPT window...")
         eventtap.keyStroke({ "cmd" }, "v", 0.08)
+        print("[runChatGPTWorkflow] - Pasted prompt into ChatGPT window. Pressing Return in 1 second...")
         timer.doAfter(1.0, function()
             eventtap.keyStroke({}, "return", 0.08)
+            print("[runChatGPTWorkflow] - Pressed Return to submit the prompt to ChatGPT.")
         end)
     end)
 end
