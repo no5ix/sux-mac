@@ -1933,8 +1933,8 @@ body.keyboard-mode #search { border-color:#7da6ff; }
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
-<button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All</button>
 <button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">📍</button>
+<button class="action filter-button date-filter" data-action="dateScope" data-date-key="" aria-pressed="true">All</button>
 ]] .. (function()
     local buttons={}
     for ago=0,6 do
