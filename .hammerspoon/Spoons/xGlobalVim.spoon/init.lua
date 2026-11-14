@@ -202,23 +202,27 @@ hs.hotkey.bind({"ctrl", "shift"}, "f", function()
 end)
 
 -- forward delete a word
-hs.hotkey.bind({"ctrl", "shift"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "alt"))
-
--- select current word
-hs.hotkey.bind({"ctrl"}, "m", function()
-    hs.eventtap.keyStroke({"alt"}, "left", 0)
-    hs.eventtap.keyStroke({"alt", "shift"}, "right", 0)
-    -- hs.eventtap.keyStroke({"ctrl"}, "e", 0)
-    -- hs.eventtap.keyStroke({""}, "return", 0)
-
-    -- hs.eventtap.keyStroke({"cmd", "shift"}, "down", 0)
-    -- hs.eventtap.keyStroke({"shift"}, "down", 0)
-    -- hs.eventtap.keyStroke({"ctrl", "shift"}, "e", 0)
-    -- hs.eventtap.keyStroke({""}, "delete", 0)
-end)
+hs.hotkey.bind({"ctrl"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "alt"))
+-- delete text from the cursor to the beginning of the line.
+hs.hotkey.bind({"ctrl", "shift"}, "n", hs.fnutils.partial(fn_cb_task, "delete", "cmd"))
 
 -- backward delete a word
-hs.hotkey.bind({"ctrl", "shift"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"))
+hs.hotkey.bind({"ctrl"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "alt"))
+-- delete text from the cursor to the end of the line.
+hs.hotkey.bind({"ctrl", "shift"}, "m", hs.fnutils.partial(fn_cb_task, "forwarddelete", "cmd"))
+
+-- -- select current word
+-- hs.hotkey.bind({"ctrl", "shift"}, "m", function()
+--     hs.eventtap.keyStroke({"alt"}, "left", 0)
+--     hs.eventtap.keyStroke({"alt", "shift"}, "right", 0)
+--     -- hs.eventtap.keyStroke({"ctrl"}, "e", 0)
+--     -- hs.eventtap.keyStroke({""}, "return", 0)
+
+--     -- hs.eventtap.keyStroke({"cmd", "shift"}, "down", 0)
+--     -- hs.eventtap.keyStroke({"shift"}, "down", 0)
+--     -- hs.eventtap.keyStroke({"ctrl", "shift"}, "e", 0)
+--     -- hs.eventtap.keyStroke({""}, "delete", 0)
+-- end)
 
 hs.hotkey.bind({"ctrl"}, "h", hs.fnutils.partial(fn_cb_task, "left"))
 hs.hotkey.bind({"ctrl", "shift"}, "h",  hs.fnutils.partial(fn_cb_task, "left", "shift"))
@@ -250,20 +254,20 @@ hs.hotkey.bind({"ctrl", "shift"}, "d",  hs.fnutils.partial(fn_cb_task, "delete")
 
 ------------- 类似 vi 的键盘设置 2. 下面是特殊字符 ----------
 
--- hs.hotkey.bind({"ctrl"}, "p", hs.fnutils.partial(fn_cb_char, "&"), nil , hs.fnutils.partial(fn_cb_char, "&"))
-hs.hotkey.bind({"ctrl", "shift"}, "p",  hs.fnutils.partial(fn_cb_char, "&"))
+hs.hotkey.bind({"ctrl"}, "p",  hs.fnutils.partial(fn_cb_char, "&"))
+hs.hotkey.bind({"ctrl", "shift"}, "p",  hs.fnutils.partial(fn_cb_char, "^"))
 
-hs.hotkey.bind({"ctrl"}, "u", hs.fnutils.partial(fn_cb_char, "!"))
-hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "~"))
+hs.hotkey.bind({"ctrl"}, "u", hs.fnutils.partial(fn_cb_char, "+"))
+hs.hotkey.bind({"ctrl", "shift"}, "u",  hs.fnutils.partial(fn_cb_char, "="))
 
 hs.hotkey.bind({"ctrl"}, "y", hs.fnutils.partial(fn_cb_char, "*"))
 hs.hotkey.bind({"ctrl", "shift"}, "y",  hs.fnutils.partial(fn_cb_char, "%"))
 
-hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "_"))
-hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "-"))
+hs.hotkey.bind({"ctrl"}, ";", hs.fnutils.partial(fn_cb_char, "-"))
+hs.hotkey.bind({"ctrl", "shift"}, ";",  hs.fnutils.partial(fn_cb_char, "_"))
 
-hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "="))
-hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "+"))
+hs.hotkey.bind({"ctrl"}, "'", hs.fnutils.partial(fn_cb_char, "!"))
+hs.hotkey.bind({"ctrl", "shift"}, "'",  hs.fnutils.partial(fn_cb_char, "~"))
 
 hs.hotkey.bind({"ctrl"}, "9", hs.fnutils.partial(fn_cb_char, "["))
 hs.hotkey.bind({"ctrl", "shift"}, "9",  hs.fnutils.partial(fn_cb_char, "{"))
