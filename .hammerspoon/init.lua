@@ -134,6 +134,9 @@
 -- spoon.Seal:start()
 -- spoon.Seal:loadPlugins({"filesearch"})
 
+print("[Hammerspoon Version] - " .. hs.processInfo.version)
+
+
 
 hs.loadSpoon("xGlobalVim")
 hs.loadSpoon("xAppTriggers")

@@ -1,0 +1,8 @@
+{
+  "skills": {
+    "version": 1,
+    "enabled": [
+      "nestjs-code-audit"
+    ]
+  }
+}
