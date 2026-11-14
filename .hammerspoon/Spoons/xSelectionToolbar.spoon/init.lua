@@ -1436,38 +1436,81 @@ function obj:start()
             print("Skipping clipboard fallback for Finder")
             return end
 
+        -- Mark the fallback pending before touching the pasteboard so a second
+        -- gesture cannot start another synthetic copy while this one owns the
+        -- clipboard. Every failure path below releases the flag.
         pendingCapture = true
-        local oldClipboard = pasteboard.getContents()
-        local oldCount = pasteboard.changeCount()
-        _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
-        hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
-        print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
-        timer.doAfter(0.22, function()
-            local newCount = pasteboard.changeCount()
-            local copied = trim(pasteboard.getContents())
-            if oldClipboard ~= nil and newCount ~= oldCount then
-                pasteboard.setContents(oldClipboard)
-            end
-            pendingCapture = false
-            print("Clipboard fallback copy completed (changeCount=" .. tostring(newCount) .. ", copied length=" .. tostring(#copied) .. ")")
 
-            local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
-                and not copied:match("^file://")
-                and not copied:match("^/[^%s]+$")
-            if newCount ~= oldCount and isPlainText then
-                local axValue = selectionFromAccessibility()
-                local selection = trim(axValue ~= "" and axValue or copied)
-                if selection ~= "" and not looksLikeImagePayload(selection) then
-                    print("Clipboard fallback copy yielded valid text selection (length=" .. tostring(#selection) .. ")")
-                    showIfSelection(selection)
-                else
-                    logger.d("Clipboard fallback copy yielded no valid text selection" .. (copied ~= "" and " (copied text length=" .. tostring(#copied) .. ")" or "") .. newCount ~= oldCount and " (changeCount=" .. tostring(newCount) .. ")" or "" .. isPlainText and "" or " (not plain text)")
-                    print("looksLikeImagePayload: " .. tostring(looksLikeImagePayload(copied)))
-                end
-            else
-                logger.d("Clipboard fallback copy did not yield a valid text selection" .. (copied ~= "" and " (copied text length=" .. tostring(#copied) .. ")" or "") .. newCount ~= oldCount and " (changeCount=" .. tostring(newCount) .. ")" or "" .. isPlainText and "" or " (not plain text)")
-            end
+        local oldClipboard
+        local oldCount
+        local setupOk, setupErr = pcall(function()
+            oldClipboard = pasteboard.getContents()
+            oldCount = pasteboard.changeCount()
+            _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
+            hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
         end)
+
+        if not setupOk then
+            pendingCapture = false
+            logger.e("Clipboard fallback setup failed: " .. tostring(setupErr))
+            return
+        end
+
+        print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
+
+        local callbackOk, callbackErr = pcall(function()
+            timer.doAfter(0.22, function()
+                -- Keep the capture pending while the callback owns the clipboard.
+                -- Protected execution ensures any Hammerspoon API error still
+                -- reaches the unconditional cleanup below.
+                local ok, err = pcall(function()
+                    local newCount = pasteboard.changeCount()
+                    local copied = trim(pasteboard.getContents())
+
+                    print("Clipboard fallback copy completed (changeCount="
+                        .. tostring(newCount) .. ", copied length=" .. tostring(#copied) .. ")")
+
+                    local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
+                        and not copied:match("^file://")
+                        and not copied:match("^/[^%s]+$")
+
+                    if newCount ~= oldCount and isPlainText then
+                        local axValue = selectionFromAccessibility()
+                        local selection = trim(axValue ~= "" and axValue or copied)
+                        if selection ~= "" and not looksLikeImagePayload(selection) then
+                            print("Clipboard fallback copy yielded valid text selection (length="
+                                .. tostring(#selection) .. ")")
+                            showIfSelection(selection)
+                        else
+                            logger.d("Clipboard fallback copy yielded no valid text selection (copied length="
+                                .. tostring(#copied) .. ")")
+                        end
+                    else
+                        logger.d("Clipboard fallback copy did not yield a valid text selection (changeCount="
+                            .. tostring(newCount) .. ", copied length=" .. tostring(#copied)
+                            .. ", plainText=" .. tostring(isPlainText) .. ")")
+                    end
+
+                    -- Restore only if the clipboard still contains this capture's
+                    -- result. Do not overwrite a newer clipboard change.
+                    if oldClipboard ~= nil and pasteboard.changeCount() == newCount then
+                        pasteboard.setContents(oldClipboard)
+                    end
+                end)
+
+                pendingCapture = false
+                print("pendingCapture = FALSE")
+
+                if not ok then
+                    logger.e("Clipboard fallback callback failed: " .. tostring(err))
+                end
+            end)
+        end)
+
+        if not callbackOk then
+            pendingCapture = false
+            logger.e("Failed to schedule clipboard fallback timer: " .. tostring(callbackErr))
+        end
     end
 
 
