@@ -1557,8 +1557,12 @@ function obj:start()
 
         print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
 
+        local fallbackTimer
         local callbackOk, callbackErr = pcall(function()
-            timer.doAfter(0.22, function()
+            fallbackTimer = timer.doAfter(0.22, function()
+                -- The one-shot timer has completed; release its retained handle.
+                fallbackTimer = nil
+
                 -- Keep the capture pending while the callback owns the clipboard.
                 -- Protected execution ensures any Hammerspoon API error still
                 -- reaches the unconditional cleanup below.
@@ -1616,6 +1620,10 @@ function obj:start()
         end)
 
         if not callbackOk then
+            if fallbackTimer then
+                fallbackTimer:stop()
+                fallbackTimer = nil
+            end
             pendingCapture = false
             logger.e("Failed to schedule clipboard fallback timer: " .. tostring(callbackErr))
         end
