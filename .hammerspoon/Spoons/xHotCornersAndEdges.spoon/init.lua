@@ -13,6 +13,7 @@ pkg.edgeDeltaLong = 88 -- Delta is in pixels, area to be considered as a edge
 pkg.edgeDeltaShort = 8 -- Delta is in pixels, area to be considered as a edge
 pkg.hotEdgeDoubleHitInterval = 1388 -- ms, 毫秒内连续触碰到屏幕边缘两次视为双击热边缘, 因为hs本身的原因这个值应该不能小于1300
 pkg.isStageManagerEnabled = true  -- please turn it on when u enable stage manager, it will leave some space on the left area of the screen
+-- pkg.isStageManagerEnabled = false  -- please turn it on when u enable stage manager, it will leave some space on the left area of the screen
 
 -- Local variables
 local curTs = 0  -- ms
@@ -75,14 +76,20 @@ function winresize(how)
 		if pkg.isStageManagerEnabled then
 			newrect = { leftStartX, 0, leftWidth, 1 }  -- 这个13 / 27是窗口的宽度, 1/27是横向的起始坐标, a table {X,Y,W,H} creates a rect
 		else
-        	newrect = hs.layout.left50
 			-- hs.eventtap.keyStroke({"fn", "ctrl"}, "left", 0)  -- 不能用这个, 实测fn在hs其实并不能当做modifier, 虽然他的doc说可以
+			
+            -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift", "alt"}, "left", 0.2)  -- System Settings -> Keyboard -> Keyboard Shortcuts... -> Windows
+        	newrect = hs.layout.left50
+			-- return
 		end
     elseif how == "right" then
 		if pkg.isStageManagerEnabled then
 			newrect = { rightStartX, 0, rightWidth, 1 }
 		else
+			
+            -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift", "alt"}, "right", 0)  -- System Settings -> Keyboard -> Keyboard Shortcuts... -> Windows
 			newrect = hs.layout.right50
+			-- return
 		end
     elseif how == "up" then
         newrect = { 0, 0, 1, 0.5 }
@@ -92,7 +99,10 @@ function winresize(how)
 		if pkg.isStageManagerEnabled then
 			newrect = { leftStartX, 0, totalStageMgrAvailableScreenWidth, 1 }  
 		else
+			
+            -- hs.eventtap.keyStroke({"ctrl", "cmd", "shift", "alt"}, "up", 0)  -- System Settings -> Keyboard -> Keyboard Shortcuts... -> Windows -> General -> Fill
 			newrect = hs.layout.maximized
+			-- return
 		end
     elseif how == "left_third" or how == "hthird-0" then
         newrect = { 0, 0, 1 / 3, 1 }
@@ -465,23 +475,23 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 			-- hs.eventtap.event.newKeyEvent({"cmd"}, "]", false):post()
 		elseif gestureOrMouseClick == 'trackPadGesture' then
 			if gestureType == hs.eventtap.event.types.smartMagnify then
-				local win = hs.window.focusedWindow()
-				if win ~= nil then
-					win:moveToScreen(hs.mouse.getCurrentScreen())
-					hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
-						winresize("max")
-					end)
+				-- local win = hs.window.focusedWindow()
+				-- if win ~= nil then
+				-- 	win:moveToScreen(hs.mouse.getCurrentScreen())
+				-- 	hs.timer.doAfter(0.6, function()  -- 这个timer不可少, 不然经常窗口还没出来就执行了 winresize
+				-- 		winresize("max")
+				-- 	end)
+				-- end
+				-- return true
+			elseif gestureType == hs.eventtap.event.types.rotate then
+				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+					local win = hs.window.focusedWindow()
+					if win then
+						win:close()
+					end
 				end
 				return true
-			-- elseif gestureType == hs.eventtap.event.types.rotate then
-			-- 	if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-			-- 	elseif rotationDegreesSum < -38 then  -- Clockwise rotation
-			-- 		local win = hs.window.focusedWindow()
-			-- 		if win then
-			-- 			win:close()
-			-- 		end
-			-- 	end
-			-- 	return true
 			end
 		end
 	elseif revisedPos.y > (curFrame.h - pkg.edgeDeltaShort) and revisedPos.x < (curFrame.w / 2) and revisedPos.x > pkg.edgeDeltaLong then  -- 下左
@@ -534,14 +544,14 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 				-- end
 				-- return true
 			elseif gestureType == hs.eventtap.event.types.rotate then
-			-- 	if rotationDegreesSum > 38 then  -- counter-clockwise rotation
-			-- 	elseif rotationDegreesSum < -38 then  -- Clockwise rotation
-			-- 		local win = hs.window.focusedWindow()
-			-- 		if win then
-			-- 			win:close()
-			-- 		end
-			-- 	end
-			-- 	return true
+				if rotationDegreesSum > 38 then  -- counter-clockwise rotation
+				elseif rotationDegreesSum < -38 then  -- Clockwise rotation
+					local win = hs.window.focusedWindow()
+					if win then
+						win:close()
+					end
+				end
+				return true
 			end
 		end
 	else

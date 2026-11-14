@@ -1,8 +1,11 @@
 {
   "skills": {
-    "version": 1,
-    "enabled": [
-      "nestjs-code-audit"
+    "version": 2,
+    "disabled": [
+      {
+        "id": "sk1:g:c8cc9e807bbb24f00887",
+        "name": "nestjs-code-audit"
+      }
     ]
   }
 }
