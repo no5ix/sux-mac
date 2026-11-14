@@ -4,6 +4,10 @@ obj.__index = obj
 local pasteboard = require("hs.pasteboard")
 local webview = require("hs.webview")
 local timer = require("hs.timer")
+
+-- Keep ChatGPT workflow timers strongly referenced until each workflow completes.
+local chatGPTWorkflowTimers = {}
+local chatGPTWorkflowSequence = 0
 local json = require("hs.json")
 local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
@@ -934,20 +938,110 @@ local function runChatGPTWorkflow(text, promptTemplate)
     pasteboard.setContents(prompt)
     hideToolbar()
 
-    -- Keep the simple, predictable workflow: open ChatGPT, wait for the page,
-    -- paste the prepared prompt, then press Return one second later.
-    print("[runChatGPTWorkflow] - Opening ChatGPT in the default browser...")
-    hs.task.new("/usr/bin/open", nil, { CHATGPT_URL }):start()
-    print("[runChatGPTWorkflow] - Opened ChatGPT in the default browser. Waiting 8 seconds for the page to load...")
-    timer.doAfter(8.0, function()
-        print("[runChatGPTWorkflow] - Pasting prompt into ChatGPT window...")
-        eventtap.keyStroke({ "cmd" }, "v", 0.08)
-        print("[runChatGPTWorkflow] - Pasted prompt into ChatGPT window. Pressing Return in 1 second...")
-        timer.doAfter(1.0, function()
-            eventtap.keyStroke({}, "return", 0.08)
-            print("[runChatGPTWorkflow] - Pressed Return to submit the prompt to ChatGPT.")
+    chatGPTWorkflowSequence = chatGPTWorkflowSequence + 1
+    local workflowId = chatGPTWorkflowSequence
+    local workflow = {}
+    chatGPTWorkflowTimers[workflowId] = workflow
+
+    local function finishWorkflow()
+        -- Stop any still-pending timer before releasing the strong references.
+        if workflow.pasteTimer then
+            pcall(function() workflow.pasteTimer:stop() end)
+            workflow.pasteTimer = nil
+        end
+        if workflow.submitTimer then
+            pcall(function() workflow.submitTimer:stop() end)
+            workflow.submitTimer = nil
+        end
+        chatGPTWorkflowTimers[workflowId] = nil
+    end
+
+    local function logError(stage, err)
+        logger.e("[runChatGPTWorkflow] " .. stage .. ": " .. tostring(err))
+        print("[runChatGPTWorkflow] ERROR (" .. stage .. "): " .. tostring(err))
+        finishWorkflow()
+    end
+
+    print("[runChatGPTWorkflow] STEP 1: Opening ChatGPT in the default browser...")
+
+    local taskOk, taskOrError = pcall(function()
+        local task = hs.task.new("/usr/bin/open", nil, { CHATGPT_URL })
+        if not task then
+            error("hs.task.new returned nil")
+        end
+        local started = task:start()
+        if not started then
+            error("Failed to start /usr/bin/open")
+        end
+        return task
+    end)
+
+    if not taskOk then
+        logError("open task failed", taskOrError)
+        return
+    end
+
+    workflow.openTask = taskOrError
+    print("[runChatGPTWorkflow] STEP 2: Open task started")
+
+    print("[runChatGPTWorkflow] STEP 3: Scheduling 8-second paste timer...")
+
+    local scheduleOk, scheduleError = pcall(function()
+        workflow.pasteTimer = timer.doAfter(8.0, function()
+            workflow.pasteTimer = nil
+
+            print("[runChatGPTWorkflow] STEP 4: 8-second paste timer fired")
+
+            local pasteOk, pasteError = xpcall(function()
+                print("[runChatGPTWorkflow] STEP 5: Sending Cmd+V...")
+                eventtap.keyStroke({ "cmd" }, "v", 0.08)
+                print("[runChatGPTWorkflow] STEP 6: Cmd+V sent; scheduling Return in 1 second...")
+
+                workflow.submitTimer = timer.doAfter(1.0, function()
+                    workflow.submitTimer = nil
+
+                    local submitOk, submitError = xpcall(function()
+                        print("[runChatGPTWorkflow] STEP 7: Sending Return...")
+                        eventtap.keyStroke({}, "return", 0.08)
+                        print("[runChatGPTWorkflow] STEP 8: Return sent")
+                    end, debug.traceback)
+
+                    if not submitOk then
+                        logError("submit callback failed", submitError)
+                        return
+                    end
+
+                    finishWorkflow()
+                end)
+
+                if not workflow.submitTimer then
+                    error("Return timer creation returned nil")
+                end
+                print("[runChatGPTWorkflow] Return timer running: "
+                    .. tostring(workflow.submitTimer:running()))
+            end, debug.traceback)
+
+            if not pasteOk then
+                logError("paste callback failed", pasteError)
+            end
         end)
     end)
+
+    if not scheduleOk then
+        logError("paste timer scheduling failed", scheduleError)
+        return
+    end
+
+    if not workflow.pasteTimer then
+        logError("paste timer scheduling failed", "timer.doAfter returned nil")
+        return
+    end
+
+    print("[runChatGPTWorkflow] STEP 3A: Paste timer retained in module registry")
+    print("[runChatGPTWorkflow] Paste timer running: "
+        .. tostring(workflow.pasteTimer:running()))
+    print("[runChatGPTWorkflow] Paste timer next trigger: "
+        .. tostring(workflow.pasteTimer:nextTrigger()))
 end
 
 local function onToolbarMessage(message)
