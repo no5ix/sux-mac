@@ -274,7 +274,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
-.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}
+.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:14.67px;line-height:1}
 .separator{flex:0 0 1px;width:1px;height:24px;background:var(--toolbar-separator);margin:0 2px}
 :root,[data-appearance="light"]{--toolbar-bg:rgba(250,250,252,.98);--toolbar-fg:#202124;--toolbar-border:rgba(0,0,0,.12);--toolbar-hover:#d8dee9;--toolbar-hover-border:rgba(40,50,70,.18);--toolbar-active:#c5ccd8;--toolbar-separator:#d9dce2}
 [data-appearance="dark"]{--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}
@@ -1250,11 +1250,11 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:14px;width:100%;height:100%;padding:18px;border:0;border-radius:18px;background:rgba(250,250,252,.98);box-shadow:none!important}
-.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:20px;font-weight:700;color:#4b5563}
-.panel-count{font-size:16px;font-weight:600;color:#778092}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:12px;overflow:hidden;min-height:0;flex:1}
-.result-card{appearance:none;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;padding:14px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
+.panel{display:flex;flex-direction:column;gap:9px;width:100%;height:100%;padding:12px;border:0;border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important}
+.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:19px;font-size:13.33px;font-weight:700;color:#4b5563}
+.panel-count{font-size:10.67px;font-weight:600;color:#778092}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:8px;overflow:hidden;min-height:0;flex:1}
+.result-card{appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:0;padding:9px;border:0;border-radius:9px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
 .result-card[data-tone="blue"]{background:#dce8ff}
 .result-card[data-tone="purple"]{background:#e9defa}
 .result-card[data-tone="green"]{background:#dcefe2}
@@ -1263,14 +1263,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="purple"].is-selected,.result-card[data-tone="purple"]:hover{background:#d9c5f2}
 .result-card[data-tone="green"].is-selected,.result-card[data-tone="green"]:hover{background:#c4e3d0}
 .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#ecd8b9}
-.card-heading{display:flex;align-items:center;gap:8px;min-width:0;flex:none}
+.card-heading{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
 .card-icon{font-size:22px;line-height:1}
-.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;flex:1}
-.card-status{flex:none;font-size:13px;font-weight:600;color:#9a6b16}
-.card-preview{font-size:15px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding-right:4px;display:block}
+.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.67px;font-weight:700;flex:1}
+.card-status{flex:none;font-size:8.67px;font-weight:600;color:#9a6b16}
+.card-preview{font-size:10px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding-right:3px;display:block}
 .result-card[data-state="ready"] .card-status{color:#16834a}
 .result-card[data-state="error"] .card-status{color:#c43b3b}
-.panel-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:#788191;white-space:nowrap}
+.panel-footer{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:8px;color:#788191;white-space:nowrap}
 @media(prefers-color-scheme:dark){
  body{color:#f4f5f7}
  .panel{background:rgba(38,40,45,.98)}
@@ -1624,9 +1624,9 @@ local function showReplacementToolbar(session)
     local rows = math.max(1, math.ceil(count / 4))
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
-    -- Match the wide, four-column chooser layout while preserving screen margins.
-    local width = math.max(600, frame.w - 48)
-    local height = math.max(420, frame.h - 48)
+    -- Use 75% of the active display dimensions, keeping the panel centered.
+    local width = frame.w * 0.75
+    local height = frame.h * 0.75
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = false
     }, replacementToolbarUsercontent)
