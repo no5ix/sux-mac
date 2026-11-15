@@ -1409,7 +1409,7 @@ local function applyReplacementResult(session, id, result)
         end
 
         replacementAfter(session, 0.12, function()
-            local system = hs.axuielement.systemElement()
+            local system = hs.axuielement.systemWideElement()
             local focused = system and system:attributeValue("AXFocusedUIElement")
             local focusedRole = focused and focused:attributeValue("AXRole")
             local focusedId = focused and focused:attributeValue("AXIdentifier")
@@ -1435,7 +1435,7 @@ local function applyReplacementResult(session, id, result)
             eventtap.keyStroke({"cmd"}, "a", 0.04)
             replacementAfter(session, 0.08, function()
                 local activeApp = hs.application.frontmostApplication()
-                local activeSystem = hs.axuielement.systemElement()
+                local activeSystem = hs.axuielement.systemWideElement()
                 local activeElement = activeSystem and activeSystem:attributeValue("AXFocusedUIElement")
                 local activeRole = activeElement and activeElement:attributeValue("AXRole")
                 if not activeApp or activeApp:pid() ~= session.appPid or activeRole ~= session.originalRole then
@@ -1524,7 +1524,7 @@ local function showReplacementToolbar(session)
 end
 
 local function readFocusedEditableElement()
-    local system = hs.axuielement.systemElement()
+    local system = hs.axuielement.systemWideElement()
     local element = system and system:attributeValue("AXFocusedUIElement")
     if not element then return nil, "No focused Accessibility element" end
     local role = element:attributeValue("AXRole")
@@ -1549,7 +1549,7 @@ local function readFocusedEditableElement()
 end
 
 local function findOriginalReplacementElement(session)
-    local system = hs.axuielement.systemElement()
+    local system = hs.axuielement.systemWideElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
     if current and session.element then
         local ok, same = pcall(function() return current:isEqual(session.element) end)
@@ -1614,7 +1614,7 @@ local function focusOriginalReplacementElement(session)
 end
 
 local function replacementElementIsFocused(session)
-    local system = hs.axuielement.systemElement()
+    local system = hs.axuielement.systemWideElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
     if not current then return false end
     local app = hs.application.frontmostApplication()
@@ -2038,7 +2038,7 @@ function obj:start()
                 end
                 return nil
             end
-            local system = hs.axuielement.systemElement()
+            local system = hs.axuielement.systemWideElement()
             local focused = system and system:attributeValue("AXFocusedUIElement")
             return walk(focused)
         end)
