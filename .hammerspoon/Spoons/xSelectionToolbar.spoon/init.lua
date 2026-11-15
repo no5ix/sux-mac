@@ -1537,9 +1537,8 @@ local function readFocusedEditableElement()
         pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
         editable = settable
     end
-    -- Some browsers expose the focused contenteditable as AXGroup/AXGenericElement.
-    -- Only accept those roles when AXSelectedText is settable and the element
-    -- explicitly reports editability.
+    -- Chromium/WebKit browsers may expose a focused contenteditable element as
+    -- AXTextArea, AXTextField, AXWebArea, AXGroup, or AXGenericElement.
     if not editable and (role == "AXGroup" or role == "AXGenericElement") then
         local settable = false
         local isEditable = false
