@@ -134,7 +134,17 @@
 -- spoon.Seal:start()
 -- spoon.Seal:loadPlugins({"filesearch"})
 
-print("[Hammerspoon Version] - " .. hs.processInfo.version)
+local HsVersionCheckTimer = nil
+
+HsVersionCheckTimer = hs.timer.doAfter(3, function()
+    HsVersionCheckTimer = nil
+    if hs.processInfo.version ~= "1.0.0" then
+        hs.alert.show("There's a ERROR log!!!! Check the Hammerspoon console log!!!")
+        print("ERROR BEGINNING  ====---=======--========---=======--========---=======--========---=======--=====")
+        print("ERROR: Hammerspoon has to be 1.0.0, but the current version is " .. hs.processInfo.version .. ", otherwise all the generated panels would have a transparent title bar, such as clipboard history panel, please download from https://github.com/Hammerspoon/hammerspoon/releases?utm_source=chatgpt.com#release-1.1.0")
+        print("ERROR End  ====---=======--========---=======--========---=======--========---=======--=====")
+    end
+end)
 
 
 
