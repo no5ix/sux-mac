@@ -1623,9 +1623,9 @@ local function showReplacementToolbar(session)
     -- which makes the requested width percentage appear incorrect.
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:frame()
-    local widthRatio = frame.w < 2000 and 0.70 or 0.76
+    local widthRatio = frame.w > 1728 and 0.70 or 0.76  -- macbook pro width: 1728, extended display width: 1920
     local width = frame.w * widthRatio
-    local height = frame.h * 0.75
+    local height = frame.h * 0.70
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = true
     }, replacementToolbarUsercontent)
