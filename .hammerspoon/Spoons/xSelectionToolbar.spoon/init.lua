@@ -1618,9 +1618,11 @@ local function showReplacementToolbar(session)
     end)
     local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
     local rows = math.max(1, math.ceil(count / 4))
+    -- Use the active display's usable frame, not fullFrame(). On extended
+    -- desktops fullFrame() can describe a different aggregate coordinate space,
+    -- which makes the requested width percentage appear incorrect.
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
-    local frame = screen:fullFrame()
-    -- Use 75% of the active display dimensions, keeping the panel centered.
+    local frame = screen:frame()
     local width = frame.w * 0.76
     local height = frame.h * 0.75
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
