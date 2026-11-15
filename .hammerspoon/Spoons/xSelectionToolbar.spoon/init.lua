@@ -1240,7 +1240,7 @@ local function replacementToolbarHTML(session)
             '" data-state="pending" aria-label="' .. htmlEscape(config.label or id) .. '">' ..
             '<div class="card-heading"><span class="card-icon">' .. htmlEscape(config.icon or "") ..
             '</span><span class="card-title">' .. htmlEscape(config.label or id) ..
-            '</span><span class="card-status">Processing</span></div>' ..
+            '</span></div>' ..
             '<div class="card-preview">Generating preview…</div></button>'
     end
     local html = [[
@@ -1250,11 +1250,11 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:12px;background:rgba(226,229,234,.98);box-shadow:none!important}
-.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:20px;font-weight:700;color:#4b5563}
+.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(226,229,234,.98);box-shadow:none!important}
+.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:16px;font-weight:700;color:#4b5563}
 .panel-count{font-size:16px;font-weight:600;color:#778092}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:10px;overflow:hidden;min-height:0;flex:1}
-.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:9px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
+.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
 .result-card[data-tone="blue"]{background:#dce8ff}
 .result-card[data-tone="purple"]{background:#e9defa}
 .result-card[data-tone="green"]{background:#dcefe2}
@@ -1265,11 +1265,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#ecd8b9}
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
 .card-icon{font-size:22px;line-height:1}
-.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;flex:1}
-.card-status{flex:none;font-size:13px;font-weight:600;color:#9a6b16}
+.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700;flex:1}
+
  .card-preview{font-size:15px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
-.result-card[data-state="ready"] .card-status{color:#16834a}
-.result-card[data-state="error"] .card-status{color:#c43b3b}
+
+
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#788191;white-space:nowrap}
 @media(prefers-color-scheme:dark){
  body{color:#f4f5f7}
@@ -1288,7 +1288,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 }
 </style></head><body>
 <div class="panel">
- <div class="panel-header"><span>AI Text Replacement</span><span class="panel-count" id="ready-count">0 / ]] .. tostring(count) .. [[ ready</span></div>
+ <div class="panel-header"><span>AI Text Replacement</span></div>
  <div class="grid">]] .. table.concat(cards,"") .. [[</div>
  <div class="panel-footer"><span>← → Horizontal · ↑ ↓ Vertical · Tab Navigate · Enter / Space Paste · Esc Close</span><span id="selected-count">1 / ]] .. tostring(count) .. [[</span></div>
 </div>
@@ -1299,10 +1299,8 @@ let selectedIndex=0;
 function selectAt(index){const all=cards();if(!all.length)return;selectedIndex=(index+all.length)%all.length;all.forEach((x,i)=>x.classList.toggle('is-selected',i===selectedIndex));const el=document.getElementById('selected-count');if(el)el.textContent=(selectedIndex+1)+' / '+all.length;}
 function setState(id,state,result,error){
  const card=cards().find(x=>x.dataset.id===id);if(!card)return;card.dataset.state=state;
- const status=card.querySelector('.card-status'),preview=card.querySelector('.card-preview');
- if(status)status.textContent=state==='ready'?'Ready':state==='error'?'Error':'Processing';
- if(preview)preview.textContent=state==='ready'?(result||'Ready — empty result'):state==='error'?(error||'Request failed'):'Generating preview…';
- const ready=cards().filter(x=>x.dataset.state==='ready').length, count=document.getElementById('ready-count');if(count)count.textContent=ready+' / '+cards().length+' ready';
+ const preview=card.querySelector('.card-preview');
+ if(preview)preview.textContent=state==='ready'?(result||'No text returned'):state==='error'?(error||'Request failed'):'Generating preview…';
 }
 function renderSnapshot(snapshot){if(snapshot)Object.keys(snapshot).forEach(id=>{const x=snapshot[id];setState(id,x.status,x.result||'',x.error||'')});}
 cards().forEach((card,index)=>{
@@ -1625,7 +1623,7 @@ local function showReplacementToolbar(session)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     -- Use 75% of the active display dimensions, keeping the panel centered.
-    local width = frame.w * 0.75
+    local width = frame.w * 0.85
     local height = frame.h * 0.75
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = true
