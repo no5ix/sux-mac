@@ -26,6 +26,8 @@ local replacementSessionSequence = 0
 local replacementKeyTap = nil
 local replacementToolbar = nil
 local replacementToolbarUsercontent = nil
+-- Forward declaration: applyReplacementResult is defined before this function.
+local findOriginalReplacementElement
 -- App that owned the text selection before the floating toolbar was shown.
 local selectionOriginApp = nil
 
@@ -1241,7 +1243,7 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:transparent;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:6px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:6px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}
 button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:48px;height:48px;padding:2px;border:0;border-radius:8px;background:transparent;color:#202124;font:inherit;cursor:pointer}
 button .icon{font-size:25px;line-height:1.1}
 button .status{font-size:9px;line-height:1;color:#697386}
@@ -1614,7 +1616,7 @@ local function readFocusedEditableElement()
     return nil, "No editable focused Accessibility element (" .. table.concat(roles, ", ") .. ")"
 end
 
-local function findOriginalReplacementElement(session)
+findOriginalReplacementElement = function(session)
     local system = hs.axuielement.systemWideElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
     if current and session.element then
@@ -1624,7 +1626,9 @@ local function findOriginalReplacementElement(session)
 
     local app = hs.application.applicationForPID(session.appPid)
     if not app then return nil end
-    local axApp = app:axElement()
+    local axApp = nil
+    local appElementOk, appElement = pcall(function() return hs.axuielement.applicationElement(app) end)
+    if appElementOk then axApp = appElement end
     local windows = {}
     if session.originalWindow then windows[#windows + 1] = session.originalWindow end
     local focusedWindow = axApp and axApp:attributeValue("AXFocusedWindow")
