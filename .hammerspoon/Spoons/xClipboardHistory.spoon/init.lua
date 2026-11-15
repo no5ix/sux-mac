@@ -1706,6 +1706,7 @@ local function historyItemHTML(entry, index)
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     local metaRow = '<div class="card-meta-row">' ..
         '<input class="card-select-checkbox" type="checkbox" aria-label="Select clipboard item" data-select-uid="' .. uid .. '">' ..
+        '<span class="selection-order" aria-hidden="true"></span>' ..
         '<span class="stamp">' .. escapeHTML(stamp) .. '</span>' ..
         (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '<span class="pin-placeholder" aria-hidden="true"></span>') ..
         '</div>'
@@ -1931,13 +1932,15 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:focus-visible { outline:0; }
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
-.card-meta-row { position:relative; display:grid; grid-template-columns:24px minmax(0,1fr) 24px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
-.card-meta-row .stamp { grid-column:2; grid-row:1; justify-self:center; margin:0; text-align:center; white-space:nowrap; }
+.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) 20px; column-gap:5px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
+.card-meta-row .stamp { position:absolute; left:50%; transform:translateX(-50%); margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
 .card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
 .card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
 .card-select-checkbox:checked::after { content:""; width:7px; height:4px; border:solid #fff; border-width:0 0 2px 2px; transform:rotate(-45deg) translate(1px,-1px); }
 .card-select-checkbox:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.card-meta-row .pin-mark,.card-meta-row .pin-placeholder { grid-column:3; grid-row:1; justify-self:end; width:20px; text-align:center; }
+.card-meta-row .pin-mark,.card-meta-row .pin-placeholder { grid-column:4; grid-row:1; justify-self:end; width:20px; text-align:center; }
+.card-meta-row .selection-order { grid-column:2; grid-row:1; justify-self:start; min-width:0; color:var(--text); font-size:11px; line-height:1; white-space:nowrap; }
+.card-meta-row .selection-order:empty { display:none; }
 .card-meta-row .pin-mark { font-size:14px; line-height:1.1; }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
@@ -2775,6 +2778,10 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
         const orderIndex = selectedClipboardOrder.indexOf(uid);
         if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
       } else {
+        if (selectedClipboardUids.size >= 99) {
+          bridge('selectionLimitReached', rowIndex, '', '', '', uid);
+          return true;
+        }
         selectedClipboardUids.add(uid);
         selectedClipboardOrder.push(uid);
       }
@@ -2798,6 +2805,13 @@ function handleCardCheckboxChange(event, bridge) {
   if (!uid) return true;
   if (checkbox.checked) {
     if (!selectedClipboardUids.has(uid)) {
+      if (selectedClipboardUids.size >= 99) {
+        checkbox.checked = false;
+        bridge('selectionLimitReached', Number(item && item.dataset.index || 0), '', '', '', uid);
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+      }
       selectedClipboardUids.add(uid);
       selectedClipboardOrder.push(uid);
     }
@@ -2824,6 +2838,13 @@ function syncClipboardMultiSelection() {
     item.classList.toggle('multi-selected', selected);
     const checkbox = item.querySelector('.card-select-checkbox');
     if (checkbox) checkbox.checked = selected;
+    const orderBadge = item.querySelector('.selection-order');
+    if (orderBadge) {
+      const order = selectedClipboardOrder.indexOf(uid) + 1;
+      const digitEmoji = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+      orderBadge.textContent = order > 0 ? String(order).split('').map(digit => digitEmoji[Number(digit)]).join('') : '';
+      orderBadge.setAttribute('aria-label', order > 0 ? 'Selection order ' + order : '');
+    }
   });
 }
 window.syncClipboardMultiSelection = syncClipboardMultiSelection;
@@ -3157,6 +3178,8 @@ function handleClipboardPanelMessage(message)
     local body = message and message.body
     if type(body) ~= "table" then return end
     if body.action == "close" then closeClipboardPanel()
+    elseif body.action == "selectionLimitReached" then
+        hs.alert.show("You can select up to 99 clipboard items")
     elseif body.action == "selectItem" or body.action == "deselectItem" then
         local requestedUid = tostring(body.uid or "")
         if requestedUid ~= "" then
@@ -3167,6 +3190,10 @@ function handleClipboardPanelMessage(message)
             if found then
                 if body.action == "selectItem" then
                     if not selectedClipboardUids[requestedUid] then
+                        if #selectedClipboardOrder >= 99 then
+                            hs.alert.show("You can select up to 99 clipboard items")
+                            return
+                        end
                         selectedClipboardUids[requestedUid] = true
                         selectedClipboardOrder[#selectedClipboardOrder + 1] = requestedUid
                     end
