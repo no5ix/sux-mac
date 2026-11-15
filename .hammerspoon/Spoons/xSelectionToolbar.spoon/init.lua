@@ -1735,8 +1735,7 @@ local function startReplacementHotkey()
         return false
     end
     replacementKeyTap:enable()
-    local enabled = replacementKeyTap:isEnabled()
-    logger.i("Ctrl+V replacement hotkey registered (enabled=" .. tostring(enabled) .. ")")
+    logger.i("Ctrl+V replacement hotkey registered")
     return true
 end
 
