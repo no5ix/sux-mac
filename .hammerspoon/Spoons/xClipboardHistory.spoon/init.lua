@@ -3107,7 +3107,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     -- Reapply it to the newly created card nodes after rendering; do not reset
     -- the Set or the keyboard selection state during a pin/unpin refresh.
     js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
-        "document.querySelectorAll('.count').forEach(function(node){node.textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";");
+        "document.querySelectorAll('.count').forEach(function(node){node.textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";});"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
