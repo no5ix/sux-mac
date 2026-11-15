@@ -1549,11 +1549,19 @@ local function readFocusedEditableElement()
     end
 
     local app = hs.application.frontmostApplication()
-    local appElement = app and app:axElement() or nil
+    local appElement = nil
+    if app then
+        local appOk, value = pcall(function() return hs.axuielement.applicationElement(app) end)
+        if appOk then appElement = value end
+    end
     addCandidate(axAttribute(appElement, "AXFocusedUIElement"), "application")
 
     local focusedWindow = app and app:focusedWindow() or nil
-    local focusedWindowElement = focusedWindow and focusedWindow:axuielement() or nil
+    local focusedWindowElement = nil
+    if focusedWindow then
+        local windowOk, value = pcall(function() return hs.axuielement.windowElement(focusedWindow) end)
+        if windowOk then focusedWindowElement = value end
+    end
     addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
 
     for _, candidate in ipairs(candidates) do
