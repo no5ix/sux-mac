@@ -1323,12 +1323,29 @@ selectAt(0);
 end
 
 local function updateReplacementButton(session, id, state, result, error)
-    if not isCurrentReplacementSession(session) or not replacementToolbar then return end
-    replacementToolbar:evaluateJavaScript(
-        "window.setReplacementState && window.setReplacementState(" ..
+    if not isCurrentReplacementSession(session) then return end
+    if not replacementToolbar then
+        logger.d("[Replacement] UI not ready; cached state will be synchronized after panel load (" .. tostring(id) .. ")")
+        return
+    end
+    local script = "window.setReplacementState && window.setReplacementState(" ..
         replacementJSONString(id) .. "," .. string.format("%q", state) ..
         "," .. replacementJSONString(result or "") .. "," .. replacementJSONString(error or "") .. ");"
-    )
+    local ok, err = pcall(function() replacementToolbar:evaluateJavaScript(script) end)
+    if not ok then logger.e("[Replacement] Failed to update card " .. tostring(id) .. ": " .. tostring(err)) end
+end
+
+local function syncReplacementCards(session)
+    if not isCurrentReplacementSession(session) or not replacementToolbar or not session.results then return end
+    for id, entry in pairs(session.results) do
+        if entry.status == "ready" then
+            updateReplacementButton(session, id, "ready", entry.result or "")
+        elseif entry.status == "error" then
+            updateReplacementButton(session, id, "error", "", entry.error or "Request failed")
+        elseif entry.status == "pending" then
+            updateReplacementButton(session, id, "pending", "")
+        end
+    end
 end
 local function sendReplacementAIRequest(session, config, sourceText, settings)
     local id = tostring(config.id or "")
@@ -1541,6 +1558,10 @@ local function showReplacementToolbar(session)
     local bindings = {
         hs.hotkey.bind({}, "tab", function() moveSelection(1) end),
         hs.hotkey.bind({"shift"}, "tab", function() moveSelection(-1) end),
+        hs.hotkey.bind({}, "right", function() moveSelection(1) end),
+        hs.hotkey.bind({}, "left", function() moveSelection(-1) end),
+        hs.hotkey.bind({}, "down", function() moveSelection(2) end),
+        hs.hotkey.bind({}, "up", function() moveSelection(-2) end),
         hs.hotkey.bind({}, "space", chooseActive),
         hs.hotkey.bind({}, "return", chooseActive),
         hs.hotkey.bind({}, "escape", function()
@@ -1585,6 +1606,12 @@ local function showReplacementToolbar(session)
     replacementToolbar:frame({x=x,y=y,w=width,h=height})
     replacementToolbar:show()
     replacementToolbar:bringToFront()
+
+    -- AI requests can finish before the WebView exists, and evaluateJavaScript
+    -- can run before its document has loaded. Replay the authoritative session
+    -- cache after the page is ready instead of leaving cards stuck at "Waiting".
+    replacementAfter(session, 0.20, function() syncReplacementCards(session) end)
+    replacementAfter(session, 0.65, function() syncReplacementCards(session) end)
 end
 
 local function readFocusedEditableElement()
