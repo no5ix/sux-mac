@@ -20,6 +20,14 @@ local appearancePoll = nil
 local toolbar = nil
 local selectionWatcher = nil
 local selectedText = ""
+-- Ctrl+V replacement mode: one independent session and task per prompt.
+local replacementSession = nil
+local replacementSessionSequence = 0
+local replacementKeyTap = nil
+local replacementToolbar = nil
+local replacementToolbarUsercontent = nil
+local replacementTasks = {}
+local replacementSyntheticUntil = 0
 -- App that owned the text selection before the floating toolbar was shown.
 local selectionOriginApp = nil
 
@@ -1154,6 +1162,384 @@ local function onToolbarMessage(message)
 
     end
 end
+
+-- Replacement mode: prefetch every CUSTOM_AI_BUTTONS result concurrently,
+-- then let the user choose a cached result without waiting on the UI thread.
+local function replacementJSCall(functionName, value)
+    local encoded = json.encode({ value })
+    local literal = type(encoded) == "table" and encoded[1] or encoded or '""'
+    return "window." .. functionName .. "(" .. literal .. ");"
+end
+
+local function stopReplacementTasks(session)
+    if not session then return end
+    for _, task in pairs(session.tasks or {}) do
+        pcall(function() task:terminate() end)
+    end
+    session.tasks = {}
+end
+
+local function destroyReplacementToolbar()
+    if replacementToolbar then
+        local old = replacementToolbar
+        replacementToolbar = nil
+        pcall(function() old:delete() end)
+    end
+    replacementToolbarUsercontent = nil
+end
+
+local function closeReplacementSession(reason)
+    local session = replacementSession
+    if not session then return end
+    session.cancelled = true
+    session.closeReason = reason
+    stopReplacementTasks(session)
+    replacementSession = nil
+    destroyReplacementToolbar()
+    print("[Replacement] Session " .. tostring(session.id) .. " closed: " .. tostring(reason))
+end
+
+local function isCurrentReplacementSession(session)
+    return session ~= nil and replacementSession == session and not session.cancelled
+end
+
+local function replacementToolbarHTML(session)
+    local buttons = {}
+    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
+        local id = tostring(config.id or "")
+        local action = customActionName(config)
+        buttons[#buttons + 1] =
+            '<button type="button" class="replacement-button" data-id="' .. htmlEscape(id) ..
+            '" aria-label="' .. htmlEscape(config.label or id) .. '" title="' ..
+            htmlEscape(config.label or id) .. '">' ..
+            '<span class="icon" aria-hidden="true">' .. htmlEscape(config.icon or "") .. '</span>' ..
+            '<span class="status" aria-hidden="true">…</span></button>'
+    end
+    local html = [[
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:transparent;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:6px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:48px;height:48px;padding:2px;border:0;border-radius:8px;background:transparent;color:#202124;font:inherit;cursor:pointer}
+button .icon{font-size:25px;line-height:1.1}
+button .status{font-size:9px;line-height:1;color:#697386}
+button[data-state="pending"] .status{color:#b7791f}
+button[data-state="ready"] .status{color:#16834a}
+button[data-state="error"] .status{color:#c43b3b}
+button.is-hovered,button:focus,button:focus-visible{background:#d8dee9!important;box-shadow:inset 0 0 0 2px #7da6ff!important;outline:none}
+@media(prefers-color-scheme:dark){.bar{background:rgba(39,41,46,.98);border-color:rgba(255,255,255,.16)}button{color:#f5f6f8}button .status{color:#a4acba}button.is-hovered,button:focus,button:focus-visible{background:#454951!important}}
+</style></head><body><div class="bar">]] .. table.concat(buttons, "") .. [[</div>
+<script>
+const bridge=(action,id)=>{try{window.webkit.messageHandlers.replacementToolbar.postMessage({action,id})}catch(e){}};
+const buttons=()=>Array.from(document.querySelectorAll('.replacement-button'));
+function focusAt(i){const b=buttons();if(!b.length)return;const n=Math.max(0,Math.min(b.length-1,i));b.forEach((x,j)=>x.tabIndex=j===n?0:-1);b[n].focus()}
+function setHover(id){buttons().forEach(b=>b.classList.toggle('is-hovered',b.dataset.id===id))}
+function setState(id,state){const b=buttons().find(x=>x.dataset.id===id);if(!b)return;b.dataset.state=state;const s=b.querySelector('.status');if(s)s.textContent=state==='ready'?'✓':state==='error'?'!':'…'}
+buttons().forEach((b,i)=>{b.tabIndex=i===0?0:-1;b.dataset.state='pending';b.addEventListener('mouseenter',()=>setHover(b.dataset.id));b.addEventListener('mouseleave',()=>setHover(document.activeElement?.dataset?.id||''));b.addEventListener('focus',()=>setHover(b.dataset.id));b.addEventListener('click',()=>bridge('choose',b.dataset.id))});
+document.addEventListener('keydown',e=>{
+ const b=buttons(),i=b.indexOf(document.activeElement);
+ if(e.key==='Escape'){e.preventDefault();bridge('cancel');return}
+ if(e.key==='Tab'&&b.length){e.preventDefault();focusAt(i+(e.shiftKey?-1:1));return}
+ if((e.key===' '||e.key==='Enter')&&i>=0){e.preventDefault();bridge('choose',b[i].dataset.id)}
+});
+window.setReplacementState=(id,state)=>setState(id,state);
+window.focusFirstReplacementButton=()=>focusAt(0);
+</script></body></html>
+]]
+    return html
+end
+
+local function updateReplacementButton(session, id, state)
+    if not isCurrentReplacementSession(session) or not replacementToolbar then return end
+    replacementToolbar:evaluateJavaScript(
+        "window.setReplacementState && window.setReplacementState(" ..
+        (type(json.encode({id}) ) == "table" and json.encode({id})[1] or json.encode({id})) ..
+        "," .. string.format("%q", state) .. ");"
+    )
+end
+
+local function sendReplacementAIRequest(session, config, sourceText, settings)
+    local id = tostring(config.id or "")
+    local prompt = tostring(config.prompt or ""):gsub("{{text}}", function() return sourceText end)
+    local body = {
+        model = settings.model,
+        messages = {
+            { role = "system", content = "Follow the user's instruction precisely and return only the requested result." },
+            { role = "user", content = prompt }
+        },
+        temperature = 0.1,
+        stream = false
+    }
+    local encoded = json.encode(body)
+    if type(encoded) == "table" then encoded = encoded[1] end
+    if type(encoded) ~= "string" then
+        session.results[id].status = "error"
+        session.results[id].error = "Could not encode request"
+        return
+    end
+
+    local args = {
+        "-sS", "--max-time", "120", "-X", "POST",
+        settings.baseURL .. "/chat/completions",
+        "-H", "Content-Type: application/json",
+        "--data-binary", encoded
+    }
+    if trim(settings.apiKey) ~= "" then
+        table.insert(args, 6, "Authorization: Bearer " .. settings.apiKey)
+        table.insert(args, 6, "-H")
+    end
+
+    local task
+    task = hs.task.new("/usr/bin/curl", function(exitCode, stdOut, stdErr)
+        session.tasks[id] = nil
+        if not isCurrentReplacementSession(session) then return end
+        local entry = session.results[id]
+        if exitCode ~= 0 then
+            entry.status = "error"
+            entry.error = trim(stdErr) ~= "" and trim(stdErr) or ("curl exited " .. tostring(exitCode))
+            updateReplacementButton(session, id, "error")
+            return
+        end
+        local ok, response = pcall(function() return json.decode(stdOut or "") end)
+        local result = ok and type(response) == "table" and response.choices
+            and response.choices[1] and response.choices[1].message
+            and response.choices[1].message.content
+        if type(result) ~= "string" or trim(result) == "" then
+            entry.status = "error"
+            entry.error = ok and response and response.error and tostring(response.error.message or response.error)
+                or "Invalid or empty local AI response"
+            updateReplacementButton(session, id, "error")
+            return
+        end
+        entry.status = "ready"
+        entry.result = trim(result)
+        updateReplacementButton(session, id, "ready")
+        print("[Replacement] Cached " .. id .. " result (" .. tostring(#entry.result) .. " chars)")
+        if session.waitingFor == id then
+            -- A chosen action stays pending until its callback supplies the result.
+            session.applyWhenReady = true
+            if session.onReady then session.onReady(id, entry.result) end
+        end
+    end, args)
+
+    if not task then
+        session.results[id].status = "error"
+        session.results[id].error = "Could not create curl task"
+        updateReplacementButton(session, id, "error")
+        return
+    end
+    session.tasks[id] = task
+    if not task:start() then
+        session.tasks[id] = nil
+        session.results[id].status = "error"
+        session.results[id].error = "Could not start curl task"
+        updateReplacementButton(session, id, "error")
+    end
+end
+
+local function prefetchReplacementResults(session, sourceText)
+    local settings = loadLocalAISettings()
+    settings.baseURL = trim(settings.baseURL or DEFAULT_LOCAL_AI_SETTINGS.baseURL):gsub("/+$", "")
+    settings.apiKey = tostring(settings.apiKey or "")
+    settings.model = trim(settings.model or DEFAULT_LOCAL_AI_SETTINGS.model)
+    session.results = {}
+    session.tasks = {}
+    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
+        local id = tostring(config.id or "")
+        session.results[id] = { status = "pending", result = nil, error = nil }
+    end
+    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
+        sendReplacementAIRequest(session, config, sourceText, settings)
+    end
+end
+
+local function applyReplacementResult(session, id, result)
+    if not isCurrentReplacementSession(session) then return end
+    if session.app and session.app:isRunning() then
+        session.app:activate(true)
+    else
+        hs.alert.show("The original application is no longer running")
+        return
+    end
+    -- The initiating input gets focus back with its app. Replace its contents
+    -- only after activation; do not paste into the replacement toolbar.
+    timer.doAfter(0.18, function()
+        if not isCurrentReplacementSession(session) then return end
+        local focused = hs.axuielement.systemElement()
+        local current = focused and focused:attributeValue("AXFocusedUIElement")
+        local role = current and current:attributeValue("AXRole")
+        local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
+            or role == "AXComboBox" or role == "AXSearchField"
+        if not editable then
+            hs.alert.show("The original input field is no longer focused; result was not pasted")
+            return
+        end
+        pasteboard.setContents(result)
+        eventtap.keyStroke({"cmd"}, "a", 0.04)
+        timer.doAfter(0.06, function()
+            if not isCurrentReplacementSession(session) then return end
+            eventtap.keyStroke({"cmd"}, "v", 0.04)
+            closeReplacementSession("replacement applied")
+        end)
+    end)
+end
+
+local function chooseReplacementAction(session, id)
+    if not isCurrentReplacementSession(session) then return end
+    local entry = session.results and session.results[id]
+    if not entry then return end
+    if entry.status == "ready" then
+        applyReplacementResult(session, id, entry.result)
+    elseif entry.status == "pending" then
+        session.waitingFor = id
+        session.onReady = function(readyId, result)
+            if readyId == id and isCurrentReplacementSession(session) then
+                applyReplacementResult(session, id, result)
+            end
+        end
+        hs.alert.show("Waiting for " .. id .. "…")
+    else
+        hs.alert.show("AI request failed: " .. tostring(entry.error or "Unknown error"))
+    end
+end
+
+local function showReplacementToolbar(session)
+    destroyReplacementToolbar()
+    replacementToolbarUsercontent = webview.usercontent.new("replacementToolbar")
+    replacementToolbarUsercontent:setCallback(function(message)
+        message = normalizeMessage(message)
+        if type(message) ~= "table" then return end
+        local action = message.action
+        if action == "choose" then
+            chooseReplacementAction(session, tostring(message.id or ""))
+        elseif action == "cancel" then
+            closeReplacementSession("cancelled by user")
+            if session.app and session.app:isRunning() then session.app:activate(true) end
+        end
+    end)
+    replacementToolbar = webview.new({x=0,y=0,w=250,h=62}, {
+        javaScriptEnabled = true, privateBrowsing = true,
+        transparent = true, shadow = false
+    }, replacementToolbarUsercontent)
+    replacementToolbar:windowStyle(0)
+    replacementToolbar:transparent(true)
+    replacementToolbar:shadow(false)
+    replacementToolbar:level(hs.drawing.windowLevels.floating)
+    replacementToolbar:allowTextEntry(false)
+    replacementToolbar:html(replacementToolbarHTML(session), "file:///")
+    local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    local frame = screen:fullFrame()
+    local point = hs.mouse.absolutePosition()
+    local count = math.max(1, #(CUSTOM_AI_BUTTONS or {}))
+    local width = math.min(frame.w - 16, count * 48 + (count - 1) * 4 + 14)
+    local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
+    local y = math.max(frame.y + 8, math.min(point.y - 78, frame.y + frame.h - 70))
+    replacementToolbar:frame({x=x,y=y,w=width,h=62})
+    replacementToolbar:show()
+    replacementToolbar:bringToFront()
+    timer.doAfter(0.05, function()
+        if replacementToolbar and isCurrentReplacementSession(session) then
+            replacementToolbar:evaluateJavaScript("window.focusFirstReplacementButton && window.focusFirstReplacementButton();")
+        end
+    end)
+end
+
+local function readFocusedEditableElement()
+    local system = hs.axuielement.systemElement()
+    local element = system and system:attributeValue("AXFocusedUIElement")
+    if not element then return nil, "No focused Accessibility element" end
+    local role = element:attributeValue("AXRole")
+    local subrole = element:attributeValue("AXSubrole")
+    local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
+        or role == "AXComboBox" or role == "AXSearchField"
+    if role == "AXWebArea" then
+        local settable = element:isAttributeSettable("AXSelectedText")
+        editable = settable == true
+    end
+    if subrole == "AXSearchField" then editable = true end
+    if not editable then return nil, "Focused element is not an editable text field (" .. tostring(role) .. ")" end
+    return element
+end
+
+local function startReplacementSession()
+    if replacementSession then closeReplacementSession("superseded") end
+    local app = hs.application.frontmostApplication()
+    if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then
+        return false, "No suitable frontmost application"
+    end
+    local element, elementError = readFocusedEditableElement()
+    if not element then return false, elementError end
+
+    local originalClipboard = pasteboard.getContents()
+    local originalChangeCount = pasteboard.changeCount()
+    replacementSessionSequence = replacementSessionSequence + 1
+    local session = {
+        id = replacementSessionSequence,
+        app = app,
+        appPid = app:pid(),
+        element = element,
+        originalClipboard = originalClipboard,
+        originalChangeCount = originalChangeCount,
+        createdAt = timer.secondsSinceEpoch(),
+        cancelled = false
+    }
+    replacementSession = session
+
+    -- Mark the synthetic Cmd+C so xClipboardHistory ignores this temporary text.
+    replacementSyntheticUntil = timer.secondsSinceEpoch() + 1.2
+    _G.xSelectionToolbarSyntheticCopyUntil = replacementSyntheticUntil
+    eventtap.keyStroke({"cmd"}, "a", 0.04)
+    timer.doAfter(0.06, function()
+        if not isCurrentReplacementSession(session) then return end
+        eventtap.keyStroke({"cmd"}, "c", 0.04)
+        timer.doAfter(0.12, function()
+            if not isCurrentReplacementSession(session) then return end
+            local sourceText = trim(pasteboard.getContents())
+            local currentChangeCount = pasteboard.changeCount()
+            -- Restore the user's clipboard only if it still contains our copy.
+            if currentChangeCount ~= originalChangeCount then
+                if originalClipboard ~= nil and pasteboard.changeCount() == currentChangeCount then
+                    pasteboard.setContents(originalClipboard)
+                elseif originalClipboard == nil then
+                    pasteboard.clearContents()
+                end
+            end
+            _G.xSelectionToolbarSyntheticCopyUntil = nil
+            if sourceText == "" then
+                closeReplacementSession("empty input")
+                hs.alert.show("No text found in the focused input field")
+                return
+            end
+            session.sourceText = sourceText
+            prefetchReplacementResults(session, sourceText)
+            showReplacementToolbar(session)
+        end)
+    end)
+    return true
+end
+
+local function handleReplacementHotkey(event)
+    local keycode = event:getKeyCode()
+    local flags = event:getFlags()
+    if keycode == hs.keycodes.map.v and flags.ctrl and not flags.cmd and not flags.alt and not flags.shift then
+        local ok, started, err = pcall(startReplacementSession)
+        if ok and started then return true end
+        -- Preserve native Ctrl+V when this isn't a supported editable field.
+        if not ok then logger.e("Replacement shortcut failed: " .. tostring(started))
+        else logger.d("Replacement shortcut passed through: " .. tostring(err)) end
+        return false
+    end
+    return false
+end
+
+local function startReplacementHotkey()
+    if replacementKeyTap then replacementKeyTap:stop(); replacementKeyTap = nil end
+    replacementKeyTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, handleReplacementHotkey)
+    if replacementKeyTap then replacementKeyTap:start() end
+end
+
 local function buildToolbar(text)
     if toolbar then toolbar:delete(); toolbar = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
@@ -1301,6 +1687,7 @@ local function buildToolbar(text)
     end)
 end
 function obj:start()
+    startReplacementHotkey()
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if mouseSelectionTap then mouseSelectionTap:stop(); mouseSelectionTap = nil end
 
@@ -1774,6 +2161,8 @@ function obj:start()
     return self
 end
 function obj:stop()
+    if replacementKeyTap then replacementKeyTap:stop(); replacementKeyTap = nil end
+    if replacementSession then closeReplacementSession("Spoon stopped") end
     if clipboardFallbackTimer then clipboardFallbackTimer:stop(); clipboardFallbackTimer = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
