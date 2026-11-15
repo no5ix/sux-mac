@@ -26,7 +26,6 @@ local replacementSessionSequence = 0
 local replacementKeyTap = nil
 local replacementToolbar = nil
 local replacementToolbarUsercontent = nil
-local replacementTasks = {}
 local replacementSyntheticUntil = 0
 -- App that owned the text selection before the floating toolbar was shown.
 local selectionOriginApp = nil
@@ -1199,6 +1198,10 @@ local function closeReplacementSession(reason)
     session.cancelled = true
     session.closeReason = reason
     stopReplacementTasks(session)
+    for _, captureTimer in ipairs(session.captureTimers or {}) do
+        pcall(function() captureTimer:stop() end)
+    end
+    session.captureTimers = {}
     if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
         _G.xSelectionToolbarSyntheticCopyUntil = nil
     end
@@ -1209,6 +1212,21 @@ end
 
 local function isCurrentReplacementSession(session)
     return session ~= nil and replacementSession == session and not session.cancelled
+end
+
+local function replacementAfter(session, delay, callback)
+    local handle = timer.doAfter(delay, function()
+        for i = #(session.captureTimers or {}), 1, -1 do
+            if session.captureTimers[i] == handle then
+                table.remove(session.captureTimers, i)
+                break
+            end
+        end
+        if isCurrentReplacementSession(session) then callback() end
+    end)
+    session.captureTimers = session.captureTimers or {}
+    if handle then table.insert(session.captureTimers, handle) end
+    return handle
 end
 
 local function replacementToolbarHTML(session)
@@ -1377,28 +1395,28 @@ local function applyReplacementResult(session, id, result)
     session.app:activate(true)
     -- Reactivate the original app, then verify the original AX element is still
     -- focused. Never Cmd+A in a different field or on a whole webpage.
-    timer.doAfter(0.22, function()
-        if not isCurrentReplacementSession(session) then return end
+    replacementAfter(session, 0.22, function()
         if not replacementElementIsFocused(session) then
             session.applying = false
-            hs.alert.show("The original input field is no longer focused; result was not pasted")
+            session.waitingFor = nil
+            hs.alert.show("The original input field is no longer focused; choose again after focusing it")
             return
         end
         local oldClipboard = pasteboard.getContents()
         pasteboard.setContents(result)
         eventtap.keyStroke({"cmd"}, "a", 0.04)
-        timer.doAfter(0.08, function()
-            if not isCurrentReplacementSession(session) then return end
+        replacementAfter(session, 0.08, function()
             if not replacementElementIsFocused(session) then
                 if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) end
                 session.applying = false
-                hs.alert.show("Input focus changed; replacement cancelled")
+                session.waitingFor = nil
+                hs.alert.show("Input focus changed; choose again after focusing the original field")
                 return
             end
             eventtap.keyStroke({"cmd"}, "v", 0.04)
             -- Restore the clipboard after the paste event, only if it still
             -- holds this workflow's output. The field has already received it.
-            timer.doAfter(0.08, function()
+            replacementAfter(session, 0.08, function()
                 if pasteboard.getContents() == result and oldClipboard ~= nil then
                     pasteboard.setContents(oldClipboard)
                 end
@@ -1498,14 +1516,10 @@ local function replacementElementIsFocused(session)
     local current = system and system:attributeValue("AXFocusedUIElement")
     if not current or not session.element then return false end
     local ok, same = pcall(function() return current:isEqual(session.element) end)
-    if ok and same then return true end
-    -- Some AX wrappers do not implement stable isEqual; compare role and app PID
-    -- as a conservative fallback, never merely trusting that the app is frontmost.
-    local app = hs.application.frontmostApplication()
-    if not app or app:pid() ~= session.appPid then return false end
-    local currentRole = current:attributeValue("AXRole")
-    local originalRole = session.element:attributeValue("AXRole")
-    return currentRole == originalRole and currentRole ~= nil
+    if ok then return same == true end
+    -- If Accessibility cannot prove this is still the same input element, fail
+    -- closed rather than risking replacing text in a different field.
+    return false
 end
 
 local function startReplacementSession()
@@ -1537,26 +1551,29 @@ local function startReplacementSession()
     session.syntheticUntil = replacementSyntheticUntil
     _G.xSelectionToolbarSyntheticCopyUntil = replacementSyntheticUntil
     eventtap.keyStroke({"cmd"}, "a", 0.04)
-    timer.doAfter(0.06, function()
-        if not isCurrentReplacementSession(session) then return end
+    replacementAfter(session, 0.06, function()
+        if not replacementElementIsFocused(session) then
+            closeReplacementSession("input focus changed during capture")
+            hs.alert.show("Input focus changed; replacement cancelled")
+            return
+        end
         eventtap.keyStroke({"cmd"}, "c", 0.04)
-        timer.doAfter(0.12, function()
-            if not isCurrentReplacementSession(session) then return end
+        replacementAfter(session, 0.12, function()
             local sourceText = trim(pasteboard.getContents())
             local currentChangeCount = pasteboard.changeCount()
-            -- Restore the user's clipboard only if it still contains our copy.
+            -- Restore only if the pasteboard still contains the copied field text.
             if currentChangeCount ~= originalChangeCount then
                 if originalClipboard ~= nil and pasteboard.changeCount() == currentChangeCount then
                     pasteboard.setContents(originalClipboard)
-                elseif originalClipboard == nil then
+                elseif originalClipboard == nil and pasteboard.changeCount() == currentChangeCount then
                     pasteboard.clearContents()
                 end
             end
             if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
                 _G.xSelectionToolbarSyntheticCopyUntil = nil
             end
-            if sourceText == "" then
-                closeReplacementSession("empty input")
+            if currentChangeCount == originalChangeCount or sourceText == "" then
+                closeReplacementSession("empty or uncaptured input")
                 hs.alert.show("No text found in the focused input field")
                 return
             end
@@ -1572,6 +1589,10 @@ local function handleReplacementHotkey(event)
     local keycode = event:getKeyCode()
     local flags = event:getFlags()
     if keycode == hs.keycodes.map.v and flags.ctrl and not flags.cmd and not flags.alt and not flags.shift then
+        if replacementSession then
+            logger.d("Replacement shortcut ignored: a replacement session is already active")
+            return true
+        end
         local ok, started, err = pcall(startReplacementSession)
         if ok and started then return true end
         -- Preserve native Ctrl+V when this isn't a supported editable field.
