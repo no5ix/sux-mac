@@ -1849,7 +1849,7 @@ h1 { margin:0; font-size:17px; font-weight:650; }
 .header-clear { flex-shrink:0; }
 .count { color:var(--muted); font-size:12px; margin-left:auto; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:0; background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; box-shadow:none; }
-input:focus, input:focus-visible { border:0; outline:0; box-shadow:none; }
+input:focus, input:focus-visible { border:2px solid #7da6ff; outline:0; box-shadow:none; }
 main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
@@ -1857,7 +1857,7 @@ main:focus { outline:none; }
 /* Keep the filter groups visually separated by spacing, not a divider. */
 .filter-separator { display:none; }
 .action { border:0; border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; box-shadow:none; }
-.action:focus, .action:focus-visible { outline:0; box-shadow:none; }
+.action:hover, .action:focus, .action:focus-visible { background:var(--selected-bg); outline:0; box-shadow:none; }
 .action.primary { background:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; color:#25344a; }
 .action.danger { color:#dc2626; font-weight:700; }
@@ -3538,7 +3538,7 @@ local function createClipboardWebview()
     clipboard_usercontent = webview.usercontent.new("clipboardHistory")
     clipboard_usercontent:setCallback(handleClipboardPanelMessage)
     clipboard_webview = webview.new(
-        {x = 120, y = 80, w = 980, h = 760},
+        {x = 120, y = 80, w = 980, h = 783},
         {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
         clipboard_usercontent
     ):windowStyle({"titled", "closable", "resizable"})
