@@ -1700,16 +1700,15 @@ local function cardUid(entry)
 end
 
 local function historyItemHTML(entry, index)
-    -- Use a shared top-right indicator group so a selected pinned card shows
-    -- the selection mark immediately to the left of its pin marker.
     local pinnedId = effectivePinnedId(entry)
     local cardIsPinned = pinnedId ~= nil
     local uid = escapeHTML(cardUid(entry))
-    local indicators = '<div class="card-indicators">' ..
-        '<span class="multi-select-mark" aria-hidden="true" style="visibility:hidden">✓</span>' ..
-        (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '') ..
-        '</div>'
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
+    local metaRow = '<div class="card-meta-row">' ..
+        '<input class="card-select-checkbox" type="checkbox" aria-label="Select clipboard item" data-select-uid="' .. uid .. '">' ..
+        '<span class="stamp">' .. escapeHTML(stamp) .. '</span>' ..
+        (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '<span class="pin-placeholder" aria-hidden="true"></span>') ..
+        '</div>'
     if entry.type == "image" then
         local imageEntry = entry.historyEntry or entry
         local thumbnail = thumbnailForEntry(imageEntry)
@@ -1718,8 +1717,7 @@ local function historyItemHTML(entry, index)
             '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="' ..
             index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
-            escapeHTML(string.lower("[image] " .. stamp)) .. '">' .. indicators ..
-            '<div class="meta"><div class="stamp">' .. escapeHTML(stamp) .. '</div></div>' ..
+            escapeHTML(string.lower("[image] " .. stamp)) .. '">' .. metaRow ..
             preview .. '</div>'
     end
     -- Pinned text is stored in the record, so it hydrates like an ordinary one.
@@ -1741,8 +1739,8 @@ local function historyItemHTML(entry, index)
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
     return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' ..
         index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
-        escapeHTML(string.lower("[text] " .. stamp)) .. '">' .. indicators ..
-        '<div class="stamp">' .. escapeHTML(stamp) .. '</div><div class="text-preview">' ..
+        escapeHTML(string.lower("[text] " .. stamp)) .. '">' .. metaRow ..
+        '<div class="text-preview">' ..
         escapeHTML(previewText) .. '</div></button>'
 end
 
@@ -1933,6 +1931,11 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:focus-visible { outline:0; }
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
+.card-meta-row { position:relative; display:grid; grid-template-columns:24px minmax(0,1fr) 24px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
+.card-meta-row .stamp { grid-column:2; grid-row:1; justify-self:center; margin:0; text-align:center; white-space:nowrap; }
+.card-select-checkbox { grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; accent-color:#3478e5; cursor:pointer; z-index:2; }
+.card-meta-row .pin-mark,.card-meta-row .pin-placeholder { grid-column:3; grid-row:1; justify-self:end; width:20px; text-align:center; }
+.card-meta-row .pin-mark { font-size:14px; line-height:1.1; }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
 .image-item .preview { aspect-ratio:auto; }
@@ -1955,7 +1958,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
 .item .meta { padding-right:52px; }
 .item.multi-selected { background:var(--selected-bg); }
-.stamp { color:var(--muted); font-size:11px; margin-top:5px; }
+.stamp { color:var(--muted); font-size:11px; margin:0; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
 .empty { color:var(--muted); text-align:center; padding:40px 12px; grid-column:1/-1; }
@@ -2004,6 +2007,9 @@ const bridge = (action, index, query, kind, dateKey, uid) => {
     });
   } catch (_) {}
 };
+document.addEventListener('change', event => {
+  handleCardCheckboxChange(event, bridge);
+}, true);
 document.addEventListener('click', event => {
   const contextItem = event.target.closest('#clipboard-context-menu');
   if (contextItem) return;
@@ -2775,17 +2781,40 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   return true;
 }
 /* END CONTEXT MENU MODEL */
+function handleCardCheckboxChange(event, bridge) {
+  const checkbox = event.target.closest && event.target.closest('.card-select-checkbox');
+  if (!checkbox) return false;
+  const item = checkbox.closest('.item');
+  const uid = checkbox.dataset.selectUid || (item && item.dataset.uid) || '';
+  if (!uid) return true;
+  if (checkbox.checked) {
+    if (!selectedClipboardUids.has(uid)) {
+      selectedClipboardUids.add(uid);
+      selectedClipboardOrder.push(uid);
+    }
+  } else {
+    selectedClipboardUids.delete(uid);
+    const orderIndex = selectedClipboardOrder.indexOf(uid);
+    if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
+  }
+  syncClipboardMultiSelection();
+  if (item) {
+    const rowIndex = Number(item.dataset.index || 0);
+    bridge(selectedClipboardUids.has(uid) ? 'selectItem' : 'deselectItem',
+      rowIndex, '', '', '', uid);
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
 function syncClipboardMultiSelection() {
   rememberClipboardCardKinds();
   rows().forEach(item => {
     const uid = item.dataset.uid || '', selected = selectedClipboardUids.has(uid);
     item.dataset.selected = String(selected);
     item.classList.toggle('multi-selected', selected);
-    const mark = item.querySelector('.multi-select-mark');
-    if (mark) {
-      mark.style.visibility = selected ? 'visible' : 'hidden';
-      mark.setAttribute('aria-label', selected ? 'Selected' : 'Not selected');
-    }
+    const checkbox = item.querySelector('.card-select-checkbox');
+    if (checkbox) checkbox.checked = selected;
   });
 }
 window.syncClipboardMultiSelection = syncClipboardMultiSelection;
