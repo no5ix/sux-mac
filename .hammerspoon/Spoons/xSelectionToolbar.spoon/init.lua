@@ -1503,6 +1503,16 @@ local function readFocusedEditableElement()
         pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
         editable = settable
     end
+    -- Some browsers expose the focused contenteditable as AXGroup/AXGenericElement.
+    -- Only accept those roles when AXSelectedText is settable and the element
+    -- explicitly reports editability.
+    if not editable and (role == "AXGroup" or role == "AXGenericElement") then
+        local settable = false
+        local isEditable = false
+        pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
+        pcall(function() isEditable = element:attributeValue("AXEditable") == true end)
+        editable = settable and isEditable
+    end
     if not editable then
         return nil, "Focused element is not an editable text field (" .. tostring(role) .. ")"
     end
@@ -1527,32 +1537,39 @@ local function findOriginalReplacementElement(session)
     local mainWindow = axApp and axApp:attributeValue("AXMainWindow")
     if mainWindow then windows[#windows + 1] = mainWindow end
 
+    local function axAttribute(element, name)
+        local ok, value = pcall(function() return element:attributeValue(name) end)
+        return ok and value or nil
+    end
     local function matches(element)
         if not element then return false end
-        local role = element:attributeValue("AXRole")
-        if role ~= session.originalRole then return false end
+        if axAttribute(element, "AXRole") ~= session.originalRole then return false end
         if session.originalIdentifier then
-            return element:attributeValue("AXIdentifier") == session.originalIdentifier
+            return axAttribute(element, "AXIdentifier") == session.originalIdentifier
         end
         if session.originalTitle then
-            return element:attributeValue("AXTitle") == session.originalTitle
+            return axAttribute(element, "AXTitle") == session.originalTitle
+        end
+        if session.originalDescription then
+            return axAttribute(element, "AXDescription") == session.originalDescription
         end
         return false
     end
-    local function walk(root, depth)
-        if not root or depth > 12 then return nil end
+    local function walk(root, depth, visited)
+        if not root or depth > 12 or visited[root] then return nil end
+        visited[root] = true
         if matches(root) then return root end
-        local children = root:attributeValue("AXChildren")
+        local children = axAttribute(root, "AXChildren")
         if type(children) == "table" then
             for _, child in ipairs(children) do
-                local found = walk(child, depth + 1)
+                local found = walk(child, depth + 1, visited)
                 if found then return found end
             end
         end
         return nil
     end
     for _, window in ipairs(windows) do
-        local found = walk(window, 0)
+        local found = walk(window, 0, {})
         if found then return found end
     end
     return nil
@@ -1564,17 +1581,28 @@ local function focusOriginalReplacementElement(session)
     local ok = pcall(function()
         element:setAttributeValue("AXFocused", true)
     end)
-    if ok then return true end
-    return false
+    return ok
 end
 
 local function replacementElementIsFocused(session)
     local system = hs.axuielement.systemElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
     if not current then return false end
+    local app = hs.application.frontmostApplication()
+    if not app or app:pid() ~= session.appPid then return false end
+    local role = current:attributeValue("AXRole")
+    if role ~= session.originalRole then return false end
+    if session.originalIdentifier then
+        return current:attributeValue("AXIdentifier") == session.originalIdentifier
+    end
+    if session.originalTitle then
+        return current:attributeValue("AXTitle") == session.originalTitle
+    end
+    if session.originalDescription then
+        return current:attributeValue("AXDescription") == session.originalDescription
+    end
     local target = findOriginalReplacementElement(session)
-    if not target then return false end
-    local ok, same = pcall(function() return current:isEqual(target) end)
+    local ok, same = pcall(function() return target and current:isEqual(target) end)
     return ok and same == true
 end
 
