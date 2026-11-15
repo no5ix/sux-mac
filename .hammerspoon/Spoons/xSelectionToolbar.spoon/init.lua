@@ -1228,67 +1228,108 @@ local function replacementAfter(session, delay, callback)
 end
 
 local function replacementToolbarHTML(session)
-    local buttons = {}
-    for _, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
+    local cards = {}
+    local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
+    for index, config in ipairs(CUSTOM_AI_BUTTONS or {}) do
+        if index > 8 then break end
         local id = tostring(config.id or "")
-        local action = customActionName(config)
-        buttons[#buttons + 1] =
-            '<button type="button" class="replacement-button" data-id="' .. htmlEscape(id) ..
-            '" aria-label="' .. htmlEscape(config.label or id) .. '" title="' ..
+        cards[#cards + 1] =
+            '<button type="button" class="result-card" data-index="' .. tostring(index) ..
+            '" data-id="' .. htmlEscape(id) .. '" data-state="pending" aria-label="' ..
             htmlEscape(config.label or id) .. '">' ..
-            '<span class="icon" aria-hidden="true">' .. htmlEscape(config.icon or "") .. '</span>' ..
-            '<span class="status" aria-hidden="true">…</span></button>'
+            '<div class="card-heading"><span class="card-icon">' .. htmlEscape(config.icon or "") ..
+            '</span><span class="card-title">' .. htmlEscape(config.label or id) ..
+            '</span><span class="card-status">Waiting</span></div>' ..
+            '<div class="card-preview" id="preview-' .. htmlEscape(id) ..
+            '">Waiting for result…</div></button>'
     end
     local html = [[
 <!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:transparent;overflow:hidden}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-.bar{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:6px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}
-button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:48px;height:48px;padding:2px;border:0;border-radius:8px;background:transparent;color:#202124;font:inherit;cursor:pointer}
-button .icon{font-size:25px;line-height:1.1}
-button .status{font-size:9px;line-height:1;color:#697386}
-button[data-state="pending"] .status{color:#b7791f}
-button[data-state="waiting"] .status{color:#b7791f}
-button[data-state="waiting"] .status{animation:pulse 1s ease-in-out infinite alternate}
-@keyframes pulse{from{opacity:.45}to{opacity:1}}
-button[data-state="ready"] .status{color:#16834a}
-button[data-state="error"] .status{color:#c43b3b}
-button.is-hovered,button:focus,button:focus-visible{background:#d8dee9!important;box-shadow:inset 0 0 0 2px #7da6ff!important;outline:none}
-@media(prefers-color-scheme:dark){.bar{background:rgba(39,41,46,.98);border-color:rgba(255,255,255,.16)}button{color:#f5f6f8}button .status{color:#a4acba}button.is-hovered,button:focus,button:focus-visible{background:#454951!important}}
-</style></head><body><div class="bar">]] .. table.concat(buttons, "") .. [[</div>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
+.panel{display:flex;flex-direction:column;gap:9px;width:100%;height:100%;padding:10px;border:1px solid rgba(0,0,0,.13);border-radius:14px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}
+.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:18px;font-size:12px;font-weight:650;color:#4b5563}
+.panel-count{font-size:10px;font-weight:500;color:#778092}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(112px,1fr);gap:8px;overflow-y:auto;min-height:0;flex:1}
+.result-card{appearance:none;-webkit-appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:112px;padding:9px;border:1px solid rgba(45,55,72,.14);border-radius:10px;background:rgba(255,255,255,.78);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .1s,border-color .1s}
+.result-card.is-selected{border:2px solid #7da6ff;padding:8px;background:#edf3ff}
+.card-heading{display:flex;align-items:center;gap:5px;min-width:0}
+.card-icon{font-size:15px;line-height:1}
+.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:650;flex:1}
+.card-status{flex:none;font-size:9px;color:#9a6b16}
+.card-preview{font-size:10px;line-height:1.42;color:#495365;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.result-card[data-state="ready"] .card-status{color:#16834a}
+.result-card[data-state="error"] .card-status{color:#c43b3b}
+.result-card[data-state="pending"] .card-preview,.result-card[data-state="waiting"] .card-preview{color:#8b93a1}
+.panel-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9px;color:#788191;white-space:nowrap}
+@media(prefers-color-scheme:dark){
+ body{color:#f4f5f7}
+ .panel{background:rgba(38,40,45,.98);border-color:rgba(255,255,255,.15)}
+ .panel-header{color:#e4e7ec}.panel-count,.panel-footer{color:#a4acba}
+ .result-card{background:rgba(55,58,65,.8);border-color:rgba(255,255,255,.12);color:#f4f5f7}
+ .result-card.is-selected{background:#303d56;border-color:#82aaff}
+ .card-preview{color:#d0d5de}
+}
+</style></head><body>
+<div class="panel">
+ <div class="panel-header"><span>AI Text Replacement</span><span class="panel-count" id="ready-count">0 / ]] .. tostring(count) .. [[ ready</span></div>
+ <div class="grid">]] .. table.concat(cards,"") .. [[</div>
+ <div class="panel-footer"><span>Tab / ⇧Tab Navigate · Enter / Space Paste · Esc Close</span><span id="selected-count">1 / ]] .. tostring(count) .. [[</span></div>
+</div>
 <script>
 const bridge=(action,id)=>{try{window.webkit.messageHandlers.replacementToolbar.postMessage({action,id})}catch(e){}};
-const buttons=()=>Array.from(document.querySelectorAll('.replacement-button'));
-function focusAt(i){const b=buttons();if(!b.length)return;const n=Math.max(0,Math.min(b.length-1,i));b.forEach((x,j)=>x.tabIndex=j===n?0:-1);b[n].focus()}
-function setHover(id){buttons().forEach(b=>b.classList.toggle('is-hovered',b.dataset.id===id))}
-function activeId(){return document.activeElement?.dataset?.id||''}
-function setState(id,state){const b=buttons().find(x=>x.dataset.id===id);if(!b)return;b.dataset.state=state;const s=b.querySelector('.status');if(s)s.textContent=state==='ready'?'✓':state==='error'?'!':'…'}
-buttons().forEach((b,i)=>{b.tabIndex=i===0?0:-1;b.dataset.state='pending';b.addEventListener('mouseenter',()=>setHover(b.dataset.id));b.addEventListener('mouseleave',()=>setHover(activeId()));b.addEventListener('focus',()=>setHover(b.dataset.id));b.addEventListener('click',()=>bridge('choose',b.dataset.id))});
-document.addEventListener('keydown',e=>{
- const b=buttons(),i=b.indexOf(document.activeElement);
- if(e.key==='Escape'){e.preventDefault();bridge('cancel');return}
- if(e.key==='Tab'&&b.length){e.preventDefault();focusAt(i+(e.shiftKey?-1:1));return}
- if((e.key===' '||e.key==='Enter')&&i>=0){e.preventDefault();bridge('choose',b[i].dataset.id)}
+const cards=()=>Array.from(document.querySelectorAll('.result-card'));
+let selectedIndex=0;
+function selectAt(index){
+ const all=cards();if(!all.length)return;
+ selectedIndex=(index+all.length)%all.length;
+ all.forEach((card,i)=>card.classList.toggle('is-selected',i===selectedIndex));
+ const counter=document.getElementById('selected-count');if(counter)counter.textContent=(selectedIndex+1)+' / '+all.length;
+}
+function setState(id,state,result,error){
+ const card=cards().find(x=>x.dataset.id===id);if(!card)return;
+ card.dataset.state=state;
+ const status=card.querySelector('.card-status'),preview=card.querySelector('.card-preview');
+ if(status)status.textContent=state==='ready'?'Ready':state==='error'?'Error':state==='waiting'?'Waiting':'Processing';
+ if(preview){
+  if(state==='ready')preview.textContent=result||'Ready — no preview available';
+  else if(state==='error')preview.textContent=error||'This prompt failed. Select another result.';
+  else preview.textContent=state==='waiting'?'Waiting for this result…':'Generating preview…';
+ }
+ const ready=cards().filter(x=>x.dataset.state==='ready').length;
+ const count=document.getElementById('ready-count');if(count)count.textContent=ready+' / '+cards().length+' ready';
+}
+cards().forEach((card,index)=>{
+ card.addEventListener('mouseenter',()=>selectAt(index));
+ card.addEventListener('click',()=>{selectAt(index);bridge('choose',card.dataset.id)});
 });
-window.setReplacementState=(id,state)=>setState(id,state);
-window.focusFirstReplacementButton=()=>focusAt(0);
-window.focusReplacementButton=focusAt;
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'){e.preventDefault();bridge('cancel');return}
+ if(e.key==='Tab'){e.preventDefault();selectAt(selectedIndex+(e.shiftKey?-1:1));return}
+ if((e.key===' '||e.key==='Enter')&&cards().length){e.preventDefault();bridge('choose',cards()[selectedIndex].dataset.id)}
+ if(e.key==='ArrowRight'||e.key==='ArrowDown'){e.preventDefault();selectAt(selectedIndex+1)}
+ if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();selectAt(selectedIndex-1)}
+});
+window.setReplacementState=(id,state,result,error)=>setState(id,state,result,error);
+window.setReplacementSelection=(index)=>selectAt(index);
+window.getReplacementCardCount=()=>cards().length;
+selectAt(0);
 </script></body></html>
 ]]
     return html
 end
 
-local function updateReplacementButton(session, id, state)
+local function updateReplacementButton(session, id, state, result, error)
     if not isCurrentReplacementSession(session) or not replacementToolbar then return end
     replacementToolbar:evaluateJavaScript(
         "window.setReplacementState && window.setReplacementState(" ..
-        replacementJSONString(id) ..
-        "," .. string.format("%q", state) .. ");"
+        replacementJSONString(id) .. "," .. string.format("%q", state) ..
+        "," .. replacementJSONString(result or "") .. "," .. replacementJSONString(error or "") .. ");"
     )
 end
-
 local function sendReplacementAIRequest(session, config, sourceText, settings)
     local id = tostring(config.id or "")
     local prompt = tostring(config.prompt or ""):gsub("{{text}}", function() return sourceText end)
