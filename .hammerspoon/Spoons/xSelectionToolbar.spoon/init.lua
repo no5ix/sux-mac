@@ -1171,6 +1171,11 @@ local function replacementJSCall(functionName, value)
     return "window." .. functionName .. "(" .. literal .. ");"
 end
 
+local function replacementJSONString(value)
+    local encoded = json.encode({ tostring(value or "") })
+    return type(encoded) == "table" and encoded[1] or encoded or '""'
+end
+
 local function stopReplacementTasks(session)
     if not session then return end
     for _, task in pairs(session.tasks or {}) do
@@ -1194,6 +1199,9 @@ local function closeReplacementSession(reason)
     session.cancelled = true
     session.closeReason = reason
     stopReplacementTasks(session)
+    if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
+        _G.xSelectionToolbarSyntheticCopyUntil = nil
+    end
     replacementSession = nil
     destroyReplacementToolbar()
     print("[Replacement] Session " .. tostring(session.id) .. " closed: " .. tostring(reason))
@@ -1226,6 +1234,9 @@ button{position:relative;display:flex;flex-direction:column;align-items:center;j
 button .icon{font-size:25px;line-height:1.1}
 button .status{font-size:9px;line-height:1;color:#697386}
 button[data-state="pending"] .status{color:#b7791f}
+button[data-state="waiting"] .status{color:#b7791f}
+button[data-state="waiting"] .status{animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:.45}to{opacity:1}}
 button[data-state="ready"] .status{color:#16834a}
 button[data-state="error"] .status{color:#c43b3b}
 button.is-hovered,button:focus,button:focus-visible{background:#d8dee9!important;box-shadow:inset 0 0 0 2px #7da6ff!important;outline:none}
@@ -1255,7 +1266,7 @@ local function updateReplacementButton(session, id, state)
     if not isCurrentReplacementSession(session) or not replacementToolbar then return end
     replacementToolbar:evaluateJavaScript(
         "window.setReplacementState && window.setReplacementState(" ..
-        (type(json.encode({id}) ) == "table" and json.encode({id})[1] or json.encode({id})) ..
+        replacementJSONString(id) ..
         "," .. string.format("%q", state) .. ");"
     )
 end
@@ -1318,8 +1329,8 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
         updateReplacementButton(session, id, "ready")
         print("[Replacement] Cached " .. id .. " result (" .. tostring(#entry.result) .. " chars)")
         if session.waitingFor == id then
-            -- A chosen action stays pending until its callback supplies the result.
-            session.applyWhenReady = true
+            -- A chosen action stays highlighted while pending, then applies as
+            -- soon as this exact request completes.
             if session.onReady then session.onReady(id, entry.result) end
         end
     end, args)
@@ -1356,32 +1367,43 @@ local function prefetchReplacementResults(session, sourceText)
 end
 
 local function applyReplacementResult(session, id, result)
-    if not isCurrentReplacementSession(session) then return end
-    if session.app and session.app:isRunning() then
-        session.app:activate(true)
-    else
+    if not isCurrentReplacementSession(session) or session.applying then return end
+    session.applying = true
+    if not session.app or not session.app:isRunning() then
+        session.applying = false
         hs.alert.show("The original application is no longer running")
         return
     end
-    -- The initiating input gets focus back with its app. Replace its contents
-    -- only after activation; do not paste into the replacement toolbar.
-    timer.doAfter(0.18, function()
+    session.app:activate(true)
+    -- Reactivate the original app, then verify the original AX element is still
+    -- focused. Never Cmd+A in a different field or on a whole webpage.
+    timer.doAfter(0.22, function()
         if not isCurrentReplacementSession(session) then return end
-        local focused = hs.axuielement.systemElement()
-        local current = focused and focused:attributeValue("AXFocusedUIElement")
-        local role = current and current:attributeValue("AXRole")
-        local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
-            or role == "AXComboBox" or role == "AXSearchField"
-        if not editable then
+        if not replacementElementIsFocused(session) then
+            session.applying = false
             hs.alert.show("The original input field is no longer focused; result was not pasted")
             return
         end
+        local oldClipboard = pasteboard.getContents()
         pasteboard.setContents(result)
         eventtap.keyStroke({"cmd"}, "a", 0.04)
-        timer.doAfter(0.06, function()
+        timer.doAfter(0.08, function()
             if not isCurrentReplacementSession(session) then return end
+            if not replacementElementIsFocused(session) then
+                if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) end
+                session.applying = false
+                hs.alert.show("Input focus changed; replacement cancelled")
+                return
+            end
             eventtap.keyStroke({"cmd"}, "v", 0.04)
-            closeReplacementSession("replacement applied")
+            -- Restore the clipboard after the paste event, only if it still
+            -- holds this workflow's output. The field has already received it.
+            timer.doAfter(0.08, function()
+                if pasteboard.getContents() == result and oldClipboard ~= nil then
+                    pasteboard.setContents(oldClipboard)
+                end
+                closeReplacementSession("replacement applied")
+            end)
         end)
     end)
 end
@@ -1399,7 +1421,12 @@ local function chooseReplacementAction(session, id)
                 applyReplacementResult(session, id, result)
             end
         end
-        hs.alert.show("Waiting for " .. id .. "…")
+        if replacementToolbar then
+            replacementToolbar:evaluateJavaScript(
+                "window.setReplacementState && window.setReplacementState(" ..
+                replacementJSCall("JSON.parse", id):match("%((.*)%)") .. ", 'waiting');"
+            )
+        end
     else
         hs.alert.show("AI request failed: " .. tostring(entry.error or "Unknown error"))
     end
@@ -1454,13 +1481,31 @@ local function readFocusedEditableElement()
     local subrole = element:attributeValue("AXSubrole")
     local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
         or role == "AXComboBox" or role == "AXSearchField"
-    if role == "AXWebArea" then
-        local settable = element:isAttributeSettable("AXSelectedText")
-        editable = settable == true
-    end
     if subrole == "AXSearchField" then editable = true end
-    if not editable then return nil, "Focused element is not an editable text field (" .. tostring(role) .. ")" end
+    if role == "AXWebArea" then
+        local settable = false
+        pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
+        editable = settable
+    end
+    if not editable then
+        return nil, "Focused element is not an editable text field (" .. tostring(role) .. ")"
+    end
     return element
+end
+
+local function replacementElementIsFocused(session)
+    local system = hs.axuielement.systemElement()
+    local current = system and system:attributeValue("AXFocusedUIElement")
+    if not current or not session.element then return false end
+    local ok, same = pcall(function() return current:isEqual(session.element) end)
+    if ok and same then return true end
+    -- Some AX wrappers do not implement stable isEqual; compare role and app PID
+    -- as a conservative fallback, never merely trusting that the app is frontmost.
+    local app = hs.application.frontmostApplication()
+    if not app or app:pid() ~= session.appPid then return false end
+    local currentRole = current:attributeValue("AXRole")
+    local originalRole = session.element:attributeValue("AXRole")
+    return currentRole == originalRole and currentRole ~= nil
 end
 
 local function startReplacementSession()
@@ -1489,6 +1534,7 @@ local function startReplacementSession()
 
     -- Mark the synthetic Cmd+C so xClipboardHistory ignores this temporary text.
     replacementSyntheticUntil = timer.secondsSinceEpoch() + 1.2
+    session.syntheticUntil = replacementSyntheticUntil
     _G.xSelectionToolbarSyntheticCopyUntil = replacementSyntheticUntil
     eventtap.keyStroke({"cmd"}, "a", 0.04)
     timer.doAfter(0.06, function()
@@ -1506,7 +1552,9 @@ local function startReplacementSession()
                     pasteboard.clearContents()
                 end
             end
-            _G.xSelectionToolbarSyntheticCopyUntil = nil
+            if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
+                _G.xSelectionToolbarSyntheticCopyUntil = nil
+            end
             if sourceText == "" then
                 closeReplacementSession("empty input")
                 hs.alert.show("No text found in the focused input field")
