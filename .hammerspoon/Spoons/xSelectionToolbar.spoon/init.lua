@@ -1529,20 +1529,16 @@ local function readFocusedEditableElement()
     if not element then return nil, "No focused Accessibility element" end
     local role = element:attributeValue("AXRole")
     local subrole = element:attributeValue("AXSubrole")
+    local settable = false
+    pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
     local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
         or role == "AXComboBox" or role == "AXSearchField"
     if subrole == "AXSearchField" then editable = true end
-    if role == "AXWebArea" then
-        local settable = false
-        pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
-        editable = settable
-    end
+    if role == "AXWebArea" then editable = settable end
     -- Chromium/WebKit browsers may expose a focused contenteditable element as
     -- AXTextArea, AXTextField, AXWebArea, AXGroup, or AXGenericElement.
     if not editable and (role == "AXGroup" or role == "AXGenericElement") then
-        local settable = false
         local isEditable = false
-        pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
         pcall(function() isEditable = element:attributeValue("AXEditable") == true end)
         editable = settable and isEditable
     end
