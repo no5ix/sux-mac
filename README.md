@@ -47,7 +47,7 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 
 # Usage
 
-1.	Install the Hammerspoon software: https://www.hammerspoon.org
+1.	Install the hammerspoon1.0.0 (has to be 1.0.0, otherwise all the generated panels would have a transparent title bar, such as clipboard history panel) software: https://www.hammerspoon.org
 2.	Place the `.hammerspoon` folder in your user home directory.
 3.	Launch Hammerspoon and reload the configuration:
     - ![alt text](/img/image-3.png)
@@ -97,7 +97,7 @@ A powerful [sux-like](https://github.com/no5ix/sux) productivity tool on Mac.
 
 # 用法
 
-1. 安装 hammerspoon 软件, https://www.hammerspoon.org
+1. 安装 hammerspoon1.0.0 (has to be 1.0.0, otherwise all the generated panels would have a transparent title bar, such as clipboard history panel) 软件, https://www.hammerspoon.org
 2. 把 `.hammerspoon` 放到你的用户根目录
 3. 启动 hammerspoon, 重载
     - ![alt text](/img/image-3.png)
