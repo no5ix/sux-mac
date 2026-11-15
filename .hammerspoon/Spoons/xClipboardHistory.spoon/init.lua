@@ -1827,7 +1827,7 @@ function clipboardPanelHTML()
     --panel-fg: #202124;
     --header-bg: #ffffff;
     --border: #d8dbe2;
-    --control-bg: #ffffff;
+    --control-bg: #e5e7eb;
     --control-border: #c8ccd4;
     --card-bg: #ffffff;
     --card-border: #d5d9e0;
@@ -1836,7 +1836,7 @@ function clipboardPanelHTML()
     --muted: #626b79;
     --subtle: #697386;
     --accent: #2463eb;
-    --selected-bg: #e5edff;
+    --selected-bg: #c8d9fb;
     --filter-selected-bg: #454a55;
     --filter-selected-fg: #ffffff;
     --selected-border: #5d8df7;
@@ -3452,7 +3452,8 @@ closeClipboardPanel = function()
 end
 
 local function configureClipboardWebview(view)
-    view:windowStyle({"titled", "closable", "resizable"})
+    -- Use a borderless panel window: no native title bar or traffic-light chrome.
+    view:windowStyle({})
     view:shadow(true)
     view:allowTextEntry(true)
     view:closeOnEscape(false)
@@ -3548,7 +3549,7 @@ local function createClipboardWebview()
         {x = 120, y = 80, w = 980, h = 783},
         {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
         clipboard_usercontent
-    ):windowStyle({"titled", "closable", "resizable"})
+    ):windowStyle({})
     configureClipboardWebview(clipboard_webview)
 end
 createClipboardWebview()
