@@ -3462,8 +3462,10 @@ closeClipboardPanel = function()
 end
 
 local function configureClipboardWebview(view)
-    -- Use a borderless panel window: no native title bar or traffic-light chrome.
+    -- Use a transparent, borderless native window so the rounded HTML panel
+    -- can reveal transparent corners instead of the WebView's square backing.
     view:windowStyle({})
+    view:transparent(true)
     view:shadow(true)
     view:allowTextEntry(true)
     view:closeOnEscape(false)
