@@ -45,6 +45,8 @@ local previousApplicationRestoreGeneration = 0
 -- Declared before panel callbacks so window-close and dismissal handlers can
 -- stop the global click monitor safely.
 local outsideClickMonitor = nil
+local panelDragMonitor = nil
+local panelDragState = nil
 local closeOutsideClickPending = false
 local stopOutsideClickMonitor
 local selectedVisibleIndex = 1
@@ -1871,11 +1873,13 @@ body {
 #clipboard-panel-shell > main,
 #clipboard-panel-shell > footer { min-width:0; }
 header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
-.top { display:flex; align-items:center; justify-content:space-between; gap:14px; -webkit-app-region:drag; cursor:move; }
+.top { display:flex; align-items:center; justify-content:space-between; gap:14px; }
 h1 { margin:0; font-size:14px; font-weight:650; cursor:move; user-select:none; }
-.header-tools { display:flex; align-items:center; gap:10px; margin-left:auto; -webkit-app-region:no-drag; }
+.header-tools { display:flex; align-items:center; gap:10px; margin-left:auto; }
 .header-clear,.header-reload { flex-shrink:0; }
 .count { color:var(--muted); font-size:12px; white-space:nowrap; }
+#clipboard-title { cursor:move; user-select:none; -webkit-user-select:none; }
+#clipboard-panel-shell.dragging { cursor:grabbing; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:0; background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; box-shadow:none; }
 input:focus, input:focus-visible { border:0; background:var(--selected-bg); outline:0; box-shadow:none; }
 main:focus { outline:none; }
@@ -1955,11 +1959,12 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
 .empty { color:var(--muted); text-align:center; padding:40px 12px; grid-column:1/-1; }
-footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); font-size:11px; }
+footer { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 16px; color:var(--muted); background:var(--footer-bg); font-size:11px; }
+footer .count { margin-left:auto; }
 body.keyboard-mode #search { outline:0; box-shadow:none; }
 </style></head><body>
 <div id="clipboard-panel-shell">
-<header><div class="top"><h1>Clipboard History</h1><div class="header-tools"><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div></div>
+<header><div class="top"><h1 id="clipboard-title">Clipboard History</h1><div class="header-tools"><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">📍</button>
@@ -1989,7 +1994,7 @@ end)() .. [[
 <button class="action filter-button type-filter" data-action="filter" data-filter="image" aria-pressed="false">Images</button>
 </div></header>
 <main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
-<footer>Tab: next result · Shift+Tab: previous result, then search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
+<footer><span>Tab: next result · Shift+Tab: previous result, then search · Arrow keys: select when results are focused · Click: paste · Esc: close</span><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></footer>
 </div>
 <script>
 const bridge = (action, index, query, kind, dateKey, uid) => {
@@ -3102,7 +3107,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     -- Reapply it to the newly created card nodes after rendering; do not reset
     -- the Set or the keyboard selection state during a pin/unpin refresh.
     js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
-        "document.querySelector('.count').textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";"
+        "document.querySelectorAll('.count').forEach(function(node){node.textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";");
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
@@ -3535,7 +3540,63 @@ local function pointIsInsideClipboardPanel(point)
         and point.y >= frame.y and point.y <= frame.y + frame.h
 end
 
+local function stopPanelDragMonitor()
+    if panelDragMonitor then
+        panelDragMonitor:stop()
+        panelDragMonitor = nil
+    end
+    panelDragState = nil
+end
+
+local function startPanelDragMonitor()
+    stopPanelDragMonitor()
+    panelDragMonitor = hs.eventtap.new({
+        hs.eventtap.event.types.leftMouseDown,
+        hs.eventtap.event.types.leftMouseDragged,
+        hs.eventtap.event.types.leftMouseUp
+    }, function(event)
+        local view = clipboard_webview
+        if not view or not view:isVisible() then
+            stopPanelDragMonitor()
+            return false
+        end
+
+        local eventType = event:getType()
+        local point = hs.mouse.absolutePosition()
+        local frame = view:frame()
+        if not frame then return false end
+
+        if eventType == hs.eventtap.event.types.leftMouseDown then
+            local localX = point.x - frame.x
+            local localY = frame.y + frame.h - point.y
+            -- Only the title text and its immediate header band initiate dragging.
+            if localY >= frame.h - 58 and localY <= frame.h - 8
+                and localX >= 12 and localX <= math.min(frame.w * 0.42, 360) then
+                panelDragState = {
+                    startX = point.x, startY = point.y,
+                    originX = frame.x, originY = frame.y
+                }
+                return true
+            end
+        elseif eventType == hs.eventtap.event.types.leftMouseDragged and panelDragState then
+            local dx, dy = point.x - panelDragState.startX, point.y - panelDragState.startY
+            view:frame({
+                x = panelDragState.originX + dx,
+                y = panelDragState.originY - dy,
+                w = frame.w, h = frame.h
+            })
+            return true
+        elseif eventType == hs.eventtap.event.types.leftMouseUp and panelDragState then
+            panelDragState = nil
+            return true
+        end
+        return false
+    end)
+    panelDragMonitor:start()
+end
+
 stopOutsideClickMonitor = function()
+    stopPanelDragMonitor()
     if outsideClickMonitor then
         outsideClickMonitor:stop()
         outsideClickMonitor = nil
@@ -3569,6 +3630,7 @@ local function startOutsideClickMonitor()
         return false
     end)
     outsideClickMonitor:start()
+    startPanelDragMonitor()
 end
 
 local function createClipboardWebview()
