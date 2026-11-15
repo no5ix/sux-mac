@@ -1278,7 +1278,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
  <div class="panel-footer"><span>← → Horizontal · ↑ ↓ Vertical · Tab Navigate · Enter / Space Paste · Esc Close</span><span id="selected-count">1 / ]] .. tostring(count) .. [[</span></div>
 </div>
 <script>
-const bridge=(action,id)=>{try{window.webkit.messageHandlers.replacementToolbar.postMessage({action,id})}catch(e){}};
+const bridge=(action,id,extra={})=>{try{window.webkit.messageHandlers.replacementToolbar.postMessage(Object.assign({action,id},extra))}catch(e){}};
 const cards=()=>Array.from(document.querySelectorAll('.result-card'));
 let selectedIndex=0;
 function selectAt(index){const all=cards();if(!all.length)return;selectedIndex=(index+all.length)%all.length;all.forEach((x,i)=>x.classList.toggle('is-selected',i===selectedIndex));const el=document.getElementById('selected-count');if(el)el.textContent=(selectedIndex+1)+' / '+all.length;}
@@ -1289,50 +1289,48 @@ function setState(id,state,result,error){
  if(preview)preview.textContent=state==='ready'?(result||'Ready — empty result'):state==='error'?(error||'Request failed'):'Generating preview…';
  const ready=cards().filter(x=>x.dataset.state==='ready').length, count=document.getElementById('ready-count');if(count)count.textContent=ready+' / '+cards().length+' ready';
 }
-function renderSnapshot(snapshot){
- if(!snapshot)return;
- Object.keys(snapshot).forEach(id=>{const item=snapshot[id];setState(id,item.status,item.result||'',item.error||'')});
-}
+function renderSnapshot(snapshot){if(snapshot)Object.keys(snapshot).forEach(id=>{const x=snapshot[id];setState(id,x.status,x.result||'',x.error||'')});}
 cards().forEach((card,index)=>card.addEventListener('click',()=>{selectAt(index);bridge('choose',card.dataset.id)}));
 document.addEventListener('keydown',e=>{
  if(e.key==='Escape'){e.preventDefault();bridge('cancel');return}
- if(e.key==='Tab'){e.preventDefault();bridge('navigate',e.shiftKey?-1:1);return}
+ if(e.key==='Tab'){e.preventDefault();bridge('navigate','',{delta:e.shiftKey?-1:1});return}
  if((e.key===' '||e.key==='Enter')&&cards().length){e.preventDefault();bridge('choose',cards()[selectedIndex].dataset.id)}
 });
 window.renderReplacementSnapshot=renderSnapshot;
 window.setReplacementSelection=selectAt;
-window.addEventListener('load',()=>bridge('ready'));
+window.addEventListener('load',()=>{bridge('ready');window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);});
+window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);
 bridge('ready');
 </script></body></html>
 ]]
     return html
 end
 
-local function updateReplacementButton(session, id, state, result, error)
-    if not isCurrentReplacementSession(session) then return end
-    if not replacementToolbar then
-        logger.d("[Replacement] UI not ready; cached state will be synchronized after panel load (" .. tostring(id) .. ")")
-        return
+local function replacementResultsSnapshot(session)
+    local snapshot = {}
+    for id, entry in pairs(session.results or {}) do
+        snapshot[id] = {
+            status = entry.status or "pending",
+            result = entry.result or "",
+            error = entry.error or ""
+        }
     end
-    local script = "window.setReplacementState && window.setReplacementState(" ..
-        replacementJSONString(id) .. "," .. string.format("%q", state) ..
-        "," .. replacementJSONString(result or "") .. "," .. replacementJSONString(error or "") .. ");"
-    local ok, err = pcall(function() replacementToolbar:evaluateJavaScript(script) end)
-    if not ok then logger.e("[Replacement] Failed to update card " .. tostring(id) .. ": " .. tostring(err)) end
+    local encoded = json.encode(snapshot)
+    if type(encoded) == "table" then encoded = encoded[1] end
+    return type(encoded) == "string" and encoded or "{}"
 end
 
-local function syncReplacementCards(session)
-    if not isCurrentReplacementSession(session) or not replacementToolbar or not session.results then return end
-    for id, entry in pairs(session.results) do
-        if entry.status == "ready" then
-            updateReplacementButton(session, id, "ready", entry.result or "")
-        elseif entry.status == "error" then
-            updateReplacementButton(session, id, "error", "", entry.error or "Request failed")
-        elseif entry.status == "pending" then
-            updateReplacementButton(session, id, "pending", "")
-        end
-    end
+local function updateReplacementButton(session, id, state, result, error)
+    if not isCurrentReplacementSession(session) then return end
+    local entry = session.results and session.results[id]
+    if not entry then return end
+    entry.status = state
+    if result ~= nil then entry.result = result end
+    if error ~= nil then entry.error = error end
+    session.resultVersion = (session.resultVersion or 0) + 1
+    logger.i("[Replacement] " .. tostring(id) .. " -> " .. tostring(state))
 end
+
 local function sendReplacementAIRequest(session, config, sourceText, settings)
     local id = tostring(config.id or "")
     local prompt = tostring(config.prompt or ""):gsub("{{text}}", function() return sourceText end)
@@ -1357,7 +1355,8 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
         "-sS", "--max-time", "120", "-X", "POST",
         settings.baseURL .. "/chat/completions",
         "-H", "Content-Type: application/json",
-        "--data-binary", encoded
+        "--data-binary", encoded,
+        "-w", "\\n__HTTP_STATUS__:%{http_code}"
     }
     if trim(settings.apiKey) ~= "" then
         table.insert(args, 6, "Authorization: Bearer " .. settings.apiKey)
@@ -1375,14 +1374,23 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
             updateReplacementButton(session, id, "error", "", entry.error)
             return
         end
-        local ok, response = pcall(function() return json.decode(stdOut or "") end)
+        local responseBody = stdOut or ""
+        local httpStatus = tonumber(responseBody:match("__HTTP_STATUS__:(%d+)%s*$"))
+        responseBody = responseBody:gsub("%s*__HTTP_STATUS__:%d+%s*$", "")
+        if httpStatus and (httpStatus < 200 or httpStatus >= 300) then
+            entry.error = "HTTP " .. tostring(httpStatus) .. ": " .. responseBody:sub(1, 800)
+            updateReplacementButton(session, id, "error", "", entry.error)
+            logger.e("[Replacement] " .. id .. " failed: " .. entry.error)
+            return
+        end
+        local ok, response = pcall(function() return json.decode(responseBody) end)
         local result = ok and type(response) == "table" and response.choices
             and response.choices[1] and response.choices[1].message
             and response.choices[1].message.content
         if type(result) ~= "string" or trim(result) == "" then
             entry.status = "error"
             entry.error = ok and response and response.error and tostring(response.error.message or response.error)
-                or "Invalid or empty local AI response"
+                or ("Invalid or empty local AI response: " .. responseBody:sub(1, 500))
             updateReplacementButton(session, id, "error", "", entry.error)
             return
         end
@@ -1509,12 +1517,7 @@ local function chooseReplacementAction(session, id)
                 applyReplacementResult(session, id, result)
             end
         end
-        if replacementToolbar then
-            replacementToolbar:evaluateJavaScript(
-                "window.setReplacementState && window.setReplacementState(" ..
-                replacementJSONString(id) .. ", 'waiting');"
-            )
-        end
+        logger.i("[Replacement] Waiting for selected result: " .. tostring(id))
     else
         hs.alert.show("AI request failed: " .. tostring(entry.error or "Unknown error"))
     end
@@ -1536,17 +1539,23 @@ local function showReplacementToolbar(session)
         end
     end
     local function moveHorizontal(delta)
-        selectIndex(session.activeIndex + delta)
+        local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
+        local index = session.activeIndex - 1
+        local row, col = math.floor(index / 2), index % 2
+        local nextCol = (col + delta + 2) % 2
+        local target = row * 2 + nextCol
+        if target >= count then target = row * 2 end
+        selectIndex(target + 1)
     end
     local function moveVertical(delta)
         local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
+        local index = session.activeIndex - 1
+        local row, col = math.floor(index / 2), index % 2
         local rows = math.ceil(count / 2)
-        local column = (session.activeIndex - 1) % 2
-        local row = math.floor((session.activeIndex - 1) / 2)
         local targetRow = (row + delta + rows) % rows
-        local target = targetRow * 2 + column + 1
-        if target > count then target = count end
-        selectIndex(target)
+        local target = targetRow * 2 + col
+        if target >= count then target = count - 1 end
+        selectIndex(target + 1)
     end
     local function chooseActive()
         local config = (CUSTOM_AI_BUTTONS or {})[session.activeIndex]
@@ -1557,8 +1566,8 @@ local function showReplacementToolbar(session)
         if hotkey then session.navigationHotkeys[#session.navigationHotkeys + 1] = hotkey
         else logger.e("[Replacement] Failed to bind navigation key: " .. tostring(key)) end
     end
-    bind({}, "tab", function() moveHorizontal(1) end)
-    bind({"shift"}, "tab", function() moveHorizontal(-1) end)
+    bind({}, "tab", function() selectIndex(session.activeIndex + 1) end)
+    bind({"shift"}, "tab", function() selectIndex(session.activeIndex - 1) end)
     bind({}, "right", function() moveHorizontal(1) end)
     bind({}, "left", function() moveHorizontal(-1) end)
     bind({}, "down", function() moveVertical(1) end)
@@ -1577,8 +1586,13 @@ local function showReplacementToolbar(session)
         local action = message.action
         if action == "ready" then
             logger.i("[Replacement] Result panel WebView ready")
+        elseif action == "snapshot" then
+            local encoded = replacementResultsSnapshot(session)
+            if replacementToolbar then
+                replacementToolbar:evaluateJavaScript("window.renderReplacementSnapshot && window.renderReplacementSnapshot(" .. encoded .. ");")
+            end
         elseif action == "navigate" then
-            moveHorizontal(tonumber(message.delta) or 1)
+            selectIndex(session.activeIndex + (tonumber(message.delta) or 1))
         elseif action == "choose" then
             chooseReplacementAction(session, tostring(message.id or ""))
         elseif action == "cancel" then
