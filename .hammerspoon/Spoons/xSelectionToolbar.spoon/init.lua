@@ -1463,57 +1463,56 @@ local function applyReplacementResult(session, id, result)
         return
     end
 
+    -- Return to the application that received Ctrl+V, then paste into the same
+    -- focused input/editor. The capture workflow itself does not depend on AX.
     session.app:activate(true)
-    replacementAfter(session, 0.22, function()
-        local target = session.element
-        if target then
-            local ok, role = pcall(function() return target:attributeValue("AXRole") end)
-            if not ok or role ~= session.originalRole then target = nil end
-        end
-        if not target then target = findOriginalReplacementElement(session) end
-        if not target then
+    replacementAfter(session, 0.20, function()
+        local activeApp = hs.application.frontmostApplication()
+        if not activeApp or activeApp:pid() ~= session.appPid then
             session.applying = false
             session.waitingFor = nil
-            hs.alert.show("Could not restore the original input field; result was not pasted")
+            hs.alert.show("Original application is not active; result was not pasted")
             return
         end
 
-        local focusOk, focusResult = pcall(function()
-            return target:setAttributeValue("AXFocused", true)
-        end)
-        if not focusOk or focusResult == false then
-            session.applying = false
-            session.waitingFor = nil
-            hs.alert.show("Could not focus the original input field")
-            return
-        end
-
-        replacementAfter(session, 0.12, function()
-            local app = hs.application.frontmostApplication()
-            if not app or app:pid() ~= session.appPid then
+        local oldClipboard = pasteboard.getContents()
+        local oldClipboardData = pasteboard.readAllData and pasteboard.readAllData() or nil
+        pasteboard.setContents(result)
+        replacementAfter(session, 0.05, function()
+            local currentApp = hs.application.frontmostApplication()
+            if not currentApp or currentApp:pid() ~= session.appPid then
+                if oldClipboardData and pasteboard.writeAllData then
+                    pcall(function() pasteboard.writeAllData(oldClipboardData) end)
+                elseif oldClipboard ~= nil then
+                    pasteboard.setContents(oldClipboard)
+                else
+                    pasteboard.clearContents()
+                end
                 session.applying = false
                 session.waitingFor = nil
-                hs.alert.show("Original application is not active; result was not pasted")
+                hs.alert.show("Input application lost focus; replacement cancelled")
                 return
             end
 
-            local oldClipboard = pasteboard.getContents()
-            pasteboard.setContents(result)
             eventtap.keyStroke({"cmd"}, "a", 0.04)
-            replacementAfter(session, 0.08, function()
-                local activeApp = hs.application.frontmostApplication()
-                if not activeApp or activeApp:pid() ~= session.appPid then
-                    if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) else pasteboard.clearContents() end
+            replacementAfter(session, 0.07, function()
+                local stillActive = hs.application.frontmostApplication()
+                if not stillActive or stillActive:pid() ~= session.appPid then
                     session.applying = false
                     session.waitingFor = nil
                     hs.alert.show("Input application lost focus; replacement cancelled")
                     return
                 end
-
                 eventtap.keyStroke({"cmd"}, "v", 0.04)
-                replacementAfter(session, 0.08, function()
+                replacementAfter(session, 0.10, function()
                     if pasteboard.getContents() == result then
-                        if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) else pasteboard.clearContents() end
+                        if oldClipboardData and pasteboard.writeAllData then
+                            pcall(function() pasteboard.writeAllData(oldClipboardData) end)
+                        elseif oldClipboard ~= nil then
+                            pasteboard.setContents(oldClipboard)
+                        else
+                            pasteboard.clearContents()
+                        end
                     end
                     closeReplacementSession("replacement applied")
                 end)
@@ -1521,7 +1520,6 @@ local function applyReplacementResult(session, id, result)
         end)
     end)
 end
-
 local function chooseReplacementAction(session, id)
     if not isCurrentReplacementSession(session) then return end
     local entry = session.results and session.results[id]
@@ -1831,62 +1829,83 @@ local function startReplacementSession()
     if not app or app:bundleID() == "org.hammerspoon.Hammerspoon" then
         return false, "No suitable frontmost application"
     end
-    local element, elementError = readFocusedEditableElement()
-    if not element then return false, elementError end
 
+    -- Snapshot the clipboard before touching it. Keep full pasteboard flavors
+    -- when available, falling back to plain text for older Hammerspoon builds.
     local originalClipboard = pasteboard.getContents()
+    local originalClipboardData = pasteboard.readAllData and pasteboard.readAllData() or nil
     local originalChangeCount = pasteboard.changeCount()
     replacementSessionSequence = replacementSessionSequence + 1
     local session = {
         id = replacementSessionSequence,
         app = app,
         appPid = app:pid(),
-        element = element,
-        originalRole = element:attributeValue("AXRole"),
-        originalIdentifier = element:attributeValue("AXIdentifier"),
-        originalTitle = element:attributeValue("AXTitle"),
-        originalDescription = element:attributeValue("AXDescription"),
-        originalWindow = element:attributeValue("AXWindow"),
-        originalValue = element:attributeValue("AXValue"),
         originalClipboard = originalClipboard,
+        originalClipboardData = originalClipboardData,
         originalChangeCount = originalChangeCount,
         createdAt = timer.secondsSinceEpoch(),
         cancelled = false
     }
     replacementSession = session
 
-    -- Mark the synthetic Cmd+C so xClipboardHistory ignores this temporary text.
-    replacementSyntheticUntil = timer.secondsSinceEpoch() + 1.8
-    session.syntheticUntil = replacementSyntheticUntil
-    _G.xSelectionToolbarSyntheticCopyUntil = replacementSyntheticUntil
-    eventtap.keyStroke({"cmd"}, "a", 0.04)
-    replacementAfter(session, 0.06, function()
-        if not replacementElementIsFocused(session) then
-            closeReplacementSession("input focus changed during capture")
-            hs.alert.show("Input focus changed; replacement cancelled")
+    -- Prevent xClipboardHistory from recording the temporary Cmd+C capture.
+    session.syntheticUntil = timer.secondsSinceEpoch() + 2.0
+    _G.xSelectionToolbarSyntheticCopyUntil = session.syntheticUntil
+
+    logger.i("[Replacement] Capturing editor contents with Cmd+A then Cmd+C (AX-independent)")
+    local captureOk, captureErr = pcall(function()
+        eventtap.keyStroke({"cmd"}, "a", 0.05)
+    end)
+    if not captureOk then
+        closeReplacementSession("Cmd+A failed")
+        return false, "Could not select input contents: " .. tostring(captureErr)
+    end
+
+    replacementAfter(session, 0.12, function()
+        local activeApp = hs.application.frontmostApplication()
+        if not activeApp or activeApp:pid() ~= session.appPid then
+            closeReplacementSession("application changed before copy")
+            hs.alert.show("The original application lost focus before text capture")
             return
         end
-        eventtap.keyStroke({"cmd"}, "c", 0.04)
-        replacementAfter(session, 0.12, function()
-            local sourceText = trim(pasteboard.getContents())
-            local currentChangeCount = pasteboard.changeCount()
-            -- Restore only if the pasteboard still contains the copied field text.
-            if currentChangeCount ~= originalChangeCount then
-                if originalClipboard ~= nil and pasteboard.changeCount() == currentChangeCount then
-                    pasteboard.setContents(originalClipboard)
-                elseif originalClipboard == nil and pasteboard.changeCount() == currentChangeCount then
-                    pasteboard.clearContents()
+
+        local copyOk, copyErr = pcall(function()
+            eventtap.keyStroke({"cmd"}, "c", 0.05)
+        end)
+        if not copyOk then
+            closeReplacementSession("Cmd+C failed")
+            hs.alert.show("Could not copy the input text: " .. tostring(copyErr))
+            return
+        end
+
+        replacementAfter(session, 0.20, function()
+            local copiedText = pasteboard.getContents()
+            local sourceText = trim(copiedText)
+            local capturedChangeCount = pasteboard.changeCount()
+
+            -- Restore the original clipboard only if our synthetic copy still
+            -- owns the pasteboard; never overwrite a later user clipboard change.
+            if capturedChangeCount ~= originalChangeCount
+                and pasteboard.changeCount() == capturedChangeCount then
+                local restored = false
+                if originalClipboardData and pasteboard.writeAllData then
+                    restored = pcall(function() pasteboard.writeAllData(originalClipboardData) end)
+                end
+                if not restored then
+                    if originalClipboard ~= nil then pasteboard.setContents(originalClipboard)
+                    else pasteboard.clearContents() end
                 end
             end
-            if currentChangeCount == originalChangeCount or sourceText == "" then
+
+            if capturedChangeCount == originalChangeCount or sourceText == "" then
                 closeReplacementSession("empty or uncaptured input")
-                hs.alert.show("No text found in the focused input field")
+                hs.alert.show("No text was copied. Click inside an editable field and try Ctrl+V again.")
                 return
             end
+
             session.sourceText = sourceText
-            -- Keep the marker active briefly so the clipboard history watcher can
-            -- observe and discard the synthetic capture change even if delivery lags.
-            replacementAfter(session, 0.35, function()
+            logger.i("[Replacement] Clipboard capture succeeded (characters=" .. tostring(#sourceText) .. ")")
+            replacementAfter(session, 0.40, function()
                 if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
                     _G.xSelectionToolbarSyntheticCopyUntil = nil
                 end
