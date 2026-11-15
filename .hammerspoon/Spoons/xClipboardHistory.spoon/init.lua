@@ -1844,18 +1844,32 @@ function clipboardPanelHTML()
   }
 }
 * { box-sizing: border-box; }
-html, body { width:100%; height:100%; margin:0; overflow:hidden; }
-html { background:transparent; }
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
 body {
-  background:var(--panel-bg);
+  background:transparent;
   color:var(--panel-fg);
   font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
   display:flex;
   flex-direction:column;
-  border-radius:14px;
-  overflow:hidden;
-  clip-path:inset(0 round 14px);
 }
+#clipboard-panel-shell {
+  display:flex;
+  flex-direction:column;
+  width:100%;
+  height:100%;
+  min-width:0;
+  min-height:0;
+  overflow:hidden;
+  border:0;
+  border-radius:18px;
+  background:var(--panel-bg);
+  box-shadow:0 10px 30px rgba(0,0,0,.22);
+  clip-path:inset(0 round 18px);
+  isolation:isolate;
+}
+#clipboard-panel-shell > header,
+#clipboard-panel-shell > main,
+#clipboard-panel-shell > footer { min-width:0; }
 header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
 .top { display:flex; align-items:center; gap:10px; }
 .title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
@@ -1944,6 +1958,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); font-size:11px; }
 body.keyboard-mode #search { outline:0; box-shadow:none; }
 </style></head><body>
+<div id="clipboard-panel-shell">
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
@@ -1975,6 +1990,7 @@ end)() .. [[
 </div></header>
 <main> <div id="clipboard-items" class="item-grid">]] .. initialCardsHTML .. [[</div>]] .. loadMoreHTML .. [[</main>
 <footer>Tab: next result · Shift+Tab: previous result, then search · Arrow keys: select when results are focused · Click: paste · Esc: close</footer>
+</div>
 <script>
 const bridge = (action, index, query, kind, dateKey, uid) => {
   try {
@@ -3464,7 +3480,9 @@ end
 local function configureClipboardWebview(view)
     -- Use a transparent, borderless native window so the rounded HTML panel
     -- can reveal transparent corners instead of the WebView's square backing.
-    view:windowStyle({})
+    -- Match the working AI Text Replacement panel: borderless native WebView,
+    -- transparent outside a rounded HTML shell, and a native shadow.
+    view:windowStyle(0)
     view:transparent(true)
     view:shadow(true)
     view:allowTextEntry(true)
@@ -3559,9 +3577,9 @@ local function createClipboardWebview()
     clipboard_usercontent:setCallback(handleClipboardPanelMessage)
     clipboard_webview = webview.new(
         {x = 120, y = 80, w = 980, h = 783},
-        {javaScriptEnabled = true, privateBrowsing = true, shadow = true},
+        {javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = true},
         clipboard_usercontent
-    ):windowStyle({})
+    ):windowStyle(0)
     configureClipboardWebview(clipboard_webview)
 end
 createClipboardWebview()
