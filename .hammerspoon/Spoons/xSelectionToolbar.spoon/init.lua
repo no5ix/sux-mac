@@ -1193,6 +1193,8 @@ local function closeReplacementSession(reason)
     session.cancelled = true
     session.closeReason = reason
     stopReplacementTasks(session)
+    for _, hotkey in ipairs(session.navigationHotkeys or {}) do pcall(function() hotkey:disable() end) end
+    session.navigationHotkeys = {}
     for _, captureTimer in ipairs(session.captureTimers or {}) do
         pcall(function() captureTimer:stop() end)
     end
@@ -1272,6 +1274,7 @@ document.addEventListener('keydown',e=>{
 });
 window.setReplacementState=(id,state)=>setState(id,state);
 window.focusFirstReplacementButton=()=>focusAt(0);
+window.focusReplacementButton=focusAt;
 </script></body></html>
 ]]
     return html
@@ -1392,7 +1395,12 @@ local function applyReplacementResult(session, id, result)
 
     session.app:activate(true)
     replacementAfter(session, 0.22, function()
-        local target = findOriginalReplacementElement(session)
+        local target = session.element
+        if target then
+            local ok, role = pcall(function() return target:attributeValue("AXRole") end)
+            if not ok or role ~= session.originalRole then target = nil end
+        end
+        if not target then target = findOriginalReplacementElement(session) end
         if not target then
             session.applying = false
             session.waitingFor = nil
@@ -1400,10 +1408,10 @@ local function applyReplacementResult(session, id, result)
             return
         end
 
-        local focusOk = pcall(function()
-            target:setAttributeValue("AXFocused", true)
+        local focusOk, focusResult = pcall(function()
+            return target:setAttributeValue("AXFocused", true)
         end)
-        if not focusOk then
+        if not focusOk or focusResult == false then
             session.applying = false
             session.waitingFor = nil
             hs.alert.show("Could not focus the original input field")
@@ -1411,24 +1419,11 @@ local function applyReplacementResult(session, id, result)
         end
 
         replacementAfter(session, 0.12, function()
-            local system = hs.axuielement.systemWideElement()
-            local focused = system and system:attributeValue("AXFocusedUIElement")
-            local focusedRole = focused and focused:attributeValue("AXRole")
-            local focusedId = focused and focused:attributeValue("AXIdentifier")
-            local focusedTitle = focused and focused:attributeValue("AXTitle")
-            local focusedDescription = focused and focused:attributeValue("AXDescription")
-            local sameTarget = focused and (
-                (session.originalIdentifier and focusedId == session.originalIdentifier) or
-                (not session.originalIdentifier and session.originalTitle and focusedTitle == session.originalTitle) or
-                (not session.originalIdentifier and not session.originalTitle and session.originalDescription
-                    and focusedDescription == session.originalDescription)
-            )
             local app = hs.application.frontmostApplication()
-            if not app or app:pid() ~= session.appPid
-                or focusedRole ~= session.originalRole or not sameTarget then
+            if not app or app:pid() ~= session.appPid then
                 session.applying = false
                 session.waitingFor = nil
-                hs.alert.show("Original input focus could not be verified; result was not pasted")
+                hs.alert.show("Original application is not active; result was not pasted")
                 return
             end
 
@@ -1486,6 +1481,32 @@ end
 
 local function showReplacementToolbar(session)
     destroyReplacementToolbar()
+    session.activeIndex = 1
+    session.navigationHotkeys = {}
+    local function moveSelection(delta)
+        if not isCurrentReplacementSession(session) then return end
+        local count = #(CUSTOM_AI_BUTTONS or {})
+        if count < 1 then return end
+        session.activeIndex = ((session.activeIndex - 1 + delta) % count) + 1
+        if replacementToolbar then
+            replacementToolbar:evaluateJavaScript("window.focusReplacementButton && window.focusReplacementButton(" .. tostring(session.activeIndex - 1) .. ");")
+        end
+    end
+    local function chooseActive()
+        if not isCurrentReplacementSession(session) then return end
+        local config = (CUSTOM_AI_BUTTONS or {})[session.activeIndex]
+        if config then chooseReplacementAction(session, tostring(config.id or "")) end
+    end
+    local bindings = {
+        hs.hotkey.bind({}, "tab", function() moveSelection(1) end),
+        hs.hotkey.bind({"shift"}, "tab", function() moveSelection(-1) end),
+        hs.hotkey.bind({}, "space", chooseActive),
+        hs.hotkey.bind({}, "escape", function()
+            closeReplacementSession("cancelled by Escape")
+            if session.app and session.app:isRunning() then session.app:activate(true) end
+        end)
+    }
+    for _, binding in ipairs(bindings) do if binding then session.navigationHotkeys[#session.navigationHotkeys + 1] = binding end end
     replacementToolbarUsercontent = webview.usercontent.new("replacementToolbar")
     replacementToolbarUsercontent:setCallback(function(message)
         message = normalizeMessage(message)
