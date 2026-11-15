@@ -1871,11 +1871,11 @@ body {
 #clipboard-panel-shell > main,
 #clipboard-panel-shell > footer { min-width:0; }
 header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
-.top { display:flex; align-items:center; gap:10px; }
-.title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
-h1 { margin:0; font-size:17px; font-weight:650; }
-.header-clear { flex-shrink:0; }
-.count { color:var(--muted); font-size:12px; margin-left:auto; }
+.top { display:flex; align-items:center; justify-content:space-between; gap:14px; -webkit-app-region:drag; cursor:move; }
+h1 { margin:0; font-size:14px; font-weight:650; cursor:move; user-select:none; }
+.header-tools { display:flex; align-items:center; gap:10px; margin-left:auto; -webkit-app-region:no-drag; }
+.header-clear,.header-reload { flex-shrink:0; }
+.count { color:var(--muted); font-size:12px; white-space:nowrap; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:0; background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; box-shadow:none; }
 input:focus, input:focus-visible { border:0; background:var(--selected-bg); outline:0; box-shadow:none; }
 main:focus { outline:none; }
@@ -1959,7 +1959,7 @@ footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--f
 body.keyboard-mode #search { outline:0; box-shadow:none; }
 </style></head><body>
 <div id="clipboard-panel-shell">
-<header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
+<header><div class="top"><h1>Clipboard History</h1><div class="header-tools"><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
 <div class="actions">
 <button class="action filter-button date-filter" data-action="pinScope" data-date-key="pinned" aria-pressed="false">📍</button>
