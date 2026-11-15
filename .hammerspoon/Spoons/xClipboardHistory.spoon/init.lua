@@ -1816,6 +1816,8 @@ function clipboardPanelHTML()
   --subtle: #8e96a5;
   --accent: #7da6ff;
   --selected-bg: #293b55;
+  --filter-selected-bg: #e6e8ec;
+  --filter-selected-fg: #202329;
   --selected-border: #8cb1ff;
   --footer-bg: #1d1f24;
 }
@@ -1835,6 +1837,8 @@ function clipboardPanelHTML()
     --subtle: #697386;
     --accent: #2463eb;
     --selected-bg: #e5edff;
+    --filter-selected-bg: #454a55;
+    --filter-selected-fg: #ffffff;
     --selected-border: #5d8df7;
     --footer-bg: #f5f6f8;
   }
@@ -1859,7 +1863,7 @@ main:focus { outline:none; }
 .action { border:0; border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; box-shadow:none; }
 .action:hover, .action:focus, .action:focus-visible { background:var(--selected-bg); outline:0; box-shadow:none; }
 .action.primary { background:#3267d6; color:#ffffff; }
-.action.filter-button[aria-pressed="true"] { background:var(--selected-bg); color:var(--panel-fg); }
+.action.filter-button[aria-pressed="true"] { background:var(--filter-selected-bg); color:var(--filter-selected-fg); }
 .action.danger { color:#dc2626; font-weight:700; }
 @media (prefers-color-scheme: dark) {
   .action.danger { color:#fb923c; }
@@ -2360,6 +2364,9 @@ function setFilterFocus(index) {
   navState.filterIndex = Math.max(0, Math.min(filters.length - 1, index));
   navState.lastFilterIndex = navState.filterIndex;
   navState.area = 'filters';
+  // Leaving the history grid must clear its keyboard highlight. The filter
+  // control now owns focus, so no card should remain visually selected.
+  clearRowSelection();
   filters[navState.filterIndex].focus({ preventScroll: true });
 }
 function focusSearch() {
