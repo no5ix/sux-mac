@@ -1250,7 +1250,7 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0;border-radius:12px;background:rgba(226,229,234,.98);box-shadow:0 8px 28px rgba(0,0,0,.22)!important}
+.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:12px;background:rgba(226,229,234,.98);box-shadow:none!important}
 .panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:20px;font-weight:700;color:#4b5563}
 .panel-count{font-size:16px;font-weight:600;color:#778092}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:10px;overflow:hidden;min-height:0;flex:1}
@@ -1267,7 +1267,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .card-icon{font-size:22px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;flex:1}
 .card-status{flex:none;font-size:13px;font-weight:600;color:#9a6b16}
-.card-preview{font-size:15px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding-right:4px;display:block}
+ .card-preview{font-size:15px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
 .result-card[data-state="ready"] .card-status{color:#16834a}
 .result-card[data-state="error"] .card-status{color:#c43b3b}
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#788191;white-space:nowrap}
@@ -1638,7 +1638,8 @@ local function showReplacementToolbar(session)
     replacementToolbar:html(replacementToolbarHTML(session), "file:///")
     -- Center on the active display and constrain the window to its usable frame.
     local x = frame.x + (frame.w - width) / 2
-    local y = frame.y + (frame.h - height) / 2
+    -- Place the chooser slightly below vertical center, while keeping it on-screen.
+    local y = math.min(frame.y + frame.h - height, frame.y + (frame.h - height) / 2 + frame.h * 0.04)
     replacementToolbar:frame({x=x,y=y,w=width,h=height})
     replacementToolbar:show()
     replacementToolbar:bringToFront()
