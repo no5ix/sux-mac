@@ -1510,21 +1510,11 @@ local function replacementElementIsFocused(session)
     local system = hs.axuielement.systemElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
     if not current or not session.element then return false end
+    -- Ask AppKit Accessibility to compare the live focused element with the
+    -- captured object. Do not fall back to a same-role comparison: that could
+    -- overwrite a different input field in the same application.
     local ok, same = pcall(function() return current:isEqual(session.element) end)
-    if ok then return same == true end
-    -- hs.axuielement wrappers may not expose identity comparison. Use the
-    -- AXElement's hash only when available; never accept role-only equality.
-    local app = hs.application.frontmostApplication()
-    if not app or app:pid() ~= session.appPid then return false end
-    local currentRole = current:attributeValue("AXRole")
-    if currentRole ~= session.originalRole then return false end
-    local currentIdentifier = current:attributeValue("AXIdentifier")
-    if session.originalIdentifier and currentIdentifier ~= session.originalIdentifier then return false end
-    local currentTitle = current:attributeValue("AXTitle")
-    if session.originalTitle and currentTitle ~= session.originalTitle then return false end
-    -- Without AX identity metadata, we cannot prove that the same field regained
-    -- focus. Fail closed rather than replace an unrelated input in the same app.
-    return session.originalIdentifier ~= nil or session.originalTitle ~= nil
+    return ok and same == true
 end
 
 local function startReplacementSession()
