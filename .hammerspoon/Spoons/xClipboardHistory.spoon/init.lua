@@ -1932,7 +1932,9 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:focus-visible { outline:0; }
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
-.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) 20px; column-gap:5px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
+.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) 20px; column-gap:5px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; padding:2px 4px; border-radius:6px; cursor:pointer; transition:background-color .12s ease; }
+.card-meta-row:hover { background:var(--selected-bg); }
+.card-meta-row:focus-within { outline:1px solid var(--selected-border); outline-offset:1px; }
 .card-meta-row .stamp { position:absolute; left:calc(50% + 12px); transform:translateX(-50%); margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
 .card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
 .card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
@@ -2017,9 +2019,43 @@ document.addEventListener('change', event => {
   handleCardCheckboxChange(event, bridge);
 }, true);
 document.addEventListener('click', event => {
+  const metaRow = event.target.closest && event.target.closest('.card-meta-row');
+  if (!metaRow) return;
+  const item = metaRow.closest('.item');
+  if (!item) return;
+  // Checkbox changes are handled by the change listener; other clicks across
+  // this metadata row toggle selection without activating card paste.
+  if (event.target.closest('.card-select-checkbox')) {
+    event.stopPropagation();
+    return;
+  }
+  const checkbox = metaRow.querySelector('.card-select-checkbox');
+  if (!checkbox) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const nextSelected = !selectedClipboardUids.has(item.dataset.uid || '');
+  const accepted = setClipboardItemSelected(item, nextSelected, bridge);
+  if (!accepted) return;
+  checkbox.checked = nextSelected;
+}, true);
+document.addEventListener('keydown', event => {
+  if (event.key !== ' ' && event.key !== 'Enter') return;
+  const metaRow = event.target.closest && event.target.closest('.card-meta-row');
+  if (!metaRow || event.target.closest('.card-select-checkbox')) return;
+  const item = metaRow.closest('.item');
+  if (!item) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const checkbox = metaRow.querySelector('.card-select-checkbox');
+  const nextSelected = !selectedClipboardUids.has(item.dataset.uid || '');
+  const accepted = setClipboardItemSelected(item, nextSelected, bridge);
+  if (accepted && checkbox) checkbox.checked = nextSelected;
+}, true);
+
+document.addEventListener('click', event => {
   // Checkbox interaction is selection-only; do not let it bubble into the
   // card's normal click-to-paste handler.
-  if (event.target.closest && event.target.closest('.card-select-checkbox')) {
+  if (event.target.closest && event.target.closest('.card-meta-row')) {
     event.stopPropagation();
     return;
   }
@@ -2797,34 +2833,38 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   return true;
 }
 /* END CONTEXT MENU MODEL */
-function handleCardCheckboxChange(event, bridge) {
-  const checkbox = event.target.closest && event.target.closest('.card-select-checkbox');
-  if (!checkbox) return false;
-  const item = checkbox.closest('.item');
-  const uid = checkbox.dataset.selectUid || (item && item.dataset.uid) || '';
-  if (!uid) return true;
-  if (checkbox.checked) {
-    if (!selectedClipboardUids.has(uid)) {
-      if (selectedClipboardUids.size >= 99) {
-        checkbox.checked = false;
-        bridge('selectionLimitReached', Number(item && item.dataset.index || 0), '', '', '', uid);
-        event.preventDefault();
-        event.stopPropagation();
-        return true;
-      }
-      selectedClipboardUids.add(uid);
-      selectedClipboardOrder.push(uid);
+function setClipboardItemSelected(item, selected, bridge) {
+  if (!item) return false;
+  const uid = item.dataset.uid || '';
+  if (!uid) return false;
+  const isSelected = selectedClipboardUids.has(uid);
+  if (selected === isSelected) return true;
+  if (selected) {
+    if (selectedClipboardUids.size >= 99) {
+      bridge('selectionLimitReached', Number(item.dataset.index || 0), '', '', '', uid);
+      return false;
     }
+    selectedClipboardUids.add(uid);
+    selectedClipboardOrder.push(uid);
   } else {
     selectedClipboardUids.delete(uid);
     const orderIndex = selectedClipboardOrder.indexOf(uid);
     if (orderIndex >= 0) selectedClipboardOrder.splice(orderIndex, 1);
   }
   syncClipboardMultiSelection();
+  bridge(selectedClipboardUids.has(uid) ? 'selectItem' : 'deselectItem',
+    Number(item.dataset.index || 0), '', '', '', uid);
+  return true;
+}
+function handleCardCheckboxChange(event, bridge) {
+  const checkbox = event.target.closest && event.target.closest('.card-select-checkbox');
+  if (!checkbox) return false;
+  const item = checkbox.closest('.item');
+  const uid = checkbox.dataset.selectUid || (item && item.dataset.uid) || '';
+  if (!uid) return true;
   if (item) {
-    const rowIndex = Number(item.dataset.index || 0);
-    bridge(selectedClipboardUids.has(uid) ? 'selectItem' : 'deselectItem',
-      rowIndex, '', '', '', uid);
+    const accepted = setClipboardItemSelected(item, checkbox.checked, bridge);
+    if (!accepted) checkbox.checked = false;
   }
   event.preventDefault();
   event.stopPropagation();
