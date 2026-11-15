@@ -3819,7 +3819,8 @@ pasteboard_watcher:start()
 -- Keep an explicit reference to the global shortcut so it remains live after
 -- Spoon reloads. Bindings are global, so browser password fields should not
 -- prevent the history panel from being triggered by this chord.
-local historyHotkey = hotkey.bind({"ctrl", "shift"}, "v", showClipboardHistory)
+-- local historyHotkey = hotkey.bind({"ctrl", "shift"}, "v", showClipboardHistory)
+local historyHotkey = hotkey.bind({"ctrl"}, "s", showClipboardHistory)
 if historyHotkey then historyHotkey:enable() end
 
 -- Surface used only by the isolated Lua regression harness in
