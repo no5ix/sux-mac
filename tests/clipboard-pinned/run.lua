@@ -907,6 +907,45 @@ test("selected clipboard UID remains resolvable after pinning and unpinning", fu
         "unpinning preserves the original selection UID")
 end)
 
+test("selected resolver finds selected records outside transient caches", function()
+    local environment = new_environment("selected-persisted-lookup")
+    environment.seed_text_day(DATE, { "oldest persisted", "middle persisted", "newest persisted" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+
+    local visible = environment.t.panelState().menuData
+    local selectedEntry = visible[#visible]
+    local selectedUid = environment.t.cardUid(selectedEntry)
+
+    -- Simulate a date/filter/page change which removes transient copies but
+    -- leaves the persisted history record available.
+    environment.t.setPanelState({ menuData = {}, allHistoryCache = {} })
+    local resolved = environment.t.resolveSelectedEntriesByUid({ selectedUid })
+    check(resolved ~= nil, "resolver falls back to saved daily indexes")
+    check_equal(#resolved, 1, "exactly one selected record is returned")
+    check_equal(environment.t.cardUid(resolved[1]), selectedUid, "stable selected UID is preserved")
+    check_equal(resolved[1].content, selectedEntry.content, "correct persisted payload is recovered")
+end)
+
+test("selected resolver resolves pinned cards through source and legacy aliases", function()
+    local environment = new_environment("selected-pin-aliases")
+    seed_codex_day(environment)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+    environment.t.updateClipboardPanel("", "all", 0, false)
+    local ordinary = environment.t.panelState().menuData[1]
+    local uid = environment.t.cardUid(ordinary)
+    check(environment.t.pinClipboardEntry(ordinary), "source record pins successfully")
+    environment.t.invalidatePinnedIndex()
+    environment.t.setPanelState({ menuData = {}, allHistoryCache = {} })
+
+    local resolved = environment.t.resolveSelectedEntriesByUid({ uid })
+    check(resolved ~= nil and #resolved == 1, "selected source UID resolves to the pinned copy")
+    check_equal(resolved[1].type, ordinary.type, "resolved pinned entry retains its type")
+    check_equal(environment.t.cardUid(resolved[1]), uid, "resolved entry maps back to the source selection identity")
+end)
+
 test("selected paste supports chronological and explicit selection order", function()
     local environment = new_environment("multi-select-order")
     environment.seed_text_day(DATE, { "A oldest", "B middle", "C newest" }, BASE_TS)
