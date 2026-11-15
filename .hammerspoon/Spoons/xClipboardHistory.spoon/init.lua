@@ -3611,44 +3611,98 @@ function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
     end)
 end
 
+local function resolveSelectedEntriesByUid(requested)
+    local wanted, resolved, seen = {}, {}, {}
+    for _, uid in ipairs(requested) do
+        if type(uid) == "string" and uid ~= "" then wanted[uid] = true end
+    end
+
+    local function addCandidate(entry)
+        if type(entry) ~= "table" then return end
+        local uid = cardUid(entry)
+        if wanted[uid] and not seen[uid] then
+            resolved[uid] = entry
+            seen[uid] = true
+        end
+
+        -- Pinned cards can have a pin-record ID while older selected cards
+        -- carry their original source key. Match both identity namespaces.
+        if entry.isPinned then
+            for _, alias in ipairs({ entry.sourceId, entry.sourceKey }) do
+                if type(alias) == "string" and alias ~= ""
+                    and wanted[alias] and not seen[alias] then
+                    resolved[alias] = entry
+                    seen[alias] = true
+                end
+            end
+        end
+    end
+
+    -- Prefer in-memory entries when available.
+    for _, entry in ipairs(menuData or {}) do addCandidate(entry) end
+    for _, entry in ipairs(allHistoryCache or {}) do addCandidate(entry) end
+    for _, entry in ipairs(loadPinnedEntries()) do addCandidate(entry) end
+
+    -- Selection is session-wide, not page-wide. A selected item may no longer
+    -- be in the current date/filter/page caches, so consult the persisted
+    -- per-day indexes before deciding that the item disappeared.
+    local needsPersistentScan = false
+    for uid in pairs(wanted) do
+        if not seen[uid] then needsPersistentScan = true; break end
+    end
+    if needsPersistentScan then
+        for _, dateKey in ipairs(historyDateDirectories()) do
+            for _, record in ipairs(readDayHistory(dateKey)) do
+                local entry = metadataEntry(record, dateKey, record.id)
+                if entry then addCandidate(entry) end
+            end
+        end
+        -- Reload pins after scanning, since their index can be invalidated
+        -- independently of the currently rendered page.
+        for _, entry in ipairs(loadPinnedEntries()) do addCandidate(entry) end
+    end
+
+    local entries = {}
+    for _, uid in ipairs(requested) do
+        local entry = resolved[uid]
+        if entry then entries[#entries + 1] = entry end
+    end
+
+    local expected = 0
+    for uid in pairs(wanted) do expected = expected + 1 end
+    if expected == 0 or #entries ~= expected then
+        local missing = {}
+        for uid in pairs(wanted) do
+            if not resolved[uid] then missing[#missing + 1] = uid end
+        end
+        table.sort(missing)
+        logger.w("Selected clipboard UID resolution missed " .. tostring(#missing)
+            .. " of " .. tostring(expected) .. " records: " .. table.concat(missing, ", "))
+        return nil, missing
+    end
+    return entries
+end
+
 pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
         hs.alert.show("No clipboard-history items are selected."); return false
     end
-    local wanted, resolvedByUid, seen = {}, {}, {}
-    for _, uid in ipairs(requested) do if type(uid) == "string" and uid ~= "" then wanted[uid] = true end end
-    local candidates = {}
-    for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(candidates) do
-        local uid = cardUid(entry)
-        if wanted[uid] and not seen[uid] then resolvedByUid[uid] = entry; seen[uid] = true end
+
+    local entries = resolveSelectedEntriesByUid(requested)
+    if not entries then
+        hs.alert.show("Some selected clipboard items could not be found in saved history. Reload the panel and try again.")
+        return false
     end
-    local expected = 0
-    for _ in pairs(wanted) do expected = expected + 1 end
-    local entries = {}
-    if orderMode == "selection" then
-        for _, uid in ipairs(requested) do
-            local entry = resolvedByUid[uid]
-            if entry then entries[#entries + 1] = entry end
-        end
-    else
-        for uid in pairs(wanted) do
-            local entry = resolvedByUid[uid]
-            if entry then entries[#entries + 1] = entry end
-        end
+
+    if orderMode ~= "selection" then
         table.sort(entries, function(left, right)
             local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
             if lt ~= rt then return lt < rt end
             return cardUid(left) < cardUid(right)
         end)
     end
-    if expected == 0 or #entries ~= expected then
-        hs.alert.show("Some selected clipboard items are no longer available in this session.")
-        return false
-    end
+
     if pathMode then
         for _, entry in ipairs(entries) do
             local text, problem = clipboardEntryTextForPathPaste(entry)
@@ -3658,6 +3712,7 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
             end
         end
     end
+
     activePasteEntries = entries
     selectedClipboardUids = {}
     selectedClipboardOrder = {}
@@ -3864,6 +3919,7 @@ pkg.__test = {
     selectedClipboardUids = selectedClipboardUids,
     selectedClipboardOrder = selectedClipboardOrder,
     pasteSelectedClipboardItems = pasteSelectedClipboardItems,
+    resolveSelectedEntriesByUid = resolveSelectedEntriesByUid,
     activePasteEntries = activePasteEntries,
     resolveSelectedClipboardEntries = function(serializedUids)
         local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
