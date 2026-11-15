@@ -1588,28 +1588,31 @@ local function startReplacementSession()
     return true
 end
 
-local function handleReplacementHotkey(event)
-    local keycode = event:getKeyCode()
-    local flags = event:getFlags()
-    if keycode == hs.keycodes.map.v and flags.ctrl and not flags.cmd and not flags.alt and not flags.shift then
-        if replacementSession then
-            logger.d("Replacement shortcut ignored: a replacement session is already active")
-            return true
-        end
-        local ok, started, err = pcall(startReplacementSession)
-        if ok and started then return true end
-        -- Preserve native Ctrl+V when this isn't a supported editable field.
-        if not ok then logger.e("Replacement shortcut failed: " .. tostring(started))
-        else logger.d("Replacement shortcut passed through: " .. tostring(err)) end
-        return false
+local function handleReplacementHotkey()
+    if replacementSession then
+        logger.d("Replacement shortcut ignored: a replacement session is already active")
+        return
     end
-    return false
+    local ok, started, err = pcall(startReplacementSession)
+    if ok and started then return end
+    -- Preserve native Ctrl+V when this isn't a supported editable field.
+    if not ok then logger.e("Replacement shortcut failed: " .. tostring(started))
+    else logger.d("Replacement shortcut passed through: " .. tostring(err)) end
 end
 
 local function startReplacementHotkey()
-    if replacementKeyTap then replacementKeyTap:stop(); replacementKeyTap = nil end
-    replacementKeyTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, handleReplacementHotkey)
-    if replacementKeyTap then replacementKeyTap:start() end
+    if replacementKeyTap then
+        pcall(function() replacementKeyTap:disable() end)
+        replacementKeyTap = nil
+    end
+    replacementKeyTap = hs.hotkey.bind({"ctrl"}, "v", handleReplacementHotkey, nil, nil)
+    if not replacementKeyTap then
+        logger.e("Failed to bind Ctrl+V replacement hotkey")
+        return false
+    end
+    replacementKeyTap:enable()
+    logger.i("Ctrl+V replacement hotkey registered")
+    return true
 end
 
 local function buildToolbar(text)
@@ -2233,7 +2236,10 @@ function obj:start()
     return self
 end
 function obj:stop()
-    if replacementKeyTap then replacementKeyTap:stop(); replacementKeyTap = nil end
+    if replacementKeyTap then
+        pcall(function() replacementKeyTap:disable() end)
+        replacementKeyTap = nil
+    end
     if replacementSession then closeReplacementSession("Spoon stopped") end
     if clipboardFallbackTimer then clipboardFallbackTimer:stop(); clipboardFallbackTimer = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
