@@ -1815,7 +1815,7 @@ function clipboardPanelHTML()
   --muted: #aab0bd;
   --subtle: #8e96a5;
   --accent: #7da6ff;
-  --selected-bg: #343a46;
+  --selected-bg: #293b55;
   --selected-border: #8cb1ff;
   --footer-bg: #1d1f24;
 }
@@ -1849,7 +1849,7 @@ h1 { margin:0; font-size:17px; font-weight:650; }
 .header-clear { flex-shrink:0; }
 .count { color:var(--muted); font-size:12px; margin-left:auto; }
 input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:0; background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; box-shadow:none; }
-input:focus, input:focus-visible { border:2px solid #7da6ff; outline:0; box-shadow:none; }
+input:focus, input:focus-visible { border:0; background:var(--selected-bg); outline:0; box-shadow:none; }
 main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
@@ -1859,7 +1859,7 @@ main:focus { outline:none; }
 .action { border:0; border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; box-shadow:none; }
 .action:hover, .action:focus, .action:focus-visible { background:var(--selected-bg); outline:0; box-shadow:none; }
 .action.primary { background:#3267d6; color:#ffffff; }
-.action.filter-button[aria-pressed="true"] { background:#dbeafe; color:#25344a; }
+.action.filter-button[aria-pressed="true"] { background:var(--selected-bg); color:var(--panel-fg); }
 .action.danger { color:#dc2626; font-weight:700; }
 @media (prefers-color-scheme: dark) {
   .action.danger { color:#fb923c; }
