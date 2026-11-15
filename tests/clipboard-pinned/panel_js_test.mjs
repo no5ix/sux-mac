@@ -202,6 +202,14 @@ test("keyboard navigation restores the grid focus stop and global key routing", 
     "Space and Enter activate a focused result");
   assert.ok(panelScript.includes("bridge('paste', Number(item.dataset.index || 0), '')"),
     "keyboard activation uses the same paste bridge as click-to-paste");
+  const filterFocusStart = panelScript.indexOf("function setFilterFocus(index)");
+  const filterFocusEnd = panelScript.indexOf("\n}", filterFocusStart);
+  const filterFocusSource = panelScript.slice(filterFocusStart, filterFocusEnd);
+  assert.ok(filterFocusSource.includes("clearRowSelection()"),
+    "returning focus to the filters clears the previous card highlight");
+  assert.ok(source.includes("--filter-selected-bg: #e6e8ec;") &&
+    source.includes("--filter-selected-bg: #454a55;"),
+    "active filters use shallow white in dark mode and shallow dark in light mode");
 });
 
 
