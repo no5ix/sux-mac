@@ -1652,8 +1652,14 @@ local function readFocusedEditableElement()
         return ok and value or nil
     end
 
-    local candidates = {}
-    local seen = {}
+    local app = hs.application.frontmostApplication()
+    if not app then return nil, "No frontmost application" end
+    if app:bundleID() == "org.hammerspoon.Hammerspoon" then
+        return nil, "Hammerspoon is already frontmost; no source application to replace"
+    end
+
+    local bundleID = app:bundleID() or "unknown"
+    local candidates, seen = {}, {}
     local function addCandidate(element, source)
         if not element then return end
         local identity = tostring(element)
@@ -1662,49 +1668,48 @@ local function readFocusedEditableElement()
         candidates[#candidates + 1] = { element = element, source = source }
     end
 
-    -- The system-wide focused element is the most accurate source, but some
-    -- applications do not publish it reliably. Fall back to the frontmost
-    -- application's own AX tree before giving up.
     local systemOk, system = pcall(function() return hs.axuielement.systemWideElement() end)
-    local systemFocusedApp = nil
+    local appElement = nil
     if systemOk and system then
+        local focusedApp = axAttribute(system, "AXFocusedApplication")
+        local focusedAppPid = axAttribute(focusedApp, "AXPID")
+        if focusedAppPid and focusedAppPid ~= app:pid() then
+            logger.w("AX focused app PID differs from frontmost app (focused="
+                .. tostring(focusedAppPid) .. ", frontmost=" .. tostring(app:pid()) .. ")")
+        end
         addCandidate(axAttribute(system, "AXFocusedUIElement"), "system")
-        systemFocusedApp = axAttribute(system, "AXFocusedApplication")
-        addCandidate(axAttribute(systemFocusedApp, "AXFocusedUIElement"), "system-focused-application")
-        local systemFocusedWindow = axAttribute(systemFocusedApp, "AXFocusedWindow")
-        addCandidate(axAttribute(systemFocusedWindow, "AXFocusedUIElement"), "system-focused-window")
+        addCandidate(axAttribute(focusedApp, "AXFocusedUIElement"), "system-focused-app")
+        local focusedWindow = axAttribute(focusedApp, "AXFocusedWindow")
+        addCandidate(axAttribute(focusedWindow, "AXFocusedUIElement"), "system-focused-window")
+        local appOk, value = pcall(function() return hs.axuielement.applicationElement(app) end)
+        if appOk then appElement = value end
     end
 
-    local app = hs.application.frontmostApplication()
-    local appElement = nil
-    if app then
+    if not appElement then
         local appOk, value = pcall(function() return hs.axuielement.applicationElement(app) end)
         if appOk then appElement = value end
     end
     addCandidate(axAttribute(appElement, "AXFocusedUIElement"), "application")
-    addCandidate(axAttribute(axAttribute(appElement, "AXFocusedWindow"), "AXFocusedUIElement"), "application-focused-window")
+    addCandidate(axAttribute(axAttribute(appElement, "AXFocusedWindow"), "AXFocusedUIElement"), "application-window")
 
-    local focusedWindow = app and app:focusedWindow() or nil
-    local focusedWindowElement = nil
+    local focusedWindow = app:focusedWindow()
+    local windowElement = nil
     if focusedWindow then
-        local windowOk, value = pcall(function() return hs.axuielement.windowElement(focusedWindow) end)
-        if windowOk then focusedWindowElement = value end
+        local ok, value = pcall(function() return hs.axuielement.windowElement(focusedWindow) end)
+        if ok then windowElement = value end
     end
-    addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
+    addCandidate(axAttribute(windowElement, "AXFocusedUIElement"), "window")
 
-    -- hs.uielement exposes a separate focused-element API on macOS. Convert
-    -- its result only if it is already an axuielement-compatible object.
     local uiOk, uiElement = pcall(function() return hs.uielement.focusedElement() end)
     if uiOk and uiElement then
         local converted = nil
         pcall(function()
             if type(uiElement.asAXUIElement) == "function" then converted = uiElement:asAXUIElement() end
         end)
-        addCandidate(converted, "uielement-focused-element")
+        addCandidate(converted, "uielement-focused")
     end
 
-    for _, candidate in ipairs(candidates) do
-        local element = candidate.element
+    local function isEditable(element)
         local role = axAttribute(element, "AXRole")
         local subrole = axAttribute(element, "AXSubrole")
         local settable = false
@@ -1713,27 +1718,72 @@ local function readFocusedEditableElement()
             or role == "AXComboBox" or role == "AXSearchField"
         if subrole == "AXSearchField" then editable = true end
         if role == "AXWebArea" then editable = settable end
-        -- Chromium/WebKit may expose contenteditable controls as generic AX nodes.
-        if not editable and (role == "AXGroup" or role == "AXGenericElement") then
-            local isEditable = false
-            pcall(function() isEditable = axAttribute(element, "AXEditable") == true end)
-            editable = settable and isEditable
+        if not editable and (role == "AXGroup" or role == "AXGenericElement" or role == "AXUnknown") then
+            local axEditable = axAttribute(element, "AXEditable") == true
+            local roleDescription = string.lower(tostring(axAttribute(element, "AXRoleDescription") or ""))
+            editable = settable and (axEditable or roleDescription:find("text", 1, true) ~= nil)
         end
+        return editable, role, subrole, settable
+    end
+
+    -- VS Code's Monaco editor is nested inside an Electron/Chromium web area.
+    -- Walk focused descendants, but only accept a genuine editable control.
+    local maxDepth = bundleID == "com.microsoft.VSCode" and 14 or 8
+    local maxNodes = bundleID == "com.microsoft.VSCode" and 400 or 180
+    local function inspectSubtree(root, source)
+        if not root then return nil end
+        local queue = { { element = root, depth = 0 } }
+        local cursor, visited = 1, 0
+        while cursor <= #queue and visited < maxNodes do
+            local item = queue[cursor]
+            cursor = cursor + 1
+            visited = visited + 1
+            local element = item.element
+            local editable, role, subrole, settable = isEditable(element)
+            if editable then
+                local value = axAttribute(element, "AXValue")
+                logger.i("Editable AX control found via " .. source .. " subtree ("
+                    .. tostring(role) .. "/" .. tostring(subrole)
+                    .. ", selectedTextSettable=" .. tostring(settable)
+                    .. ", valueLength=" .. tostring(type(value) == "string" and #value or -1) .. ")")
+                return element
+            end
+            if item.depth < maxDepth then
+                local children = axAttribute(element, "AXChildren")
+                if type(children) == "table" then
+                    for _, child in ipairs(children) do
+                        if child then queue[#queue + 1] = { element = child, depth = item.depth + 1 } end
+                    end
+                end
+                local focusedChild = axAttribute(element, "AXFocusedUIElement")
+                if focusedChild then queue[#queue + 1] = { element = focusedChild, depth = item.depth + 1 } end
+            end
+        end
+        return nil
+    end
+
+    for _, candidate in ipairs(candidates) do
+        local editable, role, subrole = isEditable(candidate.element)
         if editable then
             logger.i("Focused editable element found via " .. candidate.source .. " ("
                 .. tostring(role) .. "/" .. tostring(subrole) .. ")")
-            return element
+            return candidate.element
         end
+        local nested = inspectSubtree(candidate.element, candidate.source)
+        if nested then return nested end
     end
 
-    if #candidates == 0 then
-        return nil, "No focused Accessibility element (system and application AX focus are empty)"
-    end
-    local roles = {}
+    local roleSummary = {}
     for _, candidate in ipairs(candidates) do
-        roles[#roles + 1] = candidate.source .. ":" .. tostring(axAttribute(candidate.element, "AXRole"))
+        roleSummary[#roleSummary + 1] = candidate.source .. ":" ..
+            tostring(axAttribute(candidate.element, "AXRole")) .. "/" ..
+            tostring(axAttribute(candidate.element, "AXSubrole"))
     end
-    return nil, "No editable focused Accessibility element (" .. table.concat(roles, ", ") .. ")"
+    logger.w("No editable AX target for app " .. tostring(app:name()) .. " (" .. bundleID ..
+        "); candidates=" .. table.concat(roleSummary, ", "))
+    return nil, #candidates == 0
+        and "No focused Accessibility element (system and application AX focus are empty)"
+        or "No editable text control in focused Accessibility subtree (" .. table.concat(roleSummary, ", ") .. ")"
 end
 
 findOriginalReplacementElement = function(session)
