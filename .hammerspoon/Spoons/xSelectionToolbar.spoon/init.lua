@@ -1369,9 +1369,9 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
         if not isCurrentReplacementSession(session) then return end
         local entry = session.results[id]
         if exitCode ~= 0 then
-            entry.status = "error"
             entry.error = trim(stdErr) ~= "" and trim(stdErr) or ("curl exited " .. tostring(exitCode))
             updateReplacementButton(session, id, "error", "", entry.error)
+            logger.e("[Replacement] " .. id .. " request failed: " .. entry.error)
             return
         end
         local responseBody = stdOut or ""
@@ -1388,10 +1388,10 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
             and response.choices[1] and response.choices[1].message
             and response.choices[1].message.content
         if type(result) ~= "string" or trim(result) == "" then
-            entry.status = "error"
             entry.error = ok and response and response.error and tostring(response.error.message or response.error)
                 or ("Invalid or empty local AI response: " .. responseBody:sub(1, 500))
             updateReplacementButton(session, id, "error", "", entry.error)
+            logger.e("[Replacement] " .. id .. " returned invalid output: " .. entry.error)
             return
         end
         entry.status = "ready"
