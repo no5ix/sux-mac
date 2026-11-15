@@ -1387,39 +1387,73 @@ local function applyReplacementResult(session, id, result)
         hs.alert.show("The original application is no longer running")
         return
     end
+
     session.app:activate(true)
-    -- Restore focus to the original editable Accessibility element after the
-    -- toolbar took keyboard focus. Do not send Cmd+A until exact focus is verified.
     replacementAfter(session, 0.22, function()
-        focusOriginalReplacementElement(session)
-        replacementAfter(session, 0.08, function()
-        if not replacementElementIsFocused(session) then
+        local target = findOriginalReplacementElement(session)
+        if not target then
             session.applying = false
             session.waitingFor = nil
-            hs.alert.show("The original input field is no longer focused; choose again after focusing it")
+            hs.alert.show("Could not restore the original input field; result was not pasted")
             return
         end
-        local oldClipboard = pasteboard.getContents()
-        pasteboard.setContents(result)
-        eventtap.keyStroke({"cmd"}, "a", 0.04)
-        replacementAfter(session, 0.08, function()
-            if not replacementElementIsFocused(session) then
-                if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) end
+
+        local focusOk = pcall(function()
+            target:setAttributeValue("AXFocused", true)
+        end)
+        if not focusOk then
+            session.applying = false
+            session.waitingFor = nil
+            hs.alert.show("Could not focus the original input field")
+            return
+        end
+
+        replacementAfter(session, 0.12, function()
+            local system = hs.axuielement.systemElement()
+            local focused = system and system:attributeValue("AXFocusedUIElement")
+            local focusedRole = focused and focused:attributeValue("AXRole")
+            local focusedId = focused and focused:attributeValue("AXIdentifier")
+            local focusedTitle = focused and focused:attributeValue("AXTitle")
+            local focusedDescription = focused and focused:attributeValue("AXDescription")
+            local sameTarget = focused and (
+                (session.originalIdentifier and focusedId == session.originalIdentifier) or
+                (not session.originalIdentifier and session.originalTitle and focusedTitle == session.originalTitle) or
+                (not session.originalIdentifier and not session.originalTitle and session.originalDescription
+                    and focusedDescription == session.originalDescription)
+            )
+            local app = hs.application.frontmostApplication()
+            if not app or app:pid() ~= session.appPid
+                or focusedRole ~= session.originalRole or not sameTarget then
                 session.applying = false
                 session.waitingFor = nil
-                hs.alert.show("Input focus changed; choose again after focusing the original field")
+                hs.alert.show("Original input focus could not be verified; result was not pasted")
                 return
             end
-            eventtap.keyStroke({"cmd"}, "v", 0.04)
-            -- Restore the clipboard after the paste event, only if it still
-            -- holds this workflow's output. The field has already received it.
+
+            local oldClipboard = pasteboard.getContents()
+            pasteboard.setContents(result)
+            eventtap.keyStroke({"cmd"}, "a", 0.04)
             replacementAfter(session, 0.08, function()
-                if pasteboard.getContents() == result and oldClipboard ~= nil then
-                    pasteboard.setContents(oldClipboard)
+                local activeApp = hs.application.frontmostApplication()
+                local activeSystem = hs.axuielement.systemElement()
+                local activeElement = activeSystem and activeSystem:attributeValue("AXFocusedUIElement")
+                local activeRole = activeElement and activeElement:attributeValue("AXRole")
+                if not activeApp or activeApp:pid() ~= session.appPid or activeRole ~= session.originalRole then
+                    if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) end
+                    session.applying = false
+                    session.waitingFor = nil
+                    hs.alert.show("Input focus changed; replacement cancelled")
+                    return
                 end
-                closeReplacementSession("replacement applied")
+
+                eventtap.keyStroke({"cmd"}, "v", 0.04)
+                replacementAfter(session, 0.08, function()
+                    if pasteboard.getContents() == result and oldClipboard ~= nil then
+                        pasteboard.setContents(oldClipboard)
+                    end
+                    closeReplacementSession("replacement applied")
+                end)
             end)
-        end)
         end)
     end)
 end
