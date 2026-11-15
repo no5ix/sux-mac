@@ -1524,28 +1524,70 @@ local function showReplacementToolbar(session)
 end
 
 local function readFocusedEditableElement()
-    local system = hs.axuielement.systemWideElement()
-    local element = system and system:attributeValue("AXFocusedUIElement")
-    if not element then return nil, "No focused Accessibility element" end
-    local role = element:attributeValue("AXRole")
-    local subrole = element:attributeValue("AXSubrole")
-    local settable = false
-    pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
-    local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
-        or role == "AXComboBox" or role == "AXSearchField"
-    if subrole == "AXSearchField" then editable = true end
-    if role == "AXWebArea" then editable = settable end
-    -- Chromium/WebKit browsers may expose a focused contenteditable element as
-    -- AXTextArea, AXTextField, AXWebArea, AXGroup, or AXGenericElement.
-    if not editable and (role == "AXGroup" or role == "AXGenericElement") then
-        local isEditable = false
-        pcall(function() isEditable = element:attributeValue("AXEditable") == true end)
-        editable = settable and isEditable
+    local function axAttribute(element, name)
+        if not element then return nil end
+        local ok, value = pcall(function() return element:attributeValue(name) end)
+        return ok and value or nil
     end
-    if not editable then
-        return nil, "Focused element is not an editable text field (" .. tostring(role) .. ")"
+
+    local candidates = {}
+    local seen = {}
+    local function addCandidate(element, source)
+        if not element then return end
+        local identity = tostring(element)
+        if seen[identity] then return end
+        seen[identity] = true
+        candidates[#candidates + 1] = { element = element, source = source }
     end
-    return element
+
+    -- The system-wide focused element is the most accurate source, but some
+    -- applications do not publish it reliably. Fall back to the frontmost
+    -- application's own AX tree before giving up.
+    local systemOk, system = pcall(function() return hs.axuielement.systemWideElement() end)
+    if systemOk and system then
+        addCandidate(axAttribute(system, "AXFocusedUIElement"), "system")
+    end
+
+    local app = hs.application.frontmostApplication()
+    local appElement = app and app:axElement() or nil
+    addCandidate(axAttribute(appElement, "AXFocusedUIElement"), "application")
+
+    local focusedWindow = app and app:focusedWindow() or nil
+    local focusedWindowElement = focusedWindow and focusedWindow:axuielement() or nil
+    addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
+    addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
+
+    for _, candidate in ipairs(candidates) do
+        local element = candidate.element
+        local role = axAttribute(element, "AXRole")
+        local subrole = axAttribute(element, "AXSubrole")
+        local settable = false
+        pcall(function() settable = element:isAttributeSettable("AXSelectedText") == true end)
+        local editable = role == "AXTextField" or role == "AXTextArea" or role == "AXTextView"
+            or role == "AXComboBox" or role == "AXSearchField"
+        if subrole == "AXSearchField" then editable = true end
+        if role == "AXWebArea" then editable = settable end
+        -- Chromium/WebKit may expose contenteditable controls as generic AX nodes.
+        if not editable and (role == "AXGroup" or role == "AXGenericElement") then
+            local isEditable = false
+            pcall(function() isEditable = axAttribute(element, "AXEditable") == true end)
+            editable = settable and isEditable
+        end
+        if editable then
+            logger.i("Focused editable element found via " .. candidate.source .. " ("
+                .. tostring(role) .. "/" .. tostring(subrole) .. ")")
+            return element
+        end
+    end
+
+    if #candidates == 0 then
+        return nil, "No focused Accessibility element (system and application AX focus are empty)"
+    end
+    local roles = {}
+    for _, candidate in ipairs(candidates) do
+        roles[#roles + 1] = candidate.source .. ":" .. tostring(axAttribute(candidate.element, "AXRole"))
+    end
+    return nil, "No editable focused Accessibility element (" .. table.concat(roles, ", ") .. ")"
 end
 
 local function findOriginalReplacementElement(session)
