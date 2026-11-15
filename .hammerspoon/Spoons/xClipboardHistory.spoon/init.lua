@@ -1842,7 +1842,7 @@ function clipboardPanelHTML()
 * { box-sizing: border-box; }
 html, body { width:100%; height:100%; margin:0; overflow:hidden; }
 body { background:var(--panel-bg); color:var(--panel-fg); font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; display:flex; flex-direction:column; }
-header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); border-bottom:1px solid var(--border); }
+header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
 .top { display:flex; align-items:center; gap:10px; }
 .title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
 h1 { margin:0; font-size:17px; font-weight:650; }
@@ -1854,9 +1854,8 @@ main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-/* One thin rule separates the mutually exclusive scope chips (All, Pin, dates)
-   from the independent content-type chips (Text, Images). */
-.filter-separator { flex:0 0 1px; align-self:center; height:20px; margin:0 2px; background:var(--border); opacity:.85; }
+/* Keep the filter groups visually separated by spacing, not a divider. */
+.filter-separator { display:none; }
 .action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
 .action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
 .action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
@@ -1895,12 +1894,12 @@ body > #clipboard-preview-overlay .manual-preview.open { display:block; }
 body > #clipboard-preview-overlay .manual-preview.image-detail { display:none; width:min(1120px, calc(100vw - 32px)); height:calc(100vh - 64px); max-height:calc(100vh - 64px); padding:14px; overflow:hidden; box-sizing:border-box; }
 body > #clipboard-preview-overlay .manual-preview.image-detail.open { display:flex; flex-direction:column; align-items:center; justify-content:center; }
 body > #clipboard-preview-overlay .manual-preview.image-detail img { display:block; width:100%; height:100%; min-width:0; min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:5px; margin:0 auto; flex:1 1 auto; }
-.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:1px solid var(--card-border); border-radius:12px; background:var(--card-bg); padding:10px; cursor:default; overflow:hidden; }
-#clipboard-items .item:focus { outline:2px solid var(--selected-border); outline-offset:2px; }
-#clipboard-items .item { position:relative; margin:0; }
-#clipboard-items .item.selected { z-index:1; }
-.item:hover { border-color:var(--card-border); background:var(--card-bg); }
-.item.selected { border-color:var(--selected-border); outline:2px solid var(--accent); outline-offset:1px; background:var(--selected-bg); }
+.item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:0; border-radius:12px; background:var(--card-bg); padding:10px; cursor:default; overflow:hidden; }
+#clipboard-items .item { position:relative; margin:0; border:0; outline:0; }
+#clipboard-items .item:focus,
+#clipboard-items .item:focus-visible { outline:0; }
+#clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:inset 3px 0 0 var(--accent); }
+.item:hover { background:var(--selected-bg); }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
 .image-item .preview { aspect-ratio:auto; }
@@ -1922,12 +1921,12 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .card-indicators > .multi-select-mark[style*="display: inline-flex"] { visibility:visible; }
 .card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
 .item .meta { padding-right:52px; }
-.item.multi-selected { border-color:var(--selected-border); }
+.item.multi-selected { box-shadow:inset 0 0 0 1px var(--selected-border); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
 .empty { color:var(--muted); text-align:center; padding:40px 12px; grid-column:1/-1; }
-footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); border-top:1px solid var(--border); font-size:11px; }
+footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); font-size:11px; }
 body.keyboard-mode #search { border-color:#7da6ff; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
@@ -2386,6 +2385,20 @@ function focusHistory(index) {
   selectRow(selectedIndex, true);
   items[selectedIndex].focus({ preventScroll: true });
 }
+function activateSelectedCard() {
+  const items = rows();
+  if (!items.length) return false;
+  const index = Math.max(0, Math.min(items.length - 1, selectedIndex));
+  const item = items[index];
+  if (!item) return false;
+  selectRow(index);
+  navState.navIndex = index;
+  navState.lastCardIndex = index;
+  navState.uid = cardUids()[index] || null;
+  navState.area = 'history';
+  bridge('paste', Number(item.dataset.index || 0), '');
+  return true;
+}
 function navMove(forward) {
   const next = navReconcile(navState, cardUids());
   Object.assign(navState, next);
@@ -2458,6 +2471,28 @@ function handleClipboardPanelKeydown(event) {
   if (target === search && key === 'ArrowDown') {
     event.preventDefault();
     setFilterFocus(0);
+    return;
+  }
+
+  // Enter in the search field is handled by the dedicated search listener.
+  // Space/Enter on a focused result paste that result, including image cards.
+  if (isCard && (key === 'Enter' || key === ' ' || key === 'Spacebar' || key === 'Space')) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    const items = rows();
+    const focusedIndex = items.indexOf(target);
+    if (focusedIndex >= 0) selectedIndex = focusedIndex;
+    activateSelectedCard();
+    return;
+  }
+
+  // When the results container itself owns focus, activate the highlighted row.
+  if (target === resultsPanel && (key === 'Enter' || key === ' ' || key === 'Spacebar' || key === 'Space')) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    activateSelectedCard();
     return;
   }
 
