@@ -2241,7 +2241,7 @@ search.addEventListener('keydown', event => {
   }
 });
 search.addEventListener('keydown', event => {
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' || event.key === 'Space') {
     // Enter submits the search only; prevent it from reaching the global
     // result-selection handler, which uses Enter to paste the selected card.
     event.preventDefault();
