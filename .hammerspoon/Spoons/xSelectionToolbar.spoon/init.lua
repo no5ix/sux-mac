@@ -1250,11 +1250,11 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:9px;width:100%;height:100%;padding:10px;border:0;border-radius:14px;background:rgba(250,250,252,.98);box-shadow:none!important}
-.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:18px;font-size:12px;font-weight:650;color:#4b5563}
-.panel-count{font-size:10px;font-weight:500;color:#778092}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(112px,1fr);gap:8px;overflow-y:auto;min-height:0;flex:1}
-.result-card{appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:112px;padding:10px;border:0;border-radius:10px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important}
+.panel{display:flex;flex-direction:column;gap:18px;width:100%;height:100%;padding:20px;border:0;border-radius:20px;background:rgba(250,250,252,.98);box-shadow:none!important}
+.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:30px;font-size:24px;font-weight:700;color:#4b5563}
+.panel-count{font-size:20px;font-weight:600;color:#778092}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(224px,1fr);gap:16px;overflow-y:auto;min-height:0;flex:1}
+.result-card{appearance:none;display:flex;flex-direction:column;gap:14px;min-width:0;min-height:224px;padding:20px;border:0;border-radius:18px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important}
 .result-card[data-tone="blue"]{background:#dce8ff}
 .result-card[data-tone="purple"]{background:#e9defa}
 .result-card[data-tone="green"]{background:#dcefe2}
@@ -1263,14 +1263,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="purple"].is-selected{background:#d9c5f2}
 .result-card[data-tone="green"].is-selected{background:#c4e3d0}
 .result-card[data-tone="amber"].is-selected{background:#ecd8b9}
-.card-heading{display:flex;align-items:center;gap:5px;min-width:0}
-.card-icon{font-size:15px;line-height:1}
-.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:650;flex:1}
-.card-status{flex:none;font-size:9px;color:#9a6b16}
-.card-preview{font-size:10px;line-height:1.42;color:#495365;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.card-heading{display:flex;align-items:center;gap:10px;min-width:0}
+.card-icon{font-size:30px;line-height:1}
+.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:22px;font-weight:700;flex:1}
+.card-status{flex:none;font-size:18px;font-weight:600;color:#9a6b16}
+.card-preview{font-size:20px;line-height:1.42;color:#495365;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow-wrap:anywhere}
 .result-card[data-state="ready"] .card-status{color:#16834a}
 .result-card[data-state="error"] .card-status{color:#c43b3b}
-.panel-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9px;color:#788191;white-space:nowrap}
+.panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:16px;color:#788191;white-space:nowrap}
 @media(prefers-color-scheme:dark){
  body{color:#f4f5f7}
  .panel{background:rgba(38,40,45,.98)}
@@ -1618,8 +1618,11 @@ local function showReplacementToolbar(session)
     end)
     local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
     local rows = math.max(1, math.ceil(count / 2))
-    local height = 48 + rows * 112 + math.max(0, rows - 1) * 8 + 34
-    local width = 2 * 260 + 3 * 8 + 20
+    local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    local frame = screen:fullFrame()
+    local width = math.min(2 * 520 + 3 * 16 + 40, frame.w - 48)
+    local desiredHeight = 78 + rows * 224 + math.max(0, rows - 1) * 16 + 58
+    local height = math.min(desiredHeight, frame.h - 48)
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = false
     }, replacementToolbarUsercontent)
@@ -1629,10 +1632,9 @@ local function showReplacementToolbar(session)
     replacementToolbar:level(hs.drawing.windowLevels.floating)
     replacementToolbar:allowTextEntry(true)
     replacementToolbar:html(replacementToolbarHTML(session), "file:///")
-    local frame = (hs.mouse.getCurrentScreen() or hs.screen.mainScreen()):fullFrame()
-    local point = hs.mouse.absolutePosition()
-    local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
-    local y = math.max(frame.y + 8, math.min(point.y - 80, frame.y + frame.h - height - 8))
+    -- Center on the active display and constrain the window to its usable frame.
+    local x = frame.x + (frame.w - width) / 2
+    local y = frame.y + (frame.h - height) / 2
     replacementToolbar:frame({x=x,y=y,w=width,h=height})
     replacementToolbar:show()
     replacementToolbar:bringToFront()
