@@ -1848,17 +1848,18 @@ header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; ba
 h1 { margin:0; font-size:17px; font-weight:650; }
 .header-clear { flex-shrink:0; }
 .count { color:var(--muted); font-size:12px; margin-left:auto; }
-input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:1px solid var(--control-border); background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; }
-input:focus { border-color:var(--accent); }
+input { width:100%; margin-top:10px; padding:9px 11px; border-radius:9px; border:0; background:var(--control-bg); color:var(--panel-fg); font-size:13px; outline:none; box-shadow:none; }
+input:focus, input:focus-visible { border:0; outline:0; box-shadow:none; }
 main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 /* Keep the filter groups visually separated by spacing, not a divider. */
 .filter-separator { display:none; }
-.action { border:1px solid var(--button-border); border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; }
-.action.primary { background:#3267d6; border-color:#3267d6; color:#ffffff; }
-.action.filter-button[aria-pressed="true"] { background:#dbeafe; border-color:#bfdbfe; color:#25344a; }
+.action { border:0; border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; box-shadow:none; }
+.action:focus, .action:focus-visible { outline:0; box-shadow:none; }
+.action.primary { background:#3267d6; color:#ffffff; }
+.action.filter-button[aria-pressed="true"] { background:#dbeafe; color:#25344a; }
 .action.danger { color:#dc2626; font-weight:700; }
 @media (prefers-color-scheme: dark) {
   .action.danger { color:#fb923c; }
@@ -1882,7 +1883,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .load-more-wrap { flex:0 0 auto; width:100%; display:flex; justify-content:flex-start; }
 .item { position:relative; cursor:default; }
 .item, .item * { cursor:default; }
-.item:hover { border-color:var(--card-border); background:var(--card-bg); }
+.item:hover { background:var(--selected-bg); }
 /* This overlay lives directly under body, outside the scrolling grid and its
    stacking contexts. Its z-index intentionally exceeds the fixed header. */
 body > #clipboard-preview-overlay { display:none; position:fixed; inset:0; z-index:2147483647; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.34); box-sizing:border-box; isolation:isolate; }
@@ -1898,7 +1899,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item { position:relative; margin:0; border:0; outline:0; }
 #clipboard-items .item:focus,
 #clipboard-items .item:focus-visible { outline:0; }
-#clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:inset 3px 0 0 var(--accent); }
+#clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
@@ -1921,13 +1922,13 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .card-indicators > .multi-select-mark[style*="display: inline-flex"] { visibility:visible; }
 .card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
 .item .meta { padding-right:52px; }
-.item.multi-selected { box-shadow:inset 0 0 0 1px var(--selected-border); }
+.item.multi-selected { background:var(--selected-bg); }
 .stamp { color:var(--muted); font-size:11px; margin-top:5px; }
 .text-preview { margin-top:10px; min-height:70px; max-height:120px; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; font-size:13px; line-height:1.45; }
 .hint { color:var(--subtle); font-size:10px; margin-top:8px; }
 .empty { color:var(--muted); text-align:center; padding:40px 12px; grid-column:1/-1; }
 footer { flex:0 0 auto; padding:8px 16px; color:var(--muted); background:var(--footer-bg); font-size:11px; }
-body.keyboard-mode #search { border-color:#7da6ff; }
+body.keyboard-mode #search { outline:0; box-shadow:none; }
 </style></head><body>
 <header><div class="top"><div class="title-actions"><h1>Clipboard History</h1><button class="action danger header-clear" data-action="clearAll">⚠️ Clear All</button><button class="action header-reload" data-action="reloadSoftware">↻ Reload</button></div><span class="count">]] .. tostring(matchingCount) .. [[ matching items</span></div>
 <input id="search" placeholder="Search clipboard history here... Press Enter to search." value="]] .. escapeHTML(clipboard_search) .. [[" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-gramm="false">
