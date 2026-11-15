@@ -1514,11 +1514,17 @@ local function replacementElementIsFocused(session)
     if ok then return same == true end
     -- hs.axuielement wrappers may not expose identity comparison. Use the
     -- AXElement's hash only when available; never accept role-only equality.
-    local currentHash, originalHash
-    pcall(function() currentHash = current:asHSApplication() end)
-    pcall(function() originalHash = session.element:asHSApplication() end)
-    if currentHash and originalHash then return currentHash == originalHash end
-    return false
+    local app = hs.application.frontmostApplication()
+    if not app or app:pid() ~= session.appPid then return false end
+    local currentRole = current:attributeValue("AXRole")
+    if currentRole ~= session.originalRole then return false end
+    local currentIdentifier = current:attributeValue("AXIdentifier")
+    if session.originalIdentifier and currentIdentifier ~= session.originalIdentifier then return false end
+    local currentTitle = current:attributeValue("AXTitle")
+    if session.originalTitle and currentTitle ~= session.originalTitle then return false end
+    -- Without AX identity metadata, we cannot prove that the same field regained
+    -- focus. Fail closed rather than replace an unrelated input in the same app.
+    return session.originalIdentifier ~= nil or session.originalTitle ~= nil
 end
 
 local function startReplacementSession()
