@@ -1235,8 +1235,9 @@ local function replacementToolbarHTML(session)
         local id = tostring(config.id or "")
         cards[#cards + 1] =
             '<button type="button" class="result-card" data-index="' .. tostring(index) ..
-            '" data-id="' .. htmlEscape(id) .. '" data-state="pending" aria-label="' ..
-            htmlEscape(config.label or id) .. '">' ..
+            '" data-id="' .. htmlEscape(id) .. '" data-tone="' ..
+            (index == 1 and "blue" or index == 2 and "purple" or index == 3 and "green" or "amber") ..
+            '" data-state="pending" aria-label="' .. htmlEscape(config.label or id) .. '">' ..
             '<div class="card-heading"><span class="card-icon">' .. htmlEscape(config.icon or "") ..
             '</span><span class="card-title">' .. htmlEscape(config.label or id) ..
             '</span><span class="card-status">Processing</span></div>' ..
@@ -1254,7 +1255,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .panel-count{font-size:10px;font-weight:500;color:#778092}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(112px,1fr);gap:8px;overflow-y:auto;min-height:0;flex:1}
 .result-card{appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:112px;padding:10px;border:0;border-radius:10px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important}
-.result-card.is-selected{background:#dce8ff}
+.result-card[data-tone="blue"]{background:#dce8ff}
+.result-card[data-tone="purple"]{background:#e9defa}
+.result-card[data-tone="green"]{background:#dcefe2}
+.result-card[data-tone="amber"]{background:#f5e8d4}
+.result-card.is-selected{filter:saturate(1.12);box-shadow:inset 0 0 0 2px rgba(49,94,168,.55)!important}
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0}
 .card-icon{font-size:15px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:650;flex:1}
@@ -1268,7 +1273,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
  .panel{background:rgba(38,40,45,.98)}
  .panel-header{color:#e4e7ec}.panel-count,.panel-footer{color:#a4acba}
  .result-card{background:rgba(255,255,255,.055);color:#f4f5f7}
- .result-card.is-selected{background:#3b4d6d}
+ .result-card[data-tone="blue"]{background:#354866}
+ .result-card[data-tone="purple"]{background:#493c59}
+ .result-card[data-tone="green"]{background:#354d43}
+ .result-card[data-tone="amber"]{background:#514536}
+ .result-card.is-selected{filter:brightness(1.13);box-shadow:inset 0 0 0 2px rgba(164,194,255,.62)!important}
  .card-preview{color:#d0d5de}
 }
 </style></head><body>
@@ -1298,6 +1307,7 @@ document.addEventListener('keydown',e=>{
 });
 window.renderReplacementSnapshot=renderSnapshot;
 window.setReplacementSelection=selectAt;
+selectAt(0);
 window.addEventListener('load',()=>{bridge('ready');window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);});
 window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);
 bridge('ready');
