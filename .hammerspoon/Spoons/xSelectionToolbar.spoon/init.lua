@@ -1388,9 +1388,11 @@ local function applyReplacementResult(session, id, result)
         return
     end
     session.app:activate(true)
-    -- Reactivate the original app, then verify the original AX element is still
-    -- focused. Never Cmd+A in a different field or on a whole webpage.
+    -- Restore focus to the original editable Accessibility element after the
+    -- toolbar took keyboard focus. Do not send Cmd+A until exact focus is verified.
     replacementAfter(session, 0.22, function()
+        focusOriginalReplacementElement(session)
+        replacementAfter(session, 0.08, function()
         if not replacementElementIsFocused(session) then
             session.applying = false
             session.waitingFor = nil
@@ -1417,6 +1419,7 @@ local function applyReplacementResult(session, id, result)
                 end
                 closeReplacementSession("replacement applied")
             end)
+        end)
         end)
     end)
 end
@@ -1467,7 +1470,7 @@ local function showReplacementToolbar(session)
     replacementToolbar:transparent(true)
     replacementToolbar:shadow(false)
     replacementToolbar:level(hs.drawing.windowLevels.floating)
-    replacementToolbar:allowTextEntry(false)
+    replacementToolbar:allowTextEntry(true)
     replacementToolbar:html(replacementToolbarHTML(session), "file:///")
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
@@ -1506,14 +1509,72 @@ local function readFocusedEditableElement()
     return element
 end
 
+local function findOriginalReplacementElement(session)
+    local system = hs.axuielement.systemElement()
+    local current = system and system:attributeValue("AXFocusedUIElement")
+    if current and session.element then
+        local ok, same = pcall(function() return current:isEqual(session.element) end)
+        if ok and same then return current end
+    end
+
+    local app = hs.application.applicationForPID(session.appPid)
+    if not app then return nil end
+    local axApp = app:axElement()
+    local windows = {}
+    if session.originalWindow then windows[#windows + 1] = session.originalWindow end
+    local focusedWindow = axApp and axApp:attributeValue("AXFocusedWindow")
+    if focusedWindow then windows[#windows + 1] = focusedWindow end
+    local mainWindow = axApp and axApp:attributeValue("AXMainWindow")
+    if mainWindow then windows[#windows + 1] = mainWindow end
+
+    local function matches(element)
+        if not element then return false end
+        local role = element:attributeValue("AXRole")
+        if role ~= session.originalRole then return false end
+        if session.originalIdentifier then
+            return element:attributeValue("AXIdentifier") == session.originalIdentifier
+        end
+        if session.originalTitle then
+            return element:attributeValue("AXTitle") == session.originalTitle
+        end
+        return false
+    end
+    local function walk(root, depth)
+        if not root or depth > 12 then return nil end
+        if matches(root) then return root end
+        local children = root:attributeValue("AXChildren")
+        if type(children) == "table" then
+            for _, child in ipairs(children) do
+                local found = walk(child, depth + 1)
+                if found then return found end
+            end
+        end
+        return nil
+    end
+    for _, window in ipairs(windows) do
+        local found = walk(window, 0)
+        if found then return found end
+    end
+    return nil
+end
+
+local function focusOriginalReplacementElement(session)
+    local element = findOriginalReplacementElement(session)
+    if not element then return false end
+    local ok = pcall(function()
+        element:setAttributeValue("AXFocused", true)
+    end)
+    if ok then return true end
+    return false
+end
+
 local function replacementElementIsFocused(session)
     local system = hs.axuielement.systemElement()
     local current = system and system:attributeValue("AXFocusedUIElement")
-    if not current or not session.element then return false end
-    -- Ask AppKit Accessibility to compare the live focused element with the
-    -- captured object. Do not fall back to a same-role comparison: that could
-    -- overwrite a different input field in the same application.
-    local ok, same = pcall(function() return current:isEqual(session.element) end)
+    if not current then return false end
+    local target = findOriginalReplacementElement(session)
+    if not target then return false end
+    local ok, same = pcall(function() return current:isEqual(target) end)
     return ok and same == true
 end
 
@@ -1537,6 +1598,8 @@ local function startReplacementSession()
         originalRole = element:attributeValue("AXRole"),
         originalIdentifier = element:attributeValue("AXIdentifier"),
         originalTitle = element:attributeValue("AXTitle"),
+        originalDescription = element:attributeValue("AXDescription"),
+        originalWindow = element:attributeValue("AXWindow"),
         originalValue = element:attributeValue("AXValue"),
         originalClipboard = originalClipboard,
         originalChangeCount = originalChangeCount,
@@ -1589,12 +1652,16 @@ local function startReplacementSession()
 end
 
 local function handleReplacementHotkey()
+    logger.i("Ctrl+V replacement hotkey invoked")
     if replacementSession then
         logger.d("Replacement shortcut ignored: a replacement session is already active")
         return
     end
     local ok, started, err = pcall(startReplacementSession)
-    if ok and started then return end
+    if ok and started then
+        logger.i("Ctrl+V replacement session started")
+        return
+    end
     -- Preserve native Ctrl+V when this isn't a supported editable field.
     if not ok then logger.e("Replacement shortcut failed: " .. tostring(started))
     else logger.d("Replacement shortcut passed through: " .. tostring(err)) end
