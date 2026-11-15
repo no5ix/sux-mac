@@ -196,6 +196,12 @@ test("keyboard navigation restores the grid focus stop and global key routing", 
     "Escape has an explicit panel-level fallback");
   assert.ok(!panelScript.includes("resultsPanel.tabIndex = -1"),
     "the grid is not removed from keyboard focus order");
+  assert.ok(panelScript.includes("function activateSelectedCard()"),
+    "selected-result activation is shared by keyboard shortcuts");
+  assert.ok(panelScript.includes("key === ' '") && panelScript.includes("key === 'Enter'"),
+    "Space and Enter activate a focused result");
+  assert.ok(panelScript.includes("bridge('paste', Number(item.dataset.index || 0), '')"),
+    "keyboard activation uses the same paste bridge as click-to-paste");
 });
 
 
