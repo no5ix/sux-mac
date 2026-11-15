@@ -1555,7 +1555,6 @@ local function readFocusedEditableElement()
     local focusedWindow = app and app:focusedWindow() or nil
     local focusedWindowElement = focusedWindow and focusedWindow:axuielement() or nil
     addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
-    addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
 
     for _, candidate in ipairs(candidates) do
         local element = candidate.element
