@@ -1250,12 +1250,12 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:9px;width:100%;height:100%;padding:10px;border:1px solid rgba(0,0,0,.13);border-radius:14px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}
+.panel{display:flex;flex-direction:column;gap:9px;width:100%;height:100%;padding:10px;border:0;border-radius:14px;background:rgba(250,250,252,.98);box-shadow:none!important;-webkit-box-shadow:none!important}
 .panel-header{display:flex;align-items:center;justify-content:space-between;min-height:18px;font-size:12px;font-weight:650;color:#4b5563}
 .panel-count{font-size:10px;font-weight:500;color:#778092}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(112px,1fr);gap:8px;overflow-y:auto;min-height:0;flex:1}
-.result-card{appearance:none;-webkit-appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:112px;padding:9px;border:1px solid rgba(45,55,72,.14);border-radius:10px;background:rgba(255,255,255,.78);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .1s,border-color .1s}
-.result-card.is-selected{border:2px solid #7da6ff;padding:8px;background:#edf3ff}
+.result-card{appearance:none;-webkit-appearance:none;display:flex;flex-direction:column;gap:7px;min-width:0;min-height:112px;padding:10px;border:0;border-radius:10px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .1s}
+.result-card.is-selected{padding:10px;background:#dce8ff}
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0}
 .card-icon{font-size:15px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:650;flex:1}
@@ -1267,10 +1267,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9px;color:#788191;white-space:nowrap}
 @media(prefers-color-scheme:dark){
  body{color:#f4f5f7}
- .panel{background:rgba(38,40,45,.98);border-color:rgba(255,255,255,.15)}
+ .panel{background:rgba(38,40,45,.98)}
  .panel-header{color:#e4e7ec}.panel-count,.panel-footer{color:#a4acba}
- .result-card{background:rgba(55,58,65,.8);border-color:rgba(255,255,255,.12);color:#f4f5f7}
- .result-card.is-selected{background:#303d56;border-color:#82aaff}
+ .result-card{background:rgba(255,255,255,.055);color:#f4f5f7}
+ .result-card.is-selected{background:#3b4d6d}
  .card-preview{color:#d0d5de}
 }
 </style></head><body>
@@ -1281,6 +1281,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 </div>
 <script>
 const bridge=(action,id)=>{try{window.webkit.messageHandlers.replacementToolbar.postMessage({action,id})}catch(e){}};
+window.addEventListener('load',()=>bridge('ready'));
 const cards=()=>Array.from(document.querySelectorAll('.result-card'));
 let selectedIndex=0;
 function selectAt(index){
@@ -1575,7 +1576,10 @@ local function showReplacementToolbar(session)
         message = normalizeMessage(message)
         if type(message) ~= "table" then return end
         local action = message.action
-        if action == "choose" then
+        if action == "ready" then
+            logger.i("[Replacement] Result panel WebView loaded; synchronizing cached AI results")
+            syncReplacementCards(session)
+        elseif action == "choose" then
             chooseReplacementAction(session, tostring(message.id or ""))
         elseif action == "cancel" then
             closeReplacementSession("cancelled by user")
@@ -1596,7 +1600,7 @@ local function showReplacementToolbar(session)
     replacementToolbar:transparent(true)
     replacementToolbar:shadow(false)
     replacementToolbar:level(hs.drawing.windowLevels.floating)
-    replacementToolbar:allowTextEntry(false)
+    replacementToolbar:allowTextEntry(true)
     replacementToolbar:html(replacementToolbarHTML(session), "file:///")
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
@@ -1606,12 +1610,10 @@ local function showReplacementToolbar(session)
     replacementToolbar:frame({x=x,y=y,w=width,h=height})
     replacementToolbar:show()
     replacementToolbar:bringToFront()
-
-    -- AI requests can finish before the WebView exists, and evaluateJavaScript
-    -- can run before its document has loaded. Replay the authoritative session
-    -- cache after the page is ready instead of leaving cards stuck at "Waiting".
-    replacementAfter(session, 0.20, function() syncReplacementCards(session) end)
-    replacementAfter(session, 0.65, function() syncReplacementCards(session) end)
+    -- Make the result panel the active keyboard target. The original application
+    -- is explicitly reactivated by applyReplacementResult() before pasting.
+    local hsApp = hs.application.get("org.hammerspoon.Hammerspoon")
+    if hsApp then hsApp:activate(true) end
 end
 
 local function readFocusedEditableElement()
