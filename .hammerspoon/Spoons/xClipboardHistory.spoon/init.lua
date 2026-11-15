@@ -1933,11 +1933,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
 .card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) 20px; column-gap:5px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
-<<<<<<< HEAD
-.card-meta-row .stamp { position:absolute; left:50%; transform:translateX(-50%); margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
-=======
 .card-meta-row .stamp { position:absolute; left:calc(50% + 12px); transform:translateX(-50%); margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
->>>>>>> 2ddb683 (Shift clipboard card timestamps slightly right)
 .card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
 .card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
 .card-select-checkbox:checked::after { content:""; width:7px; height:4px; border:solid #fff; border-width:0 0 2px 2px; transform:rotate(-45deg) translate(1px,-1px); }
