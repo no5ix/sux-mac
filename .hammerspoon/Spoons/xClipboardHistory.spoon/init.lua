@@ -2011,6 +2011,12 @@ document.addEventListener('change', event => {
   handleCardCheckboxChange(event, bridge);
 }, true);
 document.addEventListener('click', event => {
+  // Checkbox interaction is selection-only; do not let it bubble into the
+  // card's normal click-to-paste handler.
+  if (event.target.closest && event.target.closest('.card-select-checkbox')) {
+    event.stopPropagation();
+    return;
+  }
   const contextItem = event.target.closest('#clipboard-context-menu');
   if (contextItem) return;
   const button = event.target.closest('[data-action]');
