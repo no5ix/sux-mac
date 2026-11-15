@@ -1544,8 +1544,13 @@ local function readFocusedEditableElement()
     -- applications do not publish it reliably. Fall back to the frontmost
     -- application's own AX tree before giving up.
     local systemOk, system = pcall(function() return hs.axuielement.systemWideElement() end)
+    local systemFocusedApp = nil
     if systemOk and system then
         addCandidate(axAttribute(system, "AXFocusedUIElement"), "system")
+        systemFocusedApp = axAttribute(system, "AXFocusedApplication")
+        addCandidate(axAttribute(systemFocusedApp, "AXFocusedUIElement"), "system-focused-application")
+        local systemFocusedWindow = axAttribute(systemFocusedApp, "AXFocusedWindow")
+        addCandidate(axAttribute(systemFocusedWindow, "AXFocusedUIElement"), "system-focused-window")
     end
 
     local app = hs.application.frontmostApplication()
@@ -1555,6 +1560,7 @@ local function readFocusedEditableElement()
         if appOk then appElement = value end
     end
     addCandidate(axAttribute(appElement, "AXFocusedUIElement"), "application")
+    addCandidate(axAttribute(axAttribute(appElement, "AXFocusedWindow"), "AXFocusedUIElement"), "application-focused-window")
 
     local focusedWindow = app and app:focusedWindow() or nil
     local focusedWindowElement = nil
@@ -1563,6 +1569,17 @@ local function readFocusedEditableElement()
         if windowOk then focusedWindowElement = value end
     end
     addCandidate(axAttribute(focusedWindowElement, "AXFocusedUIElement"), "focused-window")
+
+    -- hs.uielement exposes a separate focused-element API on macOS. Convert
+    -- its result only if it is already an axuielement-compatible object.
+    local uiOk, uiElement = pcall(function() return hs.uielement.focusedElement() end)
+    if uiOk and uiElement then
+        local converted = nil
+        pcall(function()
+            if type(uiElement.asAXUIElement) == "function" then converted = uiElement:asAXUIElement() end
+        end)
+        addCandidate(converted, "uielement-focused-element")
+    end
 
     for _, candidate in ipairs(candidates) do
         local element = candidate.element
