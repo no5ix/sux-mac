@@ -1369,7 +1369,7 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
         if exitCode ~= 0 then
             entry.status = "error"
             entry.error = trim(stdErr) ~= "" and trim(stdErr) or ("curl exited " .. tostring(exitCode))
-            updateReplacementButton(session, id, "error")
+            updateReplacementButton(session, id, "error", "", entry.error)
             return
         end
         local ok, response = pcall(function() return json.decode(stdOut or "") end)
@@ -1380,12 +1380,12 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
             entry.status = "error"
             entry.error = ok and response and response.error and tostring(response.error.message or response.error)
                 or "Invalid or empty local AI response"
-            updateReplacementButton(session, id, "error")
+            updateReplacementButton(session, id, "error", "", entry.error)
             return
         end
         entry.status = "ready"
         entry.result = trim(result)
-        updateReplacementButton(session, id, "ready")
+        updateReplacementButton(session, id, "ready", entry.result)
         print("[Replacement] Cached " .. id .. " result (" .. tostring(#entry.result) .. " chars)")
         if session.waitingFor == id then
             -- A chosen action stays highlighted while pending, then applies as
@@ -1397,7 +1397,7 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
     if not task then
         session.results[id].status = "error"
         session.results[id].error = "Could not create curl task"
-        updateReplacementButton(session, id, "error")
+        updateReplacementButton(session, id, "error", "", session.results[id].error)
         return
     end
     session.tasks[id] = task
@@ -1405,7 +1405,7 @@ local function sendReplacementAIRequest(session, config, sourceText, settings)
         session.tasks[id] = nil
         session.results[id].status = "error"
         session.results[id].error = "Could not start curl task"
-        updateReplacementButton(session, id, "error")
+        updateReplacementButton(session, id, "error", "", session.results[id].error)
     end
 end
 
@@ -1523,11 +1523,14 @@ local function showReplacementToolbar(session)
     session.navigationHotkeys = {}
     local function moveSelection(delta)
         if not isCurrentReplacementSession(session) then return end
-        local count = #(CUSTOM_AI_BUTTONS or {})
+        local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
         if count < 1 then return end
         session.activeIndex = ((session.activeIndex - 1 + delta) % count) + 1
         if replacementToolbar then
-            replacementToolbar:evaluateJavaScript("window.focusReplacementButton && window.focusReplacementButton(" .. tostring(session.activeIndex - 1) .. ");")
+            replacementToolbar:evaluateJavaScript(
+                "window.setReplacementSelection && window.setReplacementSelection(" ..
+                tostring(session.activeIndex - 1) .. ");"
+            )
         end
     end
     local function chooseActive()
@@ -1539,6 +1542,7 @@ local function showReplacementToolbar(session)
         hs.hotkey.bind({}, "tab", function() moveSelection(1) end),
         hs.hotkey.bind({"shift"}, "tab", function() moveSelection(-1) end),
         hs.hotkey.bind({}, "space", chooseActive),
+        hs.hotkey.bind({}, "return", chooseActive),
         hs.hotkey.bind({}, "escape", function()
             closeReplacementSession("cancelled by Escape")
             if session.app and session.app:isRunning() then session.app:activate(true) end
@@ -1557,7 +1561,13 @@ local function showReplacementToolbar(session)
             if session.app and session.app:isRunning() then session.app:activate(true) end
         end
     end)
-    replacementToolbar = webview.new({x=0,y=0,w=250,h=62}, {
+    local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
+    local columns = math.min(2, count)
+    local rows = math.max(1, math.ceil(count / 2))
+    local cardHeight = 112
+    local height = 48 + rows * cardHeight + math.max(0, rows - 1) * 8 + 34
+    local width = 2 * 260 + 3 * 8 + 20
+    replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true,
         transparent = true, shadow = false
     }, replacementToolbarUsercontent)
@@ -1565,23 +1575,16 @@ local function showReplacementToolbar(session)
     replacementToolbar:transparent(true)
     replacementToolbar:shadow(false)
     replacementToolbar:level(hs.drawing.windowLevels.floating)
-    replacementToolbar:allowTextEntry(true)
+    replacementToolbar:allowTextEntry(false)
     replacementToolbar:html(replacementToolbarHTML(session), "file:///")
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
-    local count = math.max(1, #(CUSTOM_AI_BUTTONS or {}))
-    local width = math.min(frame.w - 16, count * 48 + (count - 1) * 4 + 14)
     local x = math.max(frame.x + 8, math.min(point.x - width / 2, frame.x + frame.w - width - 8))
-    local y = math.max(frame.y + 8, math.min(point.y - 78, frame.y + frame.h - 70))
-    replacementToolbar:frame({x=x,y=y,w=width,h=62})
+    local y = math.max(frame.y + 8, math.min(point.y - 80, frame.y + frame.h - height - 8))
+    replacementToolbar:frame({x=x,y=y,w=width,h=height})
     replacementToolbar:show()
     replacementToolbar:bringToFront()
-    timer.doAfter(0.05, function()
-        if replacementToolbar and isCurrentReplacementSession(session) then
-            replacementToolbar:evaluateJavaScript("window.focusFirstReplacementButton && window.focusFirstReplacementButton();")
-        end
-    end)
 end
 
 local function readFocusedEditableElement()
