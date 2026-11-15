@@ -1253,13 +1253,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(226,229,234,.98);box-shadow:none!important}
 .panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:12px;font-weight:700;color:#4b5563}
  .panel-title{display:flex;align-items:center;min-width:0}
- .panel-close{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;margin:-2px -2px -2px 8px;padding:0;border:0;border-radius:9px;background:transparent;color:#596273;font-family:inherit;font-size:23px;font-weight:400;line-height:1;cursor:pointer;transition:background-color .12s,color .12s}
- .panel-close:hover,.panel-close:focus-visible{background:rgba(45,55,72,.14);color:#202124;outline:none}
- .panel-close:active{background:rgba(45,55,72,.23)}
+ .panel-close{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:104px;height:30px;margin:-2px -2px -2px 8px;padding:0 10px;border:0;border-radius:9px;background:rgba(45,55,72,.08);color:#596273;font-family:inherit;font-size:11px;font-weight:650;line-height:1;white-space:nowrap;cursor:pointer;transition:background-color .12s,color .12s,transform .12s}
+ .panel-close:hover,.panel-close:focus-visible{background:rgba(45,55,72,.17);color:#202124;outline:none}
+ .panel-close:active{background:rgba(45,55,72,.25);transform:scale(.98)}
+ .panel-close kbd{font:inherit;font-size:10px;font-weight:700;padding:2px 4px;margin-right:5px;border-radius:4px;background:rgba(45,55,72,.12)}
 
 
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:10px;overflow:hidden;min-height:0;flex:1}
-.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
+.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transform:translateY(0);transition:filter .12s,background-color .12s,transform .12s}
 .result-card[data-tone="blue"]{background:#dce8ff}
 .result-card[data-tone="purple"]{background:#e9defa}
 .result-card[data-tone="green"]{background:#dcefe2}
@@ -1268,6 +1269,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="purple"].is-selected,.result-card[data-tone="purple"]:hover{background:#d9c5f2}
 .result-card[data-tone="green"].is-selected,.result-card[data-tone="green"]:hover{background:#c4e3d0}
 .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#ecd8b9}
+ .result-card:hover{transform:translateY(-1px)}
+
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
 .card-icon{font-size:12px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;flex:1}
@@ -1280,9 +1283,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
  body{color:#f4f5f7}
  .panel{background:rgba(38,40,45,.98)}
  .panel-header{color:#e4e7ec}.panel-footer{color:#a4acba}
- .panel-close{color:#c5cbd5}
- .panel-close:hover,.panel-close:focus-visible{background:rgba(255,255,255,.15);color:#fff}
- .panel-close:active{background:rgba(255,255,255,.23)}
+ .panel-close{background:rgba(255,255,255,.08);color:#c5cbd5}
+ .panel-close:hover,.panel-close:focus-visible{background:rgba(255,255,255,.19);color:#fff}
+ .panel-close:active{background:rgba(255,255,255,.26)}
+ .panel-close kbd{background:rgba(255,255,255,.14)}
  .result-card{background:rgba(255,255,255,.055);color:#f4f5f7}
  .result-card[data-tone="blue"]{background:#354866}
  .result-card[data-tone="purple"]{background:#493c59}
@@ -1296,7 +1300,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 }
 </style></head><body>
 <div class="panel">
- <div class="panel-header"><span class="panel-title">AI Text Replacement</span><button type="button" class="panel-close" aria-label="Close AI Text Replacement" title="Close" onclick="bridge('cancel')">×</button></div>
+ <div class="panel-header"><span class="panel-title">AI Text Replacement</span><button type="button" class="panel-close" aria-label="Cancel AI Text Replacement" title="Esc to Cancel" onclick="bridge('cancel')"><kbd>Esc</kbd> to Cancel</button></div>
  <div class="grid">]] .. table.concat(cards,"") .. [[</div>
  <div class="panel-footer"><span>← → Horizontal · ↑ ↓ Vertical · Tab Navigate · Enter / Space Paste · Esc Close</span><span id="selected-count">1 / ]] .. tostring(count) .. [[</span></div>
 </div>
