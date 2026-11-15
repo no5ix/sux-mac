@@ -1424,7 +1424,7 @@ local function chooseReplacementAction(session, id)
         if replacementToolbar then
             replacementToolbar:evaluateJavaScript(
                 "window.setReplacementState && window.setReplacementState(" ..
-                replacementJSCall("JSON.parse", id):match("%((.*)%)") .. ", 'waiting');"
+                replacementJSONString(id) .. ", 'waiting');"
             )
         end
     else
