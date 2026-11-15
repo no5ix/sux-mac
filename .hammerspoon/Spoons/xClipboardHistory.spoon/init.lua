@@ -1845,7 +1845,17 @@ function clipboardPanelHTML()
 }
 * { box-sizing: border-box; }
 html, body { width:100%; height:100%; margin:0; overflow:hidden; }
-body { background:var(--panel-bg); color:var(--panel-fg); font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; display:flex; flex-direction:column; }
+html { background:transparent; }
+body {
+  background:var(--panel-bg);
+  color:var(--panel-fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  display:flex;
+  flex-direction:column;
+  border-radius:14px;
+  overflow:hidden;
+  clip-path:inset(0 round 14px);
+}
 header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
 .top { display:flex; align-items:center; gap:10px; }
 .title-actions { display:flex; align-items:center; gap:10px; min-width:0; }
