@@ -1858,8 +1858,8 @@ main:focus { outline:none; }
 .item:focus-visible { outline:2px solid var(--selected-border); outline-offset:2px; }
 .item[hidden], .load-more-wrap[hidden], .empty[hidden] { display:none!important; }
 .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-/* Keep the filter groups visually separated by spacing, not a divider. */
-.filter-separator { display:none; }
+/* Separate date filters from content-type filters. */
+.filter-separator { display:block; flex:0 0 1px; width:1px; height:24px; align-self:center; margin:0 3px; background:var(--muted); opacity:.55; }
 .action { border:0; border-radius:8px; padding:7px 10px; background:var(--button-bg); color:var(--panel-fg); cursor:pointer; font-size:12px; box-shadow:none; }
 .action:hover, .action:focus, .action:focus-visible { background:var(--selected-bg); outline:0; box-shadow:none; }
 .action.primary { background:#3267d6; color:#ffffff; }
