@@ -26,7 +26,6 @@ local replacementSessionSequence = 0
 local replacementKeyTap = nil
 local replacementToolbar = nil
 local replacementToolbarUsercontent = nil
-local replacementSyntheticUntil = 0
 -- App that owned the text selection before the floating toolbar was shown.
 local selectionOriginApp = nil
 
@@ -1164,12 +1163,6 @@ end
 
 -- Replacement mode: prefetch every CUSTOM_AI_BUTTONS result concurrently,
 -- then let the user choose a cached result without waiting on the UI thread.
-local function replacementJSCall(functionName, value)
-    local encoded = json.encode({ value })
-    local literal = type(encoded) == "table" and encoded[1] or encoded or '""'
-    return "window." .. functionName .. "(" .. literal .. ");"
-end
-
 local function replacementJSONString(value)
     local encoded = json.encode({ tostring(value or "") })
     return type(encoded) == "table" and encoded[1] or encoded or '""'
@@ -1215,8 +1208,10 @@ local function isCurrentReplacementSession(session)
 end
 
 local function replacementAfter(session, delay, callback)
-    local handle = timer.doAfter(delay, function()
-        for i = #(session.captureTimers or {}), 1, -1 do
+    session.captureTimers = session.captureTimers or {}
+    local handle
+    handle = timer.doAfter(delay, function()
+        for i = #session.captureTimers, 1, -1 do
             if session.captureTimers[i] == handle then
                 table.remove(session.captureTimers, i)
                 break
@@ -1224,7 +1219,6 @@ local function replacementAfter(session, delay, callback)
         end
         if isCurrentReplacementSession(session) then callback() end
     end)
-    session.captureTimers = session.captureTimers or {}
     if handle then table.insert(session.captureTimers, handle) end
     return handle
 end
@@ -1265,8 +1259,9 @@ const bridge=(action,id)=>{try{window.webkit.messageHandlers.replacementToolbar.
 const buttons=()=>Array.from(document.querySelectorAll('.replacement-button'));
 function focusAt(i){const b=buttons();if(!b.length)return;const n=Math.max(0,Math.min(b.length-1,i));b.forEach((x,j)=>x.tabIndex=j===n?0:-1);b[n].focus()}
 function setHover(id){buttons().forEach(b=>b.classList.toggle('is-hovered',b.dataset.id===id))}
+function activeId(){return document.activeElement?.dataset?.id||''}
 function setState(id,state){const b=buttons().find(x=>x.dataset.id===id);if(!b)return;b.dataset.state=state;const s=b.querySelector('.status');if(s)s.textContent=state==='ready'?'✓':state==='error'?'!':'…'}
-buttons().forEach((b,i)=>{b.tabIndex=i===0?0:-1;b.dataset.state='pending';b.addEventListener('mouseenter',()=>setHover(b.dataset.id));b.addEventListener('mouseleave',()=>setHover(document.activeElement?.dataset?.id||''));b.addEventListener('focus',()=>setHover(b.dataset.id));b.addEventListener('click',()=>bridge('choose',b.dataset.id))});
+buttons().forEach((b,i)=>{b.tabIndex=i===0?0:-1;b.dataset.state='pending';b.addEventListener('mouseenter',()=>setHover(b.dataset.id));b.addEventListener('mouseleave',()=>setHover(activeId()));b.addEventListener('focus',()=>setHover(b.dataset.id));b.addEventListener('click',()=>bridge('choose',b.dataset.id))});
 document.addEventListener('keydown',e=>{
  const b=buttons(),i=b.indexOf(document.activeElement);
  if(e.key==='Escape'){e.preventDefault();bridge('cancel');return}
@@ -1517,8 +1512,12 @@ local function replacementElementIsFocused(session)
     if not current or not session.element then return false end
     local ok, same = pcall(function() return current:isEqual(session.element) end)
     if ok then return same == true end
-    -- If Accessibility cannot prove this is still the same input element, fail
-    -- closed rather than risking replacing text in a different field.
+    -- hs.axuielement wrappers may not expose identity comparison. Use the
+    -- AXElement's hash only when available; never accept role-only equality.
+    local currentHash, originalHash
+    pcall(function() currentHash = current:asHSApplication() end)
+    pcall(function() originalHash = session.element:asHSApplication() end)
+    if currentHash and originalHash then return currentHash == originalHash end
     return false
 end
 
@@ -1539,6 +1538,10 @@ local function startReplacementSession()
         app = app,
         appPid = app:pid(),
         element = element,
+        originalRole = element:attributeValue("AXRole"),
+        originalIdentifier = element:attributeValue("AXIdentifier"),
+        originalTitle = element:attributeValue("AXTitle"),
+        originalValue = element:attributeValue("AXValue"),
         originalClipboard = originalClipboard,
         originalChangeCount = originalChangeCount,
         createdAt = timer.secondsSinceEpoch(),
@@ -1547,7 +1550,7 @@ local function startReplacementSession()
     replacementSession = session
 
     -- Mark the synthetic Cmd+C so xClipboardHistory ignores this temporary text.
-    replacementSyntheticUntil = timer.secondsSinceEpoch() + 1.2
+    replacementSyntheticUntil = timer.secondsSinceEpoch() + 1.8
     session.syntheticUntil = replacementSyntheticUntil
     _G.xSelectionToolbarSyntheticCopyUntil = replacementSyntheticUntil
     eventtap.keyStroke({"cmd"}, "a", 0.04)
@@ -1569,15 +1572,19 @@ local function startReplacementSession()
                     pasteboard.clearContents()
                 end
             end
-            if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
-                _G.xSelectionToolbarSyntheticCopyUntil = nil
-            end
             if currentChangeCount == originalChangeCount or sourceText == "" then
                 closeReplacementSession("empty or uncaptured input")
                 hs.alert.show("No text found in the focused input field")
                 return
             end
             session.sourceText = sourceText
+            -- Keep the marker active briefly so the clipboard history watcher can
+            -- observe and discard the synthetic capture change even if delivery lags.
+            replacementAfter(session, 0.35, function()
+                if _G.xSelectionToolbarSyntheticCopyUntil == session.syntheticUntil then
+                    _G.xSelectionToolbarSyntheticCopyUntil = nil
+                end
+            end)
             prefetchReplacementResults(session, sourceText)
             showReplacementToolbar(session)
         end)
