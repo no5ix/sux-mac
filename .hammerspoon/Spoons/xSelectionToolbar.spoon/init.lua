@@ -1432,21 +1432,18 @@ local function applyReplacementResult(session, id, result)
             eventtap.keyStroke({"cmd"}, "a", 0.04)
             replacementAfter(session, 0.08, function()
                 local activeApp = hs.application.frontmostApplication()
-                local activeSystem = hs.axuielement.systemWideElement()
-                local activeElement = activeSystem and activeSystem:attributeValue("AXFocusedUIElement")
-                local activeRole = activeElement and activeElement:attributeValue("AXRole")
-                if not activeApp or activeApp:pid() ~= session.appPid or activeRole ~= session.originalRole then
-                    if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) end
+                if not activeApp or activeApp:pid() ~= session.appPid then
+                    if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) else pasteboard.clearContents() end
                     session.applying = false
                     session.waitingFor = nil
-                    hs.alert.show("Input focus changed; replacement cancelled")
+                    hs.alert.show("Input application lost focus; replacement cancelled")
                     return
                 end
 
                 eventtap.keyStroke({"cmd"}, "v", 0.04)
                 replacementAfter(session, 0.08, function()
-                    if pasteboard.getContents() == result and oldClipboard ~= nil then
-                        pasteboard.setContents(oldClipboard)
+                    if pasteboard.getContents() == result then
+                        if oldClipboard ~= nil then pasteboard.setContents(oldClipboard) else pasteboard.clearContents() end
                     end
                     closeReplacementSession("replacement applied")
                 end)
