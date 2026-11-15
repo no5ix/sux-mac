@@ -1251,7 +1251,7 @@ local function replacementToolbarHTML(session)
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(226,229,234,.98);box-shadow:none!important}
-.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:16px;font-weight:700;color:#4b5563}
+.panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:12px;font-weight:700;color:#4b5563}
 
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:10px;overflow:hidden;min-height:0;flex:1}
 .result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;transition:filter .12s,background-color .12s}
@@ -1264,10 +1264,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="green"].is-selected,.result-card[data-tone="green"]:hover{background:#c4e3d0}
 .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#ecd8b9}
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
-.card-icon{font-size:22px;line-height:1}
-.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700;flex:1}
+.card-icon{font-size:12px;line-height:1}
+.card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;flex:1}
 
- .card-preview{font-size:15px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
+ .card-preview{font-size:13px;line-height:1.48;color:#495365;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
 
 
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#788191;white-space:nowrap}
@@ -1623,7 +1623,7 @@ local function showReplacementToolbar(session)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     -- Use 75% of the active display dimensions, keeping the panel centered.
-    local width = frame.w * 0.85
+    local width = frame.w * 0.76
     local height = frame.h * 0.75
     replacementToolbar = webview.new({x=0,y=0,w=width,h=height}, {
         javaScriptEnabled = true, privateBrowsing = true, transparent = true, shadow = true
