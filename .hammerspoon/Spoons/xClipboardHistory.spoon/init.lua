@@ -1933,8 +1933,8 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .item:hover { background:var(--selected-bg); }
 .card-meta-row { position:relative; display:grid; grid-template-columns:24px minmax(0,1fr) 24px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; }
 .card-meta-row .stamp { grid-column:2; grid-row:1; justify-self:center; margin:0; text-align:center; white-space:nowrap; }
-.card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:1px solid var(--muted); border-radius:0; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
-.card-select-checkbox:checked { border-color:#3478e5; border-radius:0; background:#3478e5; }
+.card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
+.card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
 .card-select-checkbox:checked::after { content:""; width:7px; height:4px; border:solid #fff; border-width:0 0 2px 2px; transform:rotate(-45deg) translate(1px,-1px); }
 .card-select-checkbox:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .card-meta-row .pin-mark,.card-meta-row .pin-placeholder { grid-column:3; grid-row:1; justify-self:end; width:20px; text-align:center; }
