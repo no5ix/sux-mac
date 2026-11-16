@@ -701,7 +701,8 @@ end
 
 local function loadPinnedEntries()
     local out = {}
-    for index, record in ipairs(readPinnedHistory()) do
+    local records = readPinnedHistory() or {}
+    for index, record in ipairs(records) do
         local entry = pinnedMetadata(record)
         if entry then
             -- Legacy records inherit their prior JSON order until reordered.
