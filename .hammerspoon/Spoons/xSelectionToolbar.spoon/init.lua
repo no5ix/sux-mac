@@ -272,12 +272,14 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
- .bar{position:relative;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
+ .bar{position:relative;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:1;transform:scale(1);transition:background-color .12s,border-color .12s,opacity .30s ease,transform .38s cubic-bezier(.22,.8,.24,1)}
   .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .28s ease,transform .38s cubic-bezier(.22,.8,.24,1),visibility .38s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
+.bar.dismissed{opacity:0;transform:scale(.92);pointer-events:none}
+.bar.dismissed .compact-trigger{opacity:0;pointer-events:none}
 .compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .28s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6.4px;width:30.4px;height:30.4px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:17.6px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
@@ -295,7 +297,7 @@ button:active{background-color:var(--toolbar-active)!important}
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);}
+function setExpanded(expanded,dismiss){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);bar.classList.toggle('dismissed',!!dismiss);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
@@ -2081,7 +2083,7 @@ local function buildToolbar(text)
     -- back underneath the pointer. Do not interpret that as a fresh hover;
     -- otherwise the compact trigger repeatedly expands/collapses and jitters.
     local suppressExpandUntilMouseLeaves = false
-    local function setToolbarExpanded(expanded)
+    local function setToolbarExpanded(expanded, dismissAfterCollapse)
         if not toolbar or not toolbar:isVisible() or toolbarExpanded == expanded then return end
         toolbarExpanded = expanded
         if not expanded then
@@ -2091,14 +2093,14 @@ local function buildToolbar(text)
         if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
 
         local currentFrame = toolbar:frame()
-        local targetWidth = expanded and expandedToolbarWidth or compactToolbarWidth
+        local targetWidth = expanded and expandedToolbarWidth or (dismissAfterCollapse and 0 or compactToolbarWidth)
         local compactCenterX = x + compactToolbarWidth / 2
         local targetX = math.max(frame.x + 8, math.min(compactCenterX - targetWidth / 2,
             frame.x + frame.w - targetWidth - 8))
         local startX, startWidth = currentFrame.x, currentFrame.w
         local startTime = timer.secondsSinceEpoch()
         local duration = 0.38
-        toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. ")")
+        toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. "," .. tostring(dismissAfterCollapse == true) .. ")")
 
         toolbarFrameAnimationTimer = timer.doEvery(1 / 60, function()
             if not toolbar or not toolbar:isVisible() then
@@ -2115,6 +2117,7 @@ local function buildToolbar(text)
                 toolbar:frame({x=targetX,y=current.y,w=targetWidth,h=current.h})
                 toolbarFrameAnimationTimer:stop()
                 toolbarFrameAnimationTimer = nil
+                if dismissAfterCollapse then hideToolbar() end
             end
         end)
     end
@@ -2151,7 +2154,7 @@ local function buildToolbar(text)
                 local f = toolbar:frame()
                 local stillInside = p.x >= f.x and p.x <= f.x + f.w
                     and p.y >= f.y and p.y <= f.y + f.h
-                if not stillInside then setToolbarExpanded(false) end
+                if not stillInside then setToolbarExpanded(false, true) end
             end)
         end
         local rx, ry = mouse.x - bounds.x, mouse.y - bounds.y
