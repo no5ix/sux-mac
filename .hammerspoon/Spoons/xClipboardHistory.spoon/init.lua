@@ -702,20 +702,31 @@ end
 local function loadPinnedEntries()
     local out = {}
     local records = readPinnedHistory() or {}
-    for index, record in ipairs(records) do
+    for _, record in ipairs(records) do
         local entry = pinnedMetadata(record)
         if entry then
-            -- Legacy records inherit their prior JSON order until reordered.
-            entry.sortOrder = tonumber(record.sortOrder) or index
+            entry.sortOrder = tonumber(record.sortOrder)
             out[#out + 1] = entry
         end
     end
     table.sort(out, function(a, b)
-        if a.sortOrder ~= b.sortOrder then return a.sortOrder < b.sortOrder end
-        if a.pinnedAt ~= b.pinnedAt then return a.pinnedAt < b.pinnedAt end
-        return tostring(a.id) < tostring(b.id)
+        if a.sortOrder and b.sortOrder and a.sortOrder ~= b.sortOrder then
+            return a.sortOrder < b.sortOrder
+        end
+        if a.sortOrder and not b.sortOrder then return true end
+        if b.sortOrder and not a.sortOrder then return false end
+        return legacyPinnedOrderLess(a, b)
     end)
     return out
+end
+
+local function legacyPinnedOrderLess(a, b)
+    local aPinnedAt, bPinnedAt = tonumber(a.pinnedAt) or tonumber(a.ts) or 0,
+        tonumber(b.pinnedAt) or tonumber(b.ts) or 0
+    if aPinnedAt ~= bPinnedAt then return aPinnedAt > bPinnedAt end
+    local aTs, bTs = tonumber(a.ts) or 0, tonumber(b.ts) or 0
+    if aTs ~= bTs then return aTs > bTs end
+    return tostring(a.id or "") < tostring(b.id or "")
 end
 
 local function normalizePinnedSortOrder(records)
@@ -728,10 +739,7 @@ local function normalizePinnedSortOrder(records)
         if ao and bo and ao ~= bo then return ao < bo end
         if ao ~= nil and bo == nil then return true end
         if ao == nil and bo ~= nil then return false end
-        if (tonumber(a.pinnedAt) or 0) ~= (tonumber(b.pinnedAt) or 0) then
-            return (tonumber(a.pinnedAt) or 0) < (tonumber(b.pinnedAt) or 0)
-        end
-        return tostring(a.id or "") < tostring(b.id or "")
+        return legacyPinnedOrderLess(a, b)
     end)
     for index, record in ipairs(ordered) do record.sortOrder = index end
     return ordered
@@ -957,6 +965,7 @@ local function migratePinnedHistory()
     end
     local migrated, legacyFiles, changes = {}, {}, 0
     local payloadIds = nil
+    local legacyOrder = {}
     for index, record in ipairs(records) do
         if type(record) ~= "table" then
             changes = changes + 1
@@ -988,11 +997,10 @@ local function migratePinnedHistory()
                 migratedRecord.pinnedAt = tonumber(migratedRecord.ts) or os.time()
                 changes = changes + 1
             end
-            -- Backfill custom positions in the exact order already presented by
-            -- the legacy Pin scope. No existing pins move during migration.
+            -- Defer legacy sort positions until all old records are available,
+            -- so migration can preserve the previous newest-pinned-first view.
             if tonumber(migratedRecord.sortOrder) == nil then
-                migratedRecord.sortOrder = index
-                changes = changes + 1
+                legacyOrder[#legacyOrder + 1] = migratedRecord
             else
                 migratedRecord.sortOrder = tonumber(migratedRecord.sortOrder)
             end
@@ -1014,6 +1022,16 @@ local function migratePinnedHistory()
             end
             migrated[#migrated + 1] = migratedRecord
         end
+    end
+    table.sort(legacyOrder, legacyPinnedOrderLess)
+    local nextSortOrder = 0
+    for _, record in ipairs(migrated) do
+        nextSortOrder = math.max(nextSortOrder, tonumber(record.sortOrder) or 0)
+    end
+    for _, record in ipairs(legacyOrder) do
+        nextSortOrder = nextSortOrder + 1
+        record.sortOrder = nextSortOrder
+        changes = changes + 1
     end
     if changes == 0 then return false end
     copyPinnedFile(PINNED_HISTORY_PATH, PINNED_MIGRATION_BACKUP_PATH)
