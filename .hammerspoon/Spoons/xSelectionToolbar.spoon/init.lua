@@ -271,21 +271,21 @@ local function getToolbarHTML(text)
 :root{color-scheme:light dark}
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
-.bar{position:relative;display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
- .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
-.bar.collapsed{width:52px;min-width:52px;max-width:52px;height:52px;min-height:52px;max-height:52px;overflow:hidden;flex:0 0 52px}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
+ .bar{position:relative;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
+  .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
+.bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{display:none}
-.bar.expanded{width:max-content;height:52px;min-height:52px;overflow:hidden}
+.bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{display:inline-flex;visibility:visible;opacity:1;transform:translateX(0)}
-.compact-trigger{position:absolute!important;left:6px;top:6px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
+.compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
 .bar.anchor-right .compact-trigger{left:auto;right:6px}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
-button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
+button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:30.4px;height:30.4px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:17.6px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
-.icon{display:inline-flex;align-items:center;justify-content:center;min-width:20px;font-size:22px;line-height:1}
-.separator{flex:0 0 1px;width:1px;height:24px;background:var(--toolbar-separator);margin:0 2px}
+.icon{display:inline-flex;align-items:center;justify-content:center;min-width:16px;font-size:17.6px;line-height:1}
+.separator{flex:0 0 1px;width:1px;height:19.2px;background:var(--toolbar-separator);margin:0 1.6px}
 :root,[data-appearance="light"]{--toolbar-bg:rgba(250,250,252,.98);--toolbar-fg:#202124;--toolbar-border:rgba(0,0,0,.12);--toolbar-hover:#d8dee9;--toolbar-hover-border:rgba(40,50,70,.18);--toolbar-active:#c5ccd8;--toolbar-separator:#d9dce2}
 [data-appearance="dark"]{--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
@@ -2025,8 +2025,8 @@ local function buildToolbar(text)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
-    local height = 62
-    local x = math.max(frame.x + 8, math.min(point.x - 180, frame.x + frame.w - 360 - 8))
+    local height = 49.6
+    local x = math.max(frame.x + 8, math.min(point.x - 144, frame.x + frame.w - 288 - 8))
     local y = point.y - height - 14
     if y < frame.y + 8 then y = point.y + 18 end
     y = math.max(frame.y + 8, math.min(y, frame.y + frame.h - height - 8))
@@ -2049,14 +2049,14 @@ local function buildToolbar(text)
 
     local buttonWidths = {}
     local buttonActions = {}
-    local groupSeparatorWidth = 9 -- separator width plus side margins and following gap
-    local gap, padding = 4, 6
+    local groupSeparatorWidth = 7.2 -- scaled separator width plus side margins and following gap
+    local gap, padding = 3.2, 4.8
     local visibleGroupCount = 0
     for _, group in ipairs(toolbarGroups) do
         if #group > 0 then
             visibleGroupCount = visibleGroupCount + 1
             for _, button in ipairs(group) do
-                buttonWidths[#buttonWidths + 1] = 38
+                buttonWidths[#buttonWidths + 1] = 30.4
                 buttonActions[#buttonActions + 1] = button.action
             end
         end
@@ -2066,23 +2066,18 @@ local function buildToolbar(text)
         + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 20
-    local compactToolbarWidth = 60
+    local compactToolbarWidth = 48
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
-    local anchorRight = point.x > frame.x + frame.w / 2
-    local expandedToolbarWidth = anchorRight
-        and math.min(toolbarWidth, x + compactToolbarWidth - frame.x - 8)
-        or math.min(toolbarWidth, frame.x + frame.w - x - 8)
+    local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
-    if anchorRight then toolbar:evaluateJavaScript("setAnchorRight(true)") end
 
     -- The same WebView has compact and expanded states. Keep the compact
     -- trigger anchored at the selection point; expand around that center on hover.
     local toolbarExpanded = false
     local collapseTimer = nil
     local COLLAPSE_DELAY = 0.25
-    -- Keep the native window's left edge fixed during resize so the compact trigger
-    -- stays at the same screen coordinate throughout collapse/expansion.
+    -- Expand and collapse around the compact trigger's center, clamped to screen bounds.
     -- While the native window is collapsing, its shrinking bounds can move
     -- back underneath the pointer. Do not interpret that as a fresh hover;
     -- otherwise the compact trigger repeatedly expands/collapses and jitters.
@@ -2098,7 +2093,9 @@ local function buildToolbar(text)
 
         local currentFrame = toolbar:frame()
         local targetWidth = expanded and expandedToolbarWidth or compactToolbarWidth
-        local targetX = anchorRight and (x + compactToolbarWidth - targetWidth) or x
+        local compactCenterX = x + compactToolbarWidth / 2
+        local targetX = math.max(frame.x + 8, math.min(compactCenterX - targetWidth / 2,
+            frame.x + frame.w - targetWidth - 8))
         local startX, startWidth = currentFrame.x, currentFrame.w
         local startTime = timer.secondsSinceEpoch()
         local duration = 0.20
@@ -2160,8 +2157,8 @@ local function buildToolbar(text)
         end
         local rx, ry = mouse.x - bounds.x, mouse.y - bounds.y
         local target = nil
-        if toolbarExpanded and ry >= 7 and ry <= 51 then
-            local cursor = padding + 1 -- left border + bar padding
+        if toolbarExpanded and ry >= 5.6 and ry <= 40.8 then
+            local cursor = padding + 0.8 -- scaled left border + bar padding
             local actionIndex = 1
             for groupIndex, group in ipairs(toolbarGroups) do
                 if #group > 0 then
