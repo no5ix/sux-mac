@@ -3103,11 +3103,6 @@ const pinnedReorderController = createPinnedReorderController(
 );
 // The Lua renderer may replace the cards after filter/search updates. Sync the
 // affordance from the authoritative Pin filter state after each DOM mutation.
-const pinnedReorderObserver = new MutationObserver(() => {
-  const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
-  pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
-});
-pinnedReorderObserver.observe(pinnedReorderRoot, { childList: true });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) pinnedReorderController.destroy();
 });
