@@ -16,6 +16,7 @@ local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
 local hoverWatcher = nil
 local appearancePoll = nil
+local toolbarFrameAnimationTimer = nil
 
 local toolbar = nil
 local selectionWatcher = nil
@@ -212,6 +213,7 @@ local function looksLikeImagePayload(value)
 end
 
 local function hideToolbar()
+    if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
     if toolbar then toolbar:hide() end
 end
 
@@ -271,10 +273,10 @@ local function getToolbarHTML(text)
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
 .bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
-.full-actions{display:none;align-items:center;gap:4px;overflow:hidden;white-space:nowrap}
-.bar.expanded .full-actions{display:inline-flex}
-.compact-trigger{display:inline-flex!important}
-.bar.expanded .compact-trigger{display:none!important}
+ .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
+.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0)}
+.compact-trigger{display:inline-flex!important;opacity:1;transition:opacity .12s ease}
+.bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
@@ -1978,13 +1980,13 @@ local function buildToolbar(text)
         developerExtrasEnabled = false,
         javaScriptCanOpenWindowsAutomatically = false,
         transparent = true,
-        shadow = false,
+        shadow = true,
         opaque = false
     }, usercontent)
     toolbar:windowStyle(0)
     toolbar:allowTextEntry(false)
     toolbar:transparent(true)
-    toolbar:shadow(false)
+    toolbar:shadow(true)
     toolbar:level(hs.drawing.windowLevels.floating)
     toolbar:windowTitle("Selection Actions")
     toolbar:html(getToolbarHTML(text), "file:///")
@@ -2068,17 +2070,39 @@ local function buildToolbar(text)
     local toolbarExpanded = false
     local collapseTimer = nil
     local COLLAPSE_DELAY = 0.25
+    local compactCenterX = x + compactToolbarWidth / 2
     local function setToolbarExpanded(expanded)
         if not toolbar or not toolbar:isVisible() or toolbarExpanded == expanded then return end
         toolbarExpanded = expanded
         if collapseTimer then collapseTimer:stop(); collapseTimer = nil end
+        if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
+
         local currentFrame = toolbar:frame()
         local targetWidth = expanded and expandedToolbarWidth or compactToolbarWidth
-        local centerX = currentFrame.x + currentFrame.w / 2
-        local targetX = math.max(frame.x + 8, math.min(centerX - targetWidth / 2,
+        local targetX = math.max(frame.x + 8, math.min(compactCenterX - targetWidth / 2,
             frame.x + frame.w - targetWidth - 8))
-        toolbar:frame({x=targetX,y=currentFrame.y,w=targetWidth,h=currentFrame.h})
+        local startX, startWidth = currentFrame.x, currentFrame.w
+        local startTime = timer.secondsSinceEpoch()
+        local duration = 0.20
         toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. ")")
+
+        toolbarFrameAnimationTimer = timer.doEvery(1 / 60, function()
+            if not toolbar or not toolbar:isVisible() then
+                if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
+                return
+            end
+            local progress = math.min(1, math.max(0, (timer.secondsSinceEpoch() - startTime) / duration))
+            local eased = 1 - math.pow(1 - progress, 3)
+            local width = startWidth + (targetWidth - startWidth) * eased
+            local nextX = startX + (targetX - startX) * eased
+            local current = toolbar:frame()
+            toolbar:frame({x=nextX,y=current.y,w=width,h=current.h})
+            if progress >= 1 then
+                toolbar:frame({x=targetX,y=current.y,w=targetWidth,h=current.h})
+                toolbarFrameAnimationTimer:stop()
+                toolbarFrameAnimationTimer = nil
+            end
+        end)
     end
 
     -- Native Hammerspoon polling only: use the toolbar's known layout and the
@@ -2632,6 +2656,7 @@ function obj:stop()
     if replacementSession then closeReplacementSession("Spoon stopped") end
     if clipboardFallbackTimer then clipboardFallbackTimer:stop(); clipboardFallbackTimer = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+    if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
     if toolbarExpiryTimer then toolbarExpiryTimer:stop(); toolbarExpiryTimer = nil end
