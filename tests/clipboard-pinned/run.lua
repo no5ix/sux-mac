@@ -268,6 +268,82 @@ test("pinned text JSON record matches the ordinary record schema", function()
     check_equal(#list_files(environment.pinned .. "/pinned-images"), 0, "no pinned image written")
 end)
 
+test("new pins append after the saved manual order", function()
+    local environment = new_environment("append-order")
+    seed_codex_day(environment)
+    local entries = environment.t.searchPersistentHistory("codex", "text")
+    check_equal(#entries, 3, "three source items")
+
+    check(environment.t.pinClipboardEntry(entries[3]), "pin first item")
+    check(environment.t.pinClipboardEntry(entries[1]), "pin second item")
+    check(environment.t.pinClipboardEntry(entries[2]), "pin third item")
+    local before = environment.t.loadPinnedEntries()
+    check_equal(before[1].sourceId, entries[3].id, "first pinned item order")
+    check_equal(before[2].sourceId, entries[1].id, "second pinned item order")
+    check_equal(before[3].sourceId, entries[2].id, "third pinned item order")
+
+    local new_record = {
+        type = "text", ts = BASE_TS + 500, id = "new-source-record",
+        sourceKey = DATE .. ":" .. tostring(BASE_TS + 500) .. ":text:new-source-record",
+        content = "brand new clipboard item",
+    }
+    check(environment.t.pinClipboardEntry(new_record), "pin a new item")
+    local after = environment.t.loadPinnedEntries()
+    check_equal(#after, 4, "new pin added")
+    check_equal(after[1].sourceId, entries[3].id, "existing first position unchanged")
+    check_equal(after[2].sourceId, entries[1].id, "existing second position unchanged")
+    check_equal(after[3].sourceId, entries[2].id, "existing third position unchanged")
+    check_equal(after[4].sourceId, "new-source-record", "new pin is appended last")
+    local records = environment.t.readPinnedHistory()
+    check_equal(records[#records].sortOrder, 4, "new pin persisted with next sortOrder")
+end)
+
+test("reordering pinned items persists and validates the complete ID sequence", function()
+    local environment = new_environment("reorder-order")
+    seed_codex_day(environment)
+    local entries = environment.t.searchPersistentHistory("codex", "text")
+    for _, entry in ipairs(entries) do check(environment.t.pinClipboardEntry(entry)) end
+    local pinned = environment.t.loadPinnedEntries()
+    local ids = { pinned[3].id, pinned[1].id, pinned[2].id }
+    check(environment.t.reorderPinnedEntries(ids), "valid complete order accepted")
+    local reordered = environment.t.loadPinnedEntries()
+    check_equal(reordered[1].id, ids[1], "first reordered ID")
+    check_equal(reordered[2].id, ids[2], "second reordered ID")
+    check_equal(reordered[3].id, ids[3], "third reordered ID")
+
+    local raw = environment.t.readPinnedHistory()
+    for index, record in ipairs(raw) do
+        check_equal(record.sortOrder, index, "dense persisted sort order")
+    end
+    check(not environment.t.reorderPinnedEntries({ ids[1], ids[1], ids[3] }),
+        "duplicate IDs rejected")
+    check(not environment.t.reorderPinnedEntries({ ids[1], ids[2] }),
+        "incomplete ID list rejected")
+    check(not environment.t.reorderPinnedEntries({ ids[1], ids[2], "not-a-pin" }),
+        "unknown ID rejected")
+    local afterRejected = environment.t.loadPinnedEntries()
+    check_equal(afterRejected[1].id, ids[1], "rejected order leaves saved order unchanged")
+end)
+
+test("legacy pins migrate with their currently stored order", function()
+    local environment = new_environment("sort-migration")
+    local records = {
+        { id = "legacy-a", type = "text", ts = BASE_TS, pinnedAt = BASE_TS + 30, content = "legacy A" },
+        { id = "legacy-b", type = "text", ts = BASE_TS + 60, pinnedAt = BASE_TS + 10, content = "legacy B" },
+        { id = "legacy-c", type = "text", ts = BASE_TS + 120, pinnedAt = BASE_TS + 20, content = "legacy C" },
+    }
+    check(environment.t.writePinnedHistory(records), "write legacy pins")
+    check(environment.t.migratePinnedHistory(), "sort order gets migrated")
+    local migrated = environment.t.readPinnedHistory()
+    check_equal(migrated[1].sortOrder, 1, "first legacy position")
+    check_equal(migrated[2].sortOrder, 2, "second legacy position")
+    check_equal(migrated[3].sortOrder, 3, "third legacy position")
+    local loaded = environment.t.loadPinnedEntries()
+    check_equal(loaded[1].id, "legacy-a", "prior JSON order is retained")
+    check_equal(loaded[2].id, "legacy-b", "prior JSON order is retained")
+    check_equal(loaded[3].id, "legacy-c", "prior JSON order is retained")
+end)
+
 test("multiline and unicode pinned text round-trips through JSON", function()
     local environment = new_environment("unicode")
     seed_codex_day(environment)
