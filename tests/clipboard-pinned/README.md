@@ -40,6 +40,7 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 | unicode | multiline and non-ASCII text survives the JSON round trip and hydration |
 | image | image is copied under `pinned/pinned-images/` + `pinned/pinned-thumbnails/`, byte-identical, `sourcePath` recorded, ordinary files kept |
 | identity | original `ts` preserved, `pinnedAt` is the pin time, ids unique, distinct records with identical timestamps pin separately, duplicate pin is idempotent |
+| manual order | pinned cards persist a custom `sortOrder`; legacy pins retain their existing order; new pins append to the end; drag reorder validates a complete unique ID sequence |
 | search | every and only matching pinned text record is returned; case-insensitive; multiline/Unicode content searchable |
 | scope | unpinned records never appear in a Pin search; ordinary search is unaffected |
 | full-collection | records beyond the first rendered page are searched; no duplicates |
@@ -96,6 +97,7 @@ exercises the shipped code rather than a copy. It also reads the whole panel
   card falling back to a clamped position, empty results and Clear All keeping
   focus in search, a single-result cycle, and a stale state object never pointing
   past the list.
+- Pinned reorder: pointer-driven drag/drop is active only in the Pin scope, leaves card checkboxes/metadata actions alone, sends the complete ordered pin IDs, and removes document listeners on controller destruction.
 - Wiring: exactly one Tab branch that delegates to `navMove`, no tab stop on the
   results container, a post-rebuild `<body>` Tab fallback, and the Escape,
   Enter-to-paste, arrow-key, Enter-to-search, and typing handlers still present.
