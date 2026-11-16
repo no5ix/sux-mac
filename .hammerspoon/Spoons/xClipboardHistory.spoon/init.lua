@@ -1782,7 +1782,8 @@ local function historyItemHTML(entry, index)
             ('<img class="preview" src="' .. escapeHTML(thumbnail) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">') or
             '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="' ..
-            index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+            index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) ..
+        '" data-pin-id="' .. (cardIsPinned and escapeHTML(tostring(entry.id or "")) or "") .. '" data-search="' ..
             escapeHTML(string.lower("[image] " .. stamp)) .. '">' .. metaRow ..
             preview .. '</div>'
     end
@@ -1993,6 +1994,10 @@ body > #clipboard-preview-overlay .manual-preview.image-detail.open { display:fl
 body > #clipboard-preview-overlay .manual-preview.image-detail img { display:block; width:100%; height:100%; min-width:0; min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:5px; margin:0 auto; flex:1 1 auto; }
 .item { font:inherit; width:100%; min-width:0; color:inherit; text-align:left; border:0; border-radius:12px; background:var(--card-bg); padding:10px; cursor:default; overflow:hidden; }
 #clipboard-items .item { position:relative; margin:0; border:0; outline:0; }
+#clipboard-items.pinned-reorder-enabled .item[data-pinned="true"] { cursor:grab; touch-action:pan-y; }
+#clipboard-items .item.dragging { opacity:.42; }
+#clipboard-items .item.drop-before { box-shadow:inset 0 0 0 2px var(--selected-border); }
+#clipboard-items .item.drop-after { box-shadow:inset 0 -3px 0 var(--selected-border); }
 #clipboard-items .item:focus,
 #clipboard-items .item:focus-visible { outline:0; }
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
