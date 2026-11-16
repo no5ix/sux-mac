@@ -3043,6 +3043,13 @@ const pinnedReorderController = createPinnedReorderController(
   pinnedReorderRoot, bridge,
   () => document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true'
 );
+// The Lua renderer may replace the cards after filter/search updates. Sync the
+// affordance from the authoritative Pin filter state after each DOM mutation.
+const pinnedReorderObserver = new MutationObserver(() => {
+  const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
+  pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
+});
+pinnedReorderObserver.observe(pinnedReorderRoot, { childList: true });
 const refreshPinnedReorderState = () => {
   const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
   pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
