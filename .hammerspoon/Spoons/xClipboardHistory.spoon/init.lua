@@ -1840,7 +1840,8 @@ local function historyItemHTML(entry, index)
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
     return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' ..
-        index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+        index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) ..
+        '" data-pin-id="' .. (cardIsPinned and escapeHTML(tostring(entry.id or "")) or "") .. '" data-search="' ..
         escapeHTML(string.lower("[text] " .. stamp)) .. '">' .. metaRow ..
         '<div class="text-preview">' ..
         escapeHTML(previewText) .. '</div></button>'
@@ -3041,8 +3042,10 @@ function createPinnedReorderController(root, bridge, isEnabled) {
   const onPointerDown = event => {
     if (!isEnabled() || event.button !== 0) return;
     const item = event.target.closest && event.target.closest('.item[data-pinned="true"]');
-    // Checkboxes and the metadata/selection strip keep their existing behavior.
-    if (!item || event.target.closest('.card-meta-row') || event.target.closest('button,input')) return;
+    // Text cards are themselves <button class="item"> elements. Exclude
+    // nested controls, but never reject the card button that owns the drag.
+    const control = event.target.closest && event.target.closest('button,input');
+    if (!item || event.target.closest('.card-meta-row') || (control && control !== item)) return;
     drag = { item, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
       target: null, after: false, active: false };
   };
@@ -3103,9 +3106,8 @@ const pinnedReorderController = createPinnedReorderController(
 );
 // The Lua renderer may replace the cards after filter/search updates. Sync the
 // affordance from the authoritative Pin filter state after each DOM mutation.
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) pinnedReorderController.destroy();
-});
+// Keep the controller attached while the WebView is temporarily hidden.
+// Hammerspoon reuses this document when the panel is shown again.
 const refreshPinnedReorderState = () => {
   const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
   pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
