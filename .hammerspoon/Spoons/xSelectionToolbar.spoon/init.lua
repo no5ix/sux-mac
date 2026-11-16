@@ -296,14 +296,14 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
- .bar{position:absolute;left:50%;top:50%;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:0;transform:translate3d(-50%,-50%,0) scale(.96);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:transform .36s cubic-bezier(.2,.75,.25,1),opacity .30s ease-out}
+ .bar{position:absolute;left:50%;top:50%;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:0;transform:translate3d(-50%,-50%,0) scale(.96);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:transform .52s cubic-bezier(.2,.75,.25,1),opacity .44s ease-out}
   .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .18s ease,transform .22s cubic-bezier(.22,.8,.24,1),visibility .22s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
 .bar.is-visible{opacity:1;transform:translate3d(-50%,-50%,0) scale(1)}
-.bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.36s,.36s}
+.bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.20s,.18s;transition-timing-function:cubic-bezier(.4,0,1,1)}
 .bar.dismissed{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);pointer-events:none}
 .bar.dismissed .compact-trigger{opacity:0;pointer-events:none}
 .compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .18s ease;z-index:2}
@@ -329,7 +329,7 @@ function revealToolbar(){
   if(!bar)return;
   requestAnimationFrame(()=>requestAnimationFrame(()=>bar.classList.add('is-visible')));
 }
-function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar||bar.classList.contains('is-closing'))return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},360);}
+function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar||bar.classList.contains('is-closing'))return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},210);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
