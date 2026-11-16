@@ -272,11 +272,13 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
-.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
- .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
-.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0)}
-.compact-trigger{display:inline-flex!important;opacity:1;transition:opacity .12s ease}
-.bar.expanded .compact-trigger{opacity:0;pointer-events:none}
+.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:0;transform:translate3d(0,6px,0) scale(.94);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:opacity .14s ease-out,transform .18s cubic-bezier(.2,.75,.25,1),background-color .12s,border-color .12s,width .16s ease}
+.bar.is-visible{opacity:1;transform:translate3d(0,0,0) scale(1)}
+.bar.is-closing{opacity:0;transform:translate3d(0,5px,0) scale(.96);transition:opacity .12s ease-in,transform .14s cubic-bezier(.4,0,1,1)}
+.full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translate3d(-7px,0,0) scale(.97);transform-origin:left center;transition:opacity .14s ease,transform .18s cubic-bezier(.2,.75,.25,1),visibility .18s}
+.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translate3d(0,0,0) scale(1)}
+.compact-trigger{display:inline-flex!important;opacity:1;transform:translate3d(0,0,0) scale(1);transform-origin:center;transition:opacity .14s ease,transform .18s cubic-bezier(.2,.75,.25,1)!important}
+.bar.expanded .compact-trigger{opacity:0;transform:translate3d(-4px,0,0) scale(.88);pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
@@ -291,8 +293,9 @@ button:active{background-color:var(--toolbar-active)!important}
   <div class="full-actions" id="selection-toolbar-actions">__GROUPED_BUTTONS__</div>
 </div><script>
 const selection = __SELECTION_JSON__;
+requestAnimationFrame(()=>requestAnimationFrame(()=>document.getElementById('selection-toolbar-bar')?.classList.add('is-visible')));
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('expanded',!!expanded);}
+function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(bar){bar.classList.remove('is-closing');bar.classList.toggle('expanded',!!expanded);}}
 </script></body></html>
 ]=]
     html = html:gsub("__GROUPED_BUTTONS__", function() return groupedButtonsHTML end)
@@ -2010,9 +2013,20 @@ local function buildToolbar(text)
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     appearancePoll = timer.doEvery(1, syncToolbarAppearance)
     local previousHideToolbar = hideToolbar
+    local pendingToolbarHide = nil
     hideToolbar = function()
-        if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
-        previousHideToolbar()
+        local closingToolbar = toolbar
+        if not closingToolbar then return end
+        if pendingToolbarHide then pendingToolbarHide:stop(); pendingToolbarHide = nil end
+        closingToolbar:evaluateJavaScript(
+            "document.getElementById('selection-toolbar-bar')?.classList.add('is-closing');"
+        )
+        pendingToolbarHide = timer.doAfter(0.14, function()
+            pendingToolbarHide = nil
+            if toolbar ~= closingToolbar then return end
+            if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
+            previousHideToolbar()
+        end)
     end
 
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
