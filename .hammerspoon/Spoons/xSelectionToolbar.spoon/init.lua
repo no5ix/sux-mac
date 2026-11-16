@@ -272,10 +272,10 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
-.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
+.bar{position:relative;display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
  .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0)}
-.compact-trigger{display:inline-flex!important;opacity:1;transition:opacity .12s ease}
+.compact-trigger{position:absolute!important;left:6px;top:6px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
@@ -2058,7 +2058,7 @@ local function buildToolbar(text)
     local toolbarWidth = 2 + padding * 2 + gap * #buttonWidths
         + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
-    toolbarWidth = toolbarWidth + 8
+    toolbarWidth = toolbarWidth + 20
     local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
     local compactToolbarWidth = 52
     local actualWidth = compactToolbarWidth
