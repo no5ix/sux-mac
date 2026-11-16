@@ -2076,9 +2076,16 @@ local function buildToolbar(text)
     local collapseTimer = nil
     local COLLAPSE_DELAY = 0.25
     local compactCenterX = x + compactToolbarWidth / 2
+    -- While the native window is collapsing, its shrinking bounds can move
+    -- back underneath the pointer. Do not interpret that as a fresh hover;
+    -- otherwise the compact trigger repeatedly expands/collapses and jitters.
+    local suppressExpandUntilMouseLeaves = false
     local function setToolbarExpanded(expanded)
         if not toolbar or not toolbar:isVisible() or toolbarExpanded == expanded then return end
         toolbarExpanded = expanded
+        if not expanded then
+            suppressExpandUntilMouseLeaves = true
+        end
         if collapseTimer then collapseTimer:stop(); collapseTimer = nil end
         if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
 
@@ -2125,7 +2132,14 @@ local function buildToolbar(text)
         local bounds = currentToolbar:frame()
         local inside = mouse.x >= bounds.x and mouse.x <= bounds.x + bounds.w
             and mouse.y >= bounds.y and mouse.y <= bounds.y + bounds.h
-        if inside then
+        if suppressExpandUntilMouseLeaves then
+            -- Keep suppression through the entire frame animation. Once it
+            -- finishes, require the pointer to leave the compact window before
+            -- another hover can expand it.
+            if not toolbarFrameAnimationTimer and not inside then
+                suppressExpandUntilMouseLeaves = false
+            end
+        elseif inside then
             if not toolbarExpanded then setToolbarExpanded(true) end
         elseif toolbarExpanded and not collapseTimer then
             collapseTimer = timer.doAfter(COLLAPSE_DELAY, function()
