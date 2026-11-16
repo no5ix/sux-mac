@@ -249,7 +249,7 @@ test("pinned text JSON record matches the ordinary record schema", function()
     check(record.content:find("\n") == nil, "this fixture is single line")
 
     local core_fields = { type = true, ts = true, content = true }
-    local allowed_pin_fields = { id = true, pinnedAt = true, sourceKey = true, sourcePath = true }
+    local allowed_pin_fields = { id = true, pinnedAt = true, sourceKey = true, sourcePath = true, sortOrder = true }
     for field in pairs(record) do
         if not core_fields[field] and not allowed_pin_fields[field] then
             error("unexpected pinned field: " .. tostring(field))
