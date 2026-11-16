@@ -254,8 +254,8 @@ test("pinned reorder pointer controller only commits complete pinned card order"
     ? nodes.filter(el => el.attrs.get("data-pinned") === "true")
     : [];
   root.classList.toggle = (name, force) => force ? root.classList.add(name) : root.classList.remove(name);
-  root.addEventListener = (type, fn) => root.handlers.set(type, fn);
-  root.removeEventListener = type => root.handlers.delete(type);
+  root.addEventListener = (type, fn, capture) => root.handlers.set(capture ? type + ":capture" : type, fn);
+  root.removeEventListener = (type, fn, capture) => root.handlers.delete(capture ? type + ":capture" : type);
   root.handlers = new Map();
   root.insertBefore = (node, reference) => moveBefore(node, reference);
   root.appendChild = node => { nodes.push(node); node.parentNode = root; };
@@ -273,12 +273,19 @@ test("pinned reorder pointer controller only commits complete pinned card order"
 
   enabled = true;
   root.handlers.get("pointerdown")({ button: 0, pointerId: 2, clientX: 10, clientY: 10, target: pointerTarget(a) });
-  listeners.get("pointermove")({ pointerId: 2, clientX: 270, clientY: 10, preventDefault() {} });
+  listeners.get("pointermove")({ pointerId: 2, clientX: 330, clientY: 10, preventDefault() {} });
   listeners.get("pointerup")({ pointerId: 2 });
   assert.deepEqual(nodes.map(node => node.dataset.pinId), ["b", "c", "a"], "drag really changes DOM order");
   assert.equal(calls.length, 1, "one reorder is sent");
   assert.equal(calls[0][0], "reorderPinned");
   assert.deepEqual(JSON.parse(calls[0][2]), ["b", "c", "a"]);
+  let clickPrevented = false, clickStopped = false;
+  root.handlers.get("click:capture")({
+    target: { closest: selector => selector === ".item" ? a : null },
+    preventDefault() { clickPrevented = true; },
+    stopImmediatePropagation() { clickStopped = true; }
+  });
+  assert.ok(clickPrevented && clickStopped, "a drag's synthetic click must not paste");
   api.destroy();
   assert.equal(listeners.has("pointermove"), false, "destroy releases document listeners");
 });
