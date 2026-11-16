@@ -270,7 +270,11 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
-.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
+.bar{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
+.full-actions{display:none;align-items:center;gap:4px;overflow:hidden;white-space:nowrap}
+.bar.expanded .full-actions{display:inline-flex}
+.compact-trigger{display:inline-flex!important}
+.bar.expanded .compact-trigger{display:none!important}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
@@ -280,11 +284,13 @@ button:active{background-color:var(--toolbar-active)!important}
 [data-appearance="dark"]{--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
 </style>
-</head><body><div class="bar">
-__GROUPED_BUTTONS__
+</head><body><div class="bar collapsed" id="selection-toolbar-bar">
+  <button class="compact-trigger" type="button" aria-label="Show selection actions" title="Show selection actions"><span class="icon">📋</span></button>
+  <div class="full-actions" id="selection-toolbar-actions">__GROUPED_BUTTONS__</div>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
+function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('expanded',!!expanded);}
 </script></body></html>
 ]=]
     html = html:gsub("__GROUPED_BUTTONS__", function() return groupedButtonsHTML end)
@@ -2051,9 +2057,29 @@ local function buildToolbar(text)
         + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 8
-    local actualWidth = math.min(toolbarWidth, frame.w - 16)
+    local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
+    local compactToolbarWidth = 52
+    local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
+
+    -- The same WebView has compact and expanded states. Keep the compact
+    -- trigger anchored at the selection point; expand around that center on hover.
+    local toolbarExpanded = false
+    local collapseTimer = nil
+    local COLLAPSE_DELAY = 0.25
+    local function setToolbarExpanded(expanded)
+        if not toolbar or not toolbar:isVisible() or toolbarExpanded == expanded then return end
+        toolbarExpanded = expanded
+        if collapseTimer then collapseTimer:stop(); collapseTimer = nil end
+        local currentFrame = toolbar:frame()
+        local targetWidth = expanded and expandedToolbarWidth or compactToolbarWidth
+        local centerX = currentFrame.x + currentFrame.w / 2
+        local targetX = math.max(frame.x + 8, math.min(centerX - targetWidth / 2,
+            frame.x + frame.w - targetWidth - 8))
+        toolbar:frame({x=targetX,y=currentFrame.y,w=targetWidth,h=currentFrame.h})
+        toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. ")")
+    end
 
     -- Native Hammerspoon polling only: use the toolbar's known layout and the
     -- native mouse coordinates to determine the target button. No DOM-based
@@ -2068,9 +2094,24 @@ local function buildToolbar(text)
 
         local mouse = hs.mouse.absolutePosition()
         local bounds = currentToolbar:frame()
+        local inside = mouse.x >= bounds.x and mouse.x <= bounds.x + bounds.w
+            and mouse.y >= bounds.y and mouse.y <= bounds.y + bounds.h
+        if inside then
+            if not toolbarExpanded then setToolbarExpanded(true) end
+        elseif toolbarExpanded and not collapseTimer then
+            collapseTimer = timer.doAfter(COLLAPSE_DELAY, function()
+                collapseTimer = nil
+                if not toolbar or not toolbar:isVisible() then return end
+                local p = hs.mouse.absolutePosition()
+                local f = toolbar:frame()
+                local stillInside = p.x >= f.x and p.x <= f.x + f.w
+                    and p.y >= f.y and p.y <= f.y + f.h
+                if not stillInside then setToolbarExpanded(false) end
+            end)
+        end
         local rx, ry = mouse.x - bounds.x, mouse.y - bounds.y
         local target = nil
-        if ry >= 7 and ry <= 51 then
+        if toolbarExpanded and ry >= 7 and ry <= 51 then
             local cursor = padding + 1 -- left border + bar padding
             local actionIndex = 1
             for groupIndex, group in ipairs(toolbarGroups) do
