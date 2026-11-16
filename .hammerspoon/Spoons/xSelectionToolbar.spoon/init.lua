@@ -2169,8 +2169,19 @@ local function buildToolbar(text)
     local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
     local anchorCenterX = x + actualWidth / 2
     local anchorCenterY = y + height / 2
+    -- Keep the expanded WebView fully inside the current screen. The
+    -- previous calculation only enforced the left boundary, so a toolbar
+    -- anchored near the right edge could extend beyond the screen and get
+    -- clipped by the native window.
+    local expandedFrameX = math.max(
+        frame.x + 8,
+        math.min(
+            anchorCenterX - expandedToolbarWidth / 2,
+            frame.x + frame.w - expandedToolbarWidth - 8
+        )
+    )
     toolbar:frame({
-        x = math.max(frame.x + 8, anchorCenterX - expandedToolbarWidth / 2),
+        x = expandedFrameX,
         y = y,
         w = expandedToolbarWidth,
         h = height
