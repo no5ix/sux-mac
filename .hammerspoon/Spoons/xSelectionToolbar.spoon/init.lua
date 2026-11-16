@@ -273,12 +273,12 @@ local function getToolbarHTML(text)
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
  .bar{position:relative;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s}
-  .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
+  .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .28s ease,transform .38s cubic-bezier(.22,.8,.24,1),visibility .38s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
-.bar.collapsed .full-actions{display:none}
+.bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
-.bar.expanded .full-actions{display:inline-flex;visibility:visible;opacity:1;transform:translateX(0)}
-.compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
+.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
+.compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .28s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6.4px;width:30.4px;height:30.4px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:17.6px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
@@ -2075,7 +2075,7 @@ local function buildToolbar(text)
     -- trigger anchored at the selection point; expand around that center on hover.
     local toolbarExpanded = false
     local collapseTimer = nil
-    local COLLAPSE_DELAY = 0.25
+    local COLLAPSE_DELAY = 0.18
     -- Expand and collapse around the compact trigger's center, clamped to screen bounds.
     -- While the native window is collapsing, its shrinking bounds can move
     -- back underneath the pointer. Do not interpret that as a fresh hover;
@@ -2097,7 +2097,7 @@ local function buildToolbar(text)
             frame.x + frame.w - targetWidth - 8))
         local startX, startWidth = currentFrame.x, currentFrame.w
         local startTime = timer.secondsSinceEpoch()
-        local duration = 0.20
+        local duration = 0.38
         toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. ")")
 
         toolbarFrameAnimationTimer = timer.doEvery(1 / 60, function()
@@ -2106,7 +2106,7 @@ local function buildToolbar(text)
                 return
             end
             local progress = math.min(1, math.max(0, (timer.secondsSinceEpoch() - startTime) / duration))
-            local eased = 1 - math.pow(1 - progress, 3)
+            local eased = progress * progress * (3 - 2 * progress)
             local width = startWidth + (targetWidth - startWidth) * eased
             local nextX = startX + (targetX - startX) * eased
             local current = toolbar:frame()
