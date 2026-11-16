@@ -279,9 +279,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{display:inline-flex;visibility:visible;opacity:1;transform:translateX(0)}
 .compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
-.bar.anchor-right .compact-trigger{left:auto;right:6px}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
-button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:30.4px;height:30.4px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:17.6px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
+button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6.4px;width:30.4px;height:30.4px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:17.6px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
 button:active{background-color:var(--toolbar-active)!important}
 .icon{display:inline-flex;align-items:center;justify-content:center;min-width:16px;font-size:17.6px;line-height:1}
@@ -2026,10 +2025,9 @@ local function buildToolbar(text)
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
     local height = 49.6
-    local x = math.max(frame.x + 8, math.min(point.x - 144, frame.x + frame.w - 288 - 8))
-    local y = point.y - height - 14
-    if y < frame.y + 8 then y = point.y + 18 end
-    y = math.max(frame.y + 8, math.min(y, frame.y + frame.h - height - 8))
+    local y = point.y - height - 11.2
+    if y < frame.y + 6.4 then y = point.y + 14.4 end
+    y = math.max(frame.y + 6.4, math.min(y, frame.y + frame.h - height - 6.4))
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
@@ -2065,7 +2063,7 @@ local function buildToolbar(text)
     local toolbarWidth = 2 + padding * 2 + gap * #buttonWidths
         + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
-    toolbarWidth = toolbarWidth + 20
+    toolbarWidth = toolbarWidth + 16
     local compactToolbarWidth = 48
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
