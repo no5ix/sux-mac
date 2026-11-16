@@ -1222,31 +1222,16 @@ local function animateReplacementToolbarOut(onComplete)
         replacementWindowAnimationTimer:stop()
         replacementWindowAnimationTimer = nil
     end
-    local start = replacementToolbar:frame()
-    local target = {
-        x = start.x + start.w * 0.02,
-        y = start.y + 8,
-        w = start.w * 0.96,
-        h = start.h * 0.96
-    }
-    local elapsed, duration = 0, 0.16
-    replacementWindowAnimationTimer = timer.doEvery(1 / 60, function()
-        elapsed = elapsed + 1 / 60
-        local t = math.min(1, elapsed / duration)
-        local eased = 1 - (1 - t) * (1 - t) * (1 - t)
-        if replacementToolbar then
-            replacementToolbar:frame({
-                x = start.x + (target.x - start.x) * eased,
-                y = start.y + (target.y - start.y) * eased,
-                w = start.w + (target.w - start.w) * eased,
-                h = start.h + (target.h - start.h) * eased
-            })
-        end
-        if t >= 1 then
-            replacementWindowAnimationTimer:stop()
-            replacementWindowAnimationTimer = nil
-            if onComplete then onComplete() end
-        end
+    -- Keep the native window stationary. Animate only the WebView's composited
+    -- panel layer; resizing a native window every frame causes visible stutter.
+    pcall(function()
+        replacementToolbar:evaluateJavaScript(
+            "document.querySelector('.panel')?.classList.add('is-closing');"
+        )
+    end)
+    replacementWindowAnimationTimer = timer.doAfter(0.15, function()
+        replacementWindowAnimationTimer = nil
+        if onComplete then onComplete() end
     end)
 end
 
@@ -1313,7 +1298,9 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(213,217,224,.99);box-shadow:none!important}
+.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(213,217,224,.99);box-shadow:none!important;opacity:0;transform:translate3d(0,8px,0) scale(.98);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:transform .18s cubic-bezier(.2,.75,.25,1),opacity .14s ease-out}
+.panel.is-visible{opacity:1;transform:translate3d(0,0,0) scale(1)}
+.panel.is-closing{opacity:0;transform:translate3d(0,5px,0) scale(.985);transition-duration:.14s,.12s}
 .panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:12px;font-weight:700;color:#4b5563}
  .panel-title{display:flex;align-items:center;min-width:0}
  .panel-close{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:104px;height:30px;margin:-2px -2px -2px 8px;padding:0 10px;border:0;border-radius:9px;background:rgba(45,55,72,.08);color:#596273;font-family:inherit;font-size:11px;font-weight:650;line-height:1;white-space:nowrap;cursor:pointer;transition:background-color .12s,color .12s,transform .12s}
@@ -1393,6 +1380,7 @@ document.addEventListener('keydown',e=>{
 });
 window.renderReplacementSnapshot=renderSnapshot;
 window.setReplacementSelection=selectAt;
+requestAnimationFrame(()=>requestAnimationFrame(()=>document.querySelector('.panel')?.classList.add('is-visible')));
 selectAt(0);
 window.addEventListener('load',()=>{bridge('ready');window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);});
 window.__replacementPoll=setInterval(()=>bridge('snapshot'),350);
@@ -1717,14 +1705,7 @@ local function showReplacementToolbar(session)
     local x = frame.x + (frame.w - width) / 2
     -- Place the chooser slightly below vertical center, while keeping it on-screen.
     local y = math.min(frame.y + frame.h - height, frame.y + (frame.h - height) / 2 + frame.h * 0.04)
-    local targetFrame = {x=x,y=y,w=width,h=height}
-    local initialScale = 0.96
-    replacementToolbar:frame({
-        x = x + width * (1 - initialScale) / 2,
-        y = y + height * (1 - initialScale) / 2 + 8,
-        w = width * initialScale,
-        h = height * initialScale
-    })
+    replacementToolbar:frame({x=x,y=y,w=width,h=height})
     local lastReplacementAppearance = nil
     local function syncReplacementAppearance()
         if not replacementToolbar then return end
@@ -1742,29 +1723,6 @@ local function showReplacementToolbar(session)
     replacementAppearancePoll = timer.doEvery(1, syncReplacementAppearance)
     replacementToolbar:show()
     replacementToolbar:bringToFront()
-    local entranceStart = replacementToolbar:frame()
-    local elapsed, duration = 0, 0.20
-    if replacementWindowAnimationTimer then
-        replacementWindowAnimationTimer:stop()
-        replacementWindowAnimationTimer = nil
-    end
-    replacementWindowAnimationTimer = timer.doEvery(1 / 60, function()
-        elapsed = elapsed + 1 / 60
-        local t = math.min(1, elapsed / duration)
-        local eased = 1 - (1 - t) * (1 - t) * (1 - t)
-        if replacementToolbar then
-            replacementToolbar:frame({
-                x = entranceStart.x + (targetFrame.x - entranceStart.x) * eased,
-                y = entranceStart.y + (targetFrame.y - entranceStart.y) * eased,
-                w = entranceStart.w + (targetFrame.w - entranceStart.w) * eased,
-                h = entranceStart.h + (targetFrame.h - entranceStart.h) * eased
-            })
-        end
-        if t >= 1 then
-            replacementWindowAnimationTimer:stop()
-            replacementWindowAnimationTimer = nil
-        end
-    end)
     local hsApp = hs.application.get("org.hammerspoon.Hammerspoon")
     if hsApp then hsApp:activate(true) end
 end
