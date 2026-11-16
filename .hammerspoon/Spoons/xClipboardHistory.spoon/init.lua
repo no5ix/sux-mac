@@ -699,6 +699,15 @@ local function pinnedMetadata(record)
     return entry
 end
 
+local function legacyPinnedOrderLess(a, b)
+    local aPinnedAt, bPinnedAt = tonumber(a.pinnedAt) or tonumber(a.ts) or 0,
+        tonumber(b.pinnedAt) or tonumber(b.ts) or 0
+    if aPinnedAt ~= bPinnedAt then return aPinnedAt > bPinnedAt end
+    local aTs, bTs = tonumber(a.ts) or 0, tonumber(b.ts) or 0
+    if aTs ~= bTs then return aTs > bTs end
+    return tostring(a.id or "") < tostring(b.id or "")
+end
+
 local function loadPinnedEntries()
     local out = {}
     local records = readPinnedHistory() or {}
@@ -718,15 +727,6 @@ local function loadPinnedEntries()
         return legacyPinnedOrderLess(a, b)
     end)
     return out
-end
-
-local function legacyPinnedOrderLess(a, b)
-    local aPinnedAt, bPinnedAt = tonumber(a.pinnedAt) or tonumber(a.ts) or 0,
-        tonumber(b.pinnedAt) or tonumber(b.ts) or 0
-    if aPinnedAt ~= bPinnedAt then return aPinnedAt > bPinnedAt end
-    local aTs, bTs = tonumber(a.ts) or 0, tonumber(b.ts) or 0
-    if aTs ~= bTs then return aTs > bTs end
-    return tostring(a.id or "") < tostring(b.id or "")
 end
 
 local function normalizePinnedSortOrder(records)
