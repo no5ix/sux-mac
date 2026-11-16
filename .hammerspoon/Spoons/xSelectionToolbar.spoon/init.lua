@@ -310,11 +310,23 @@ button:active{background-color:var(--toolbar-active)!important}
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 function setExpanded(expanded,dismiss){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);bar.classList.toggle('dismissed',!!dismiss);}
-function revealToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(bar)requestAnimationFrame(()=>bar.classList.add('is-visible'));}
+function revealToolbar(){
+  const bar=document.getElementById('selection-toolbar-bar');
+  if(!bar)return;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>bar.classList.add('is-visible')));
+}
 function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},150);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
+// Hammerspoon shows the native window before the WebView has necessarily
+// finished loading. Reveal the compact button after the page is ready so an
+// early evaluateJavaScript call cannot leave the initial opacity at zero.
+if(document.readyState==='complete'){
+  revealToolbar();
+}else{
+  window.addEventListener('load',revealToolbar,{once:true});
+}
 </script></body></html>
 ]=]
     html = html:gsub("__GROUPED_BUTTONS__", function() return groupedButtonsHTML end)
