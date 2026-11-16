@@ -222,7 +222,9 @@ test("pinned reorder pointer controller only commits complete pinned card order"
     removeEventListener(type) { listeners.delete(type); }
   };
   const makeCard = (id, left) => {
-    const el = new El("div");
+    // Text cards are actual button elements; the drag controller must allow
+    // the card button itself while still rejecting nested controls.
+    const el = new El("button");
     el.classList.add("item");
     el.attrs.set("data-pinned", "true");
     el.attrs.set("data-pin-id", id);
@@ -265,7 +267,9 @@ test("pinned reorder pointer controller only commits complete pinned card order"
   `)(document);
   let enabled = false;
   const api = controller(root, (...args) => calls.push(args), () => enabled);
-  const pointerTarget = item => ({ closest: selector => selector.includes("data-pinned") ? item : null });
+  const pointerTarget = item => ({
+    closest: selector => selector.includes("data-pinned") || selector === "button,input" ? item : null
+  });
   root.handlers.get("pointerdown")({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target: pointerTarget(a) });
   listeners.get("pointermove")({ pointerId: 1, clientX: 270, clientY: 10, preventDefault() {} });
   listeners.get("pointerup")({ pointerId: 1 });
