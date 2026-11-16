@@ -3274,7 +3274,19 @@ local function updateClipboardPanel(query,kind,offset,append)
         -- The pinned collection is its own result set: never reuse the
         -- ordinary-history search cache for it.
         menuData=searchPinnedHistory(query,kind); browseMode="pinned"; browseCursor=#menuData
+        if not append and clipboard_webview then
+            -- Also refresh drag affordance when switching into or out of Pin
+            -- without rebuilding the whole WebView.
+            clipboard_webview:evaluateJavaScript(
+                "var grid=document.getElementById('clipboard-items');if(grid)grid.classList.add('pinned-reorder-enabled');"
+            )
+        end
     elseif query~="" then
+        if not append and clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "var grid=document.getElementById('clipboard-items');if(grid)grid.classList.remove('pinned-reorder-enabled');"
+            )
+        end
         if clipboardDateFilter then
             -- Date views are subsets of the already computed global query results.
             if searchResultsCache and searchResultsCache.collection=="history"
@@ -3309,9 +3321,19 @@ local function updateClipboardPanel(query,kind,offset,append)
         end
         browseCursor=0
     elseif clipboardDateFilter then
+        if not append and clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "var grid=document.getElementById('clipboard-items');if(grid)grid.classList.remove('pinned-reorder-enabled');"
+            )
+        end
         if not append then menuData=loadPersistentDateHistory(clipboardDateFilter,"all") end
         browseMode="date"
     else
+        if not append and clipboard_webview then
+            clipboard_webview:evaluateJavaScript(
+                "var grid=document.getElementById('clipboard-items');if(grid)grid.classList.remove('pinned-reorder-enabled');"
+            )
+        end
         -- All: one stream over ordinary history and pinned records, ordered by
         -- clipboard timestamp. Load more extends the existing stream, so the
         -- rendered list stays append-only and Text/Images switch in memory.
@@ -3526,6 +3548,18 @@ function handleClipboardPanelMessage(message)
         pasteHistoryEntryPath(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
         pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
+    elseif body.action == "reorderPinned" then
+        local decoded, orderedIds = pcall(json.decode, tostring(body.query or ""))
+        if not decoded or type(orderedIds) ~= "table" or not reorderPinnedEntries(orderedIds) then
+            hs.alert.show("Unable to reorder pinned clipboard items")
+        end
+        -- Rebuild from the saved order rather than trusting the transient DOM
+        -- layout. This also reconciles card indexes and keyboard focus.
+        if clipboardPinnedFilter then
+            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
+        else
+            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
+        end
     elseif body.action == "pin" or body.action == "unpin" then
         local index=tonumber(body.index); local choice=index and menuData[index]
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
