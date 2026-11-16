@@ -513,7 +513,9 @@ local function decodePinnedRecords(raw)
 end
 
 local function readPinnedHistory()
-    return decodePinnedRecords(readPinnedHistoryRaw()) or {}
+    local records = decodePinnedRecords(readPinnedHistoryRaw())
+    if records == nil then return nil end
+    return records
 end
 
 local function writePinnedHistory(records)
