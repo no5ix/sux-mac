@@ -34,6 +34,7 @@ const menuModel = block("/* BEGIN CONTEXT MENU MODEL", "/* END CONTEXT MENU MODE
 const multiSelectionBinding = source.slice(source.indexOf('function syncClipboardMultiSelection()'), source.indexOf("const contextMenu = document.createElement('div');"));
 const navModel = block("/* BEGIN KEYBOARD NAVIGATION MODEL", "/* END KEYBOARD NAVIGATION MODEL */");
 const navBinding = block("/* BEGIN KEYBOARD NAVIGATION BINDING", "/* END KEYBOARD NAVIGATION BINDING */");
+const reorderModel = block("/* BEGIN PINNED REORDER MODEL", "/* END PINNED REORDER MODEL */");
 
 // The panel script as the browser sees it, for the structural checks.
 const scriptStart = source.indexOf("<script>");
@@ -212,6 +213,54 @@ test("keyboard navigation restores the grid focus stop and global key routing", 
     "active filters use shallow white in dark mode and shallow dark in light mode");
 });
 
+
+test("pinned reorder pointer controller only commits complete pinned card order", () => {
+  const root = new El("div");
+  const listeners = new Map();
+  const document = {
+    addEventListener(type, fn) { listeners.set(type, fn); },
+    removeEventListener(type) { listeners.delete(type); }
+  };
+  const makeCard = (id, left) => {
+    const el = new El("div");
+    el.classList.add("item");
+    el.classList.add("pinned");
+    el.attrs.set("data-pinned", "true");
+    el.attrs.set("data-pin-id", id);
+    el.rect = { left, top: 0, width: 100, height: 100 };
+    el.getBoundingClientRect = () => el.rect;
+    return el;
+  };
+  const a = makeCard("a", 0), b = makeCard("b", 120), c = makeCard("c", 240);
+  root.appendChild(a); root.appendChild(b); root.appendChild(c);
+  root.querySelectorAll = selector => selector.includes("data-pinned")
+    ? root.children.filter(el => el.attrs.get("data-pinned") === "true")
+    : [];
+  root.addEventListener = (type, fn) => root.handlers.set(type, fn);
+  root.removeEventListener = type => root.handlers.delete(type);
+  root.handlers = new Map();
+  const calls = [];
+  const controller = new Function("document", `${reorderModel}
+    return createPinnedReorderController;
+  `)(document);
+  let enabled = false;
+  const api = controller(root, (...args) => calls.push(args), () => enabled);
+  const target = { closest: () => a };
+  root.handlers.get("pointerdown")({ button: 0, pointerId: 1, clientX: 10, clientY: 10, target });
+  listeners.get("pointermove")({ pointerId: 1, clientX: 130, clientY: 10, preventDefault() {} });
+  listeners.get("pointerup")({ pointerId: 1 });
+  assert.equal(calls.length, 0, "disabled controller is inert");
+
+  enabled = true;
+  root.handlers.get("pointerdown")({ button: 0, pointerId: 2, clientX: 10, clientY: 10, target });
+  listeners.get("pointermove")({ pointerId: 2, clientX: 130, clientY: 10, preventDefault() {} });
+  listeners.get("pointerup")({ pointerId: 2 });
+  assert.equal(calls.length, 1, "one reorder is sent");
+  assert.equal(calls[0][0], "reorderPinned");
+  assert.deepEqual(JSON.parse(calls[0][2]), ["a", "b", "c"]);
+  api.destroy();
+  assert.equal(listeners.has("pointermove"), false, "destroy releases document listeners");
+});
 
 test("context menu layout: divider separates ordinary actions from paste actions", () => {
   const m = menu.buildContextMenu(new El("div"));
