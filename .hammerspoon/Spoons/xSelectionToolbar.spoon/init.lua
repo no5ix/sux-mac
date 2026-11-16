@@ -271,9 +271,11 @@ local function getToolbarHTML(text)
 :root{color-scheme:light dark}
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:flex-start}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
 .bar{position:relative;display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
  .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
+.bar.collapsed{width:52px;min-width:52px;max-width:52px}
+.bar.expanded{width:max-content}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0)}
 .compact-trigger{position:absolute!important;left:6px;top:6px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
@@ -2060,7 +2062,7 @@ local function buildToolbar(text)
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 20
     local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
-    local compactToolbarWidth = 52
+    local compactToolbarWidth = 60
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
