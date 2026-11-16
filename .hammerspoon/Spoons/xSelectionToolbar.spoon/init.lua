@@ -279,6 +279,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 .bar.expanded{width:max-content;height:52px;min-height:52px;overflow:hidden}
 .bar.expanded .full-actions{display:inline-flex;visibility:visible;opacity:1;transform:translateX(0)}
 .compact-trigger{position:absolute!important;left:6px;top:6px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
+.bar.anchor-right .compact-trigger{left:auto;right:6px}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
 button.is-hovered,button[data-hovered="true"]{background-color:var(--toolbar-hover)!important;box-shadow:inset 0 0 0 1px var(--toolbar-hover-border)!important;outline:none!important}
@@ -290,12 +291,13 @@ button:active{background-color:var(--toolbar-active)!important}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
 </style>
 </head><body><div class="bar collapsed" id="selection-toolbar-bar">
-  <button class="compact-trigger" type="button" aria-label="Show selection actions" title="Show selection actions"><span class="icon">📋</span></button>
+  <button class="compact-trigger" type="button" aria-label="Show selection actions" title="Show selection actions"><span class="icon">🛠️</span></button>
   <div class="full-actions" id="selection-toolbar-actions">__GROUPED_BUTTONS__</div>
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);}
+function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
 </script></body></html>
@@ -2067,8 +2069,12 @@ local function buildToolbar(text)
     local compactToolbarWidth = 60
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
-    local expandedToolbarWidth = math.min(toolbarWidth, frame.x + frame.w - x - 8)
+    local anchorRight = point.x > frame.x + frame.w / 2
+    local expandedToolbarWidth = anchorRight
+        and math.min(toolbarWidth, x + compactToolbarWidth - frame.x - 8)
+        or math.min(toolbarWidth, frame.x + frame.w - x - 8)
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
+    if anchorRight then toolbar:evaluateJavaScript("setAnchorRight(true)") end
 
     -- The same WebView has compact and expanded states. Keep the compact
     -- trigger anchored at the selection point; expand around that center on hover.
@@ -2092,7 +2098,7 @@ local function buildToolbar(text)
 
         local currentFrame = toolbar:frame()
         local targetWidth = expanded and expandedToolbarWidth or compactToolbarWidth
-        local targetX = x
+        local targetX = anchorRight and (x + compactToolbarWidth - targetWidth) or x
         local startX, startWidth = currentFrame.x, currentFrame.w
         local startTime = timer.secondsSinceEpoch()
         local duration = 0.20
