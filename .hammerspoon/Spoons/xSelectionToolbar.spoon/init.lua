@@ -214,14 +214,28 @@ local function looksLikeImagePayload(value)
         or value:match("^R0lGOD") ~= nil
 end
 
-local function hideToolbar()
+local dismissToolbarWithAnimation
+
+local function hideToolbarImmediately()
     if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
     if toolbar then toolbar:hide() end
 end
 
-local function dismissToolbarWithAnimation()
+local function hideToolbar()
     if not toolbar or not toolbar:isVisible() then
-        hideToolbar()
+        hideToolbarImmediately()
+        return
+    end
+    if dismissToolbarWithAnimation then
+        dismissToolbarWithAnimation()
+    else
+        hideToolbarImmediately()
+    end
+end
+
+dismissToolbarWithAnimation = function()
+    if not toolbar or not toolbar:isVisible() then
+        hideToolbarImmediately()
         return
     end
     toolbar:evaluateJavaScript("dismissToolbar && dismissToolbar()")
@@ -289,7 +303,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
 .bar.is-visible{opacity:1;transform:translate3d(-50%,-50%,0) scale(1)}
-.bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.34s,.30s}
+.bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.36s,.36s}
 .bar.dismissed{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);pointer-events:none}
 .bar.dismissed .compact-trigger{opacity:0;pointer-events:none}
 .compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .18s ease;z-index:2}
@@ -315,7 +329,7 @@ function revealToolbar(){
   if(!bar)return;
   requestAnimationFrame(()=>requestAnimationFrame(()=>bar.classList.add('is-visible')));
 }
-function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},320);}
+function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar||bar.classList.contains('is-closing'))return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},360);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
@@ -1112,7 +1126,7 @@ local function onToolbarMessage(message)
     local text = trim(textValue)
     -- logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
     if action == "dismissed" then
-        hideToolbar()
+        hideToolbarImmediately()
         return
     end
     if text == "" then hs.alert.show("No selected text"); return end
