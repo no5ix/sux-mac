@@ -1275,7 +1275,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .card-icon{font-size:12px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;flex:1}
 
- .card-preview{font-size:13px;line-height:1.48;color:#CFCDC6;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
+ .card-preview{font-size:13px;line-height:1.48;color:#344054;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
 
 
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#788191;white-space:nowrap}
@@ -1296,7 +1296,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
  .result-card[data-tone="purple"].is-selected,.result-card[data-tone="purple"]:hover{background:#59496e}
  .result-card[data-tone="green"].is-selected,.result-card[data-tone="green"]:hover{background:#405e50}
  .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#62523f}
- .card-preview{color:#CFCDC6;scrollbar-width:thin}
+ .card-preview{color:#E4E7EC;scrollbar-width:thin}
 }
 </style></head><body>
 <div class="panel">
