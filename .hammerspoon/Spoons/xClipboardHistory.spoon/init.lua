@@ -2984,11 +2984,19 @@ function createPinnedReorderController(root, bridge, isEnabled) {
     const target = state.target;
     clearMarks();
     if (commit && target && target !== state.item) {
+      const originalParent = state.item.parentNode;
+      const originalNextSibling = state.item.nextSibling;
       if (state.after) target.after(state.item);
       else target.before(state.item);
       const orderedIds = ids();
       if (orderedIds.length && orderedIds.every(Boolean)) {
         bridge('reorderPinned', 0, JSON.stringify(orderedIds));
+      } else if (originalParent) {
+        if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
+          originalParent.insertBefore(state.item, originalNextSibling);
+        } else {
+          originalParent.appendChild(state.item);
+        }
       }
     }
     root.classList.remove('reorder-drag-active');
