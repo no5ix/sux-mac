@@ -2180,12 +2180,23 @@ local function buildToolbar(text)
             frame.x + frame.w - expandedToolbarWidth - 8
         )
     )
-    toolbar:frame({
+    local compactFrame = {
+        x = x,
+        y = y,
+        w = actualWidth,
+        h = height
+    }
+    local expandedFrame = {
         x = expandedFrameX,
         y = y,
         w = expandedToolbarWidth,
         h = height
-    })
+    }
+
+    -- The native WebView must be compact while the UI is compact. Leaving it
+    -- at expanded width creates an invisible hover target across the whole
+    -- toolbar footprint, so moving over empty space can expand the toolbar.
+    toolbar:frame(compactFrame)
 
     -- The same WebView has compact and expanded states. Keep the compact
     -- trigger anchored at the selection point; expand around that center on hover.
@@ -2207,6 +2218,10 @@ local function buildToolbar(text)
         if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
 
         if expanded then
+            -- Grow the native hit-test frame only after the pointer has entered
+            -- the compact button's actual bounds. The expanded frame is centered
+            -- on the compact trigger and remains clamped to the current screen.
+            toolbar:frame(expandedFrame)
             toolbar:evaluateJavaScript("setExpanded(true,false);document.getElementById('selection-toolbar-bar')?.classList.add('is-visible');")
         elseif dismissAfterCollapse then
             dismissToolbarWithAnimation()
