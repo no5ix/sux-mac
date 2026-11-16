@@ -219,6 +219,14 @@ local function hideToolbar()
     if toolbar then toolbar:hide() end
 end
 
+local function dismissToolbarWithAnimation()
+    if not toolbar or not toolbar:isVisible() then
+        hideToolbar()
+        return
+    end
+    toolbar:evaluateJavaScript("dismissToolbar && dismissToolbar()")
+end
+
 local function normalizeMessage(message)
     -- Hammerspoon delivers a WKScriptMessage; its JavaScript payload is body.
     if type(message) == "table" and type(message.body) == "table" then
@@ -274,13 +282,15 @@ local function getToolbarHTML(text)
 *{box-sizing:border-box}
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
- .bar{position:relative;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:1;transform:scale(1);transition:background-color .12s,border-color .12s,opacity .18s ease,transform .22s cubic-bezier(.22,.8,.24,1)}
+ .bar{position:absolute;left:50%;top:50%;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:0;transform:translate3d(-50%,-50%,0) scale(.96);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:transform .20s cubic-bezier(.2,.75,.25,1),opacity .14s ease-out}
   .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .18s ease,transform .22s cubic-bezier(.22,.8,.24,1),visibility .22s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
-.bar.dismissed{opacity:0;transform:scale(.92);pointer-events:none}
+.bar.is-visible{opacity:1;transform:translate3d(-50%,-50%,0) scale(1)}
+.bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985)}
+.bar.dismissed{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);pointer-events:none}
 .bar.dismissed .compact-trigger{opacity:0;pointer-events:none}
 .compact-trigger{position:absolute!important;left:4.8px;top:4.8px;display:inline-flex!important;opacity:1;transition:opacity .18s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
@@ -300,6 +310,8 @@ button:active{background-color:var(--toolbar-active)!important}
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 function setExpanded(expanded,dismiss){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);bar.classList.toggle('dismissed',!!dismiss);}
+function revealToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(bar)requestAnimationFrame(()=>bar.classList.add('is-visible'));}
+function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},150);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
@@ -1087,6 +1099,10 @@ local function onToolbarMessage(message)
     end
     local text = trim(textValue)
     -- logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
+    if action == "dismissed" then
+        hideToolbar()
+        return
+    end
     if text == "" then hs.alert.show("No selected text"); return end
 
     if action == "copy" then
@@ -2087,6 +2103,7 @@ local function buildToolbar(text)
     toolbar:frame({ x = x, y = y, w = 360, h = height })
     toolbar:show()
     toolbar:bringToFront()
+    toolbar:evaluateJavaScript("revealToolbar()")
     -- Keep the HTML and native hover hit-testing in exactly the same button order.
     local toolbarGroups = {
         { { action = "copy" }, { action = "cut" } },
@@ -2124,7 +2141,14 @@ local function buildToolbar(text)
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
     local expandedToolbarWidth = math.min(toolbarWidth, frame.w - 16)
-    toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
+    local anchorCenterX = x + actualWidth / 2
+    local anchorCenterY = y + height / 2
+    toolbar:frame({
+        x = math.max(frame.x + 8, anchorCenterX - expandedToolbarWidth / 2),
+        y = y,
+        w = expandedToolbarWidth,
+        h = height
+    })
 
     -- The same WebView has compact and expanded states. Keep the compact
     -- trigger anchored at the selection point; expand around that center on hover.
@@ -2145,34 +2169,13 @@ local function buildToolbar(text)
         if collapseTimer then collapseTimer:stop(); collapseTimer = nil end
         if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
 
-        local currentFrame = toolbar:frame()
-        local targetWidth = expanded and expandedToolbarWidth or (dismissAfterCollapse and 0 or compactToolbarWidth)
-        local compactCenterX = x + compactToolbarWidth / 2
-        local targetX = math.max(frame.x + 8, math.min(compactCenterX - targetWidth / 2,
-            frame.x + frame.w - targetWidth - 8))
-        local startX, startWidth = currentFrame.x, currentFrame.w
-        local startTime = timer.secondsSinceEpoch()
-        local duration = 0.22
-        toolbar:evaluateJavaScript("setExpanded(" .. tostring(expanded) .. "," .. tostring(dismissAfterCollapse == true) .. ")")
-
-        toolbarFrameAnimationTimer = timer.doEvery(1 / 60, function()
-            if not toolbar or not toolbar:isVisible() then
-                if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
-                return
-            end
-            local progress = math.min(1, math.max(0, (timer.secondsSinceEpoch() - startTime) / duration))
-            local eased = progress * progress * (3 - 2 * progress)
-            local width = startWidth + (targetWidth - startWidth) * eased
-            local nextX = startX + (targetX - startX) * eased
-            local current = toolbar:frame()
-            toolbar:frame({x=nextX,y=current.y,w=width,h=current.h})
-            if progress >= 1 then
-                toolbar:frame({x=targetX,y=current.y,w=targetWidth,h=current.h})
-                toolbarFrameAnimationTimer:stop()
-                toolbarFrameAnimationTimer = nil
-                if dismissAfterCollapse then hideToolbar() end
-            end
-        end)
+        if expanded then
+            toolbar:evaluateJavaScript("setExpanded(true,false);document.getElementById('selection-toolbar-bar')?.classList.add('is-visible');")
+        elseif dismissAfterCollapse then
+            dismissToolbarWithAnimation()
+        else
+            toolbar:evaluateJavaScript("setExpanded(false,false)")
+        end
     end
 
     -- Native Hammerspoon polling only: use the toolbar's known layout and the
