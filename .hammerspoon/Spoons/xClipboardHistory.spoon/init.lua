@@ -825,13 +825,18 @@ end
 local function pinClipboardEntry(entry)
     if not entry or (entry.type ~= "text" and entry.type ~= "image") or entry.isPinned then return false end
     if not ensurePinnedStorage() then return false end
-    local records = readPinnedHistory()
+    local records = normalizePinnedSortOrder(readPinnedHistory())
     for _, record in ipairs(records) do
         if pinnedRecordMatchesEntry(record, entry) then invalidatePinnedIndex(); return true end
+    end
+    local lastSortOrder = 0
+    for _, record in ipairs(records) do
+        lastSortOrder = math.max(lastSortOrder, tonumber(record.sortOrder) or 0)
     end
     local id = tostring(math.floor(hs.timer.secondsSinceEpoch() * 1000000)) .. "-" .. tostring(#records + 1)
     local record = {
         id = id,
+        sortOrder = lastSortOrder + 1,
         type = entry.type,
         ts = tonumber(entry.ts or entry.rowTs) or os.time(),
         pinnedAt = os.time(),
