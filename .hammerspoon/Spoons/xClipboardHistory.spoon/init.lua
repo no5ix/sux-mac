@@ -3393,6 +3393,7 @@ local function updateClipboardPanel(query,kind,offset,append)
     -- the Set or the keyboard selection state during a pin/unpin refresh.
     js=js.."if(window.syncClipboardMultiSelection)window.syncClipboardMultiSelection();"..
         "document.querySelectorAll('.count').forEach(function(node){node.textContent="..jsStringLiteral(tostring(visibleCount).." matching items")..";});"
+    js=js.."var grid=document.getElementById('clipboard-items');if(grid)grid.classList.toggle('pinned-reorder-enabled',"..tostring(clipboardPinnedFilter)..");"
     if clipboard_webview then clipboard_webview:evaluateJavaScript(js) end
     clipboard_search=query; clipboard_type_filter=kind
 end
@@ -3555,11 +3556,7 @@ function handleClipboardPanelMessage(message)
         end
         -- Rebuild from the saved order rather than trusting the transient DOM
         -- layout. This also reconciles card indexes and keyboard focus.
-        if clipboardPinnedFilter then
-            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
-        else
-            updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
-        end
+        updateClipboardPanel(clipboard_search,clipboard_type_filter,0,false)
     elseif body.action == "pin" or body.action == "unpin" then
         local index=tonumber(body.index); local choice=index and menuData[index]
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
