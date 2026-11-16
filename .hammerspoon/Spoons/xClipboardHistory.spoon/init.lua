@@ -699,15 +699,67 @@ end
 
 local function loadPinnedEntries()
     local out = {}
-    for _, record in ipairs(readPinnedHistory()) do
+    for index, record in ipairs(readPinnedHistory()) do
         local entry = pinnedMetadata(record)
-        if entry then out[#out + 1] = entry end
+        if entry then
+            -- Legacy records inherit their prior JSON order until reordered.
+            entry.sortOrder = tonumber(record.sortOrder) or index
+            out[#out + 1] = entry
+        end
     end
     table.sort(out, function(a, b)
-        if a.pinnedAt == b.pinnedAt then return a.ts > b.ts end
-        return a.pinnedAt > b.pinnedAt
+        if a.sortOrder ~= b.sortOrder then return a.sortOrder < b.sortOrder end
+        if a.pinnedAt ~= b.pinnedAt then return a.pinnedAt < b.pinnedAt end
+        return tostring(a.id) < tostring(b.id)
     end)
     return out
+end
+
+local function normalizePinnedSortOrder(records)
+    local ordered = {}
+    for _, record in ipairs(records) do
+        if type(record) == "table" then ordered[#ordered + 1] = record end
+    end
+    table.sort(ordered, function(a, b)
+        local ao, bo = tonumber(a.sortOrder), tonumber(b.sortOrder)
+        if ao and bo and ao ~= bo then return ao < bo end
+        if ao ~= nil and bo == nil then return true end
+        if ao == nil and bo ~= nil then return false end
+        if (tonumber(a.pinnedAt) or 0) ~= (tonumber(b.pinnedAt) or 0) then
+            return (tonumber(a.pinnedAt) or 0) < (tonumber(b.pinnedAt) or 0)
+        end
+        return tostring(a.id or "") < tostring(b.id or "")
+    end)
+    for index, record in ipairs(ordered) do record.sortOrder = index end
+    return ordered
+end
+
+local function reorderPinnedEntries(orderedIds)
+    if type(orderedIds) ~= "table" then return false end
+    local records = readPinnedHistory()
+    local byId, ordered = {}, {}
+    for _, record in ipairs(records) do
+        if type(record) ~= "table" or type(record.id) ~= "string" or record.id == "" or byId[record.id] then
+            return false
+        end
+        byId[record.id] = record
+    end
+    -- Every existing pin must be supplied exactly once. Never allow stale DOM
+    -- state to cause a persisted record to disappear.
+    if #orderedIds ~= #records then return false end
+    local seen = {}
+    for _, id in ipairs(orderedIds) do
+        if type(id) ~= "string" or seen[id] or not byId[id] then return false end
+        seen[id] = true
+        ordered[#ordered + 1] = byId[id]
+    end
+    for index, record in ipairs(ordered) do record.sortOrder = index end
+    if not writePinnedHistory(ordered) then
+        logger.e("Unable to persist the manually ordered pinned clipboard items")
+        return false
+    end
+    invalidatePinnedIndex()
+    return true
 end
 
 -- Pinned text is stored in the JSON record, so the common case needs no disk
