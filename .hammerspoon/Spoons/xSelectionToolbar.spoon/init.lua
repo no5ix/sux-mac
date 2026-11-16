@@ -295,7 +295,7 @@ button:active{background-color:var(--toolbar-active)!important}
 </div><script>
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
-function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('expanded',!!expanded);}
+function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(!bar)return;bar.classList.toggle('expanded',!!expanded);bar.classList.toggle('collapsed',!expanded);}
 const compactTrigger=document.querySelector('.compact-trigger');
 if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
 </script></body></html>
