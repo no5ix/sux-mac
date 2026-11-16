@@ -274,9 +274,10 @@ html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
 .bar{position:relative;display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:none;margin:0;padding:6px;border:1px solid var(--toolbar-border);border-radius:12px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;transition:background-color .12s,border-color .12s,width .16s ease}
  .full-actions{display:inline-flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-5px);transition:opacity .16s ease,transform .20s cubic-bezier(.2,.75,.25,1),visibility .20s}
-.bar.collapsed{width:52px;min-width:52px;max-width:52px}
-.bar.expanded{width:max-content}
-.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0)}
+.bar.collapsed{width:52px;min-width:52px;max-width:52px;overflow:hidden}
+.bar.collapsed .full-actions{display:none}
+.bar.expanded{width:max-content;overflow:hidden}
+.bar.expanded .full-actions{display:inline-flex;visibility:visible;opacity:1;transform:translateX(0)}
 .compact-trigger{position:absolute!important;left:6px;top:6px;display:inline-flex!important;opacity:1;transition:opacity .12s ease;z-index:2}
 .bar.expanded .compact-trigger{opacity:0;pointer-events:none}
 button{appearance:none;-webkit-appearance:none;position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;width:38px;height:38px;padding:0;color:var(--toolbar-fg);background:transparent;font-family:inherit;font-size:22px;white-space:nowrap;cursor:pointer!important;transition:none!important;-webkit-user-select:none;user-select:none}
@@ -295,6 +296,8 @@ button:active{background-color:var(--toolbar-active)!important}
 const selection = __SELECTION_JSON__;
 function action(name){try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:name,text:selection});}catch(e){document.title="Toolbar error: "+e.message;}}
 function setExpanded(expanded){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('expanded',!!expanded);}
+const compactTrigger=document.querySelector('.compact-trigger');
+if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
 </script></body></html>
 ]=]
     html = html:gsub("__GROUPED_BUTTONS__", function() return groupedButtonsHTML end)
