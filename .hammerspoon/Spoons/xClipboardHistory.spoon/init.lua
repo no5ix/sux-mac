@@ -2997,6 +2997,7 @@ window.resetMultiSelection = syncClipboardMultiSelection;
 /* BEGIN PINNED REORDER MODEL */
 function createPinnedReorderController(root, bridge, isEnabled) {
   let drag = null;
+  let suppressClickFor = null;
   const cards = () => Array.from(root.querySelectorAll('.item[data-pinned="true"]'));
   const clearMarks = () => cards().forEach(item => item.classList.remove('dragging', 'drop-before', 'drop-after'));
   const ids = () => cards().map(item => item.dataset.pinId || '');
@@ -3008,6 +3009,7 @@ function createPinnedReorderController(root, bridge, isEnabled) {
     const target = state.target;
     clearMarks();
     if (commit && target && target !== state.item) {
+      suppressClickFor = state.item;
       const originalParent = state.item.parentNode;
       const originalNextSibling = state.item.nextSibling;
       const originalPreviousSibling = state.item.previousSibling;
@@ -3027,6 +3029,14 @@ function createPinnedReorderController(root, bridge, isEnabled) {
       }
     }
     root.classList.remove('reorder-drag-active');
+  };
+  const onClickCapture = event => {
+    if (!suppressClickFor) return;
+    const clickedItem = event.target.closest && event.target.closest('.item');
+    if (clickedItem !== suppressClickFor) return;
+    suppressClickFor = null;
+    event.preventDefault();
+    event.stopImmediatePropagation();
   };
   const onPointerDown = event => {
     if (!isEnabled() || event.button !== 0) return;
@@ -3070,6 +3080,7 @@ function createPinnedReorderController(root, bridge, isEnabled) {
     if (drag && event.pointerId === drag.pointerId) finish(false);
   };
   root.addEventListener('pointerdown', onPointerDown);
+  root.addEventListener('click', onClickCapture, true);
   document.addEventListener('pointermove', onPointerMove, { passive: false });
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', onPointerCancel);
@@ -3077,6 +3088,7 @@ function createPinnedReorderController(root, bridge, isEnabled) {
     destroy() {
       finish(false);
       root.removeEventListener('pointerdown', onPointerDown);
+      root.removeEventListener('click', onClickCapture, true);
       document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerup', onPointerUp);
       document.removeEventListener('pointercancel', onPointerCancel);
