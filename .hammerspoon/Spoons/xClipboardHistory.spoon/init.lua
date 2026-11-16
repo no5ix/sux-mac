@@ -564,7 +564,7 @@ end
 local function pinnedSourceKeyIndex()
     if pinnedSourceKeyCache then return pinnedSourceKeyCache end
     local exact, legacy = {}, {}
-    for _, record in ipairs(readPinnedHistory()) do
+    for _, record in ipairs(readPinnedHistory() or {}) do
         if type(record) == "table" and type(record.id) == "string" and record.id ~= "" then
             local pinId = record.id
             if type(record.sourceId) == "string" and record.sourceId ~= "" then
@@ -898,8 +898,13 @@ end
 
 local function unpinClipboardEntry(entry)
     if not entry then return false end
+    local records = readPinnedHistory()
+    if not records then
+        logger.e("Refusing to unpin while the existing pinned index is unreadable")
+        return false
+    end
     local kept, removedRecords = {}, {}
-    for _, record in ipairs(readPinnedHistory()) do
+    for _, record in ipairs(records) do
         if pinnedRecordMatchesEntry(record, entry) then
             removedRecords[#removedRecords + 1] = record
         else
