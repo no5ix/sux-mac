@@ -3108,6 +3108,9 @@ const pinnedReorderObserver = new MutationObserver(() => {
   pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
 });
 pinnedReorderObserver.observe(pinnedReorderRoot, { childList: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pinnedReorderController.destroy();
+});
 const refreshPinnedReorderState = () => {
   const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
   pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
