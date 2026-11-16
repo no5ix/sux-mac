@@ -2959,6 +2959,100 @@ function syncClipboardMultiSelection() {
 }
 window.syncClipboardMultiSelection = syncClipboardMultiSelection;
 window.resetMultiSelection = syncClipboardMultiSelection;
+/* BEGIN PINNED REORDER MODEL */
+function createPinnedReorderController(root, bridge, isEnabled) {
+  let drag = null;
+  const cards = () => Array.from(root.querySelectorAll('.item[data-pinned="true"]'));
+  const clearMarks = () => cards().forEach(item => item.classList.remove('dragging', 'drop-before', 'drop-after'));
+  const ids = () => cards().map(item => item.dataset.pinId || '');
+  const finish = commit => {
+    if (!drag) return;
+    const state = drag;
+    drag = null;
+    state.item.classList.remove('dragging');
+    const target = state.target;
+    clearMarks();
+    if (commit && target && target !== state.item) {
+      if (state.after) target.after(state.item);
+      else target.before(state.item);
+      const orderedIds = ids();
+      if (orderedIds.length && orderedIds.every(Boolean)) {
+        bridge('reorderPinned', 0, JSON.stringify(orderedIds));
+      }
+    }
+    root.classList.remove('reorder-drag-active');
+  };
+  const onPointerDown = event => {
+    if (!isEnabled() || event.button !== 0) return;
+    const item = event.target.closest && event.target.closest('.item[data-pinned="true"]');
+    // Checkboxes and the metadata/selection strip keep their existing behavior.
+    if (!item || event.target.closest('.card-meta-row') || event.target.closest('button,input')) return;
+    drag = { item, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      target: null, after: false, active: false };
+  };
+  const onPointerMove = event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!drag.active) {
+      if (Math.max(Math.abs(event.clientX - drag.x), Math.abs(event.clientY - drag.y)) < 7) return;
+      drag.active = true;
+      drag.item.classList.add('dragging');
+      root.classList.add('reorder-drag-active');
+    }
+    let target = null, after = false, best = Infinity;
+    cards().filter(item => item !== drag.item).forEach(item => {
+      const rect = item.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      const distance = (event.clientX - cx) ** 2 + (event.clientY - cy) ** 2;
+      if (distance < best) {
+        best = distance;
+        target = item;
+        after = event.clientY > cy ||
+          (Math.abs(event.clientY - cy) < rect.height / 2 && event.clientX > cx);
+      }
+    });
+    clearMarks();
+    drag.item.classList.add('dragging');
+    drag.target = target;
+    drag.after = after;
+    if (target) target.classList.add(after ? 'drop-after' : 'drop-before');
+    event.preventDefault();
+  };
+  const onPointerUp = event => {
+    if (drag && event.pointerId === drag.pointerId) finish(drag.active);
+  };
+  const onPointerCancel = event => {
+    if (drag && event.pointerId === drag.pointerId) finish(false);
+  };
+  root.addEventListener('pointerdown', onPointerDown);
+  document.addEventListener('pointermove', onPointerMove, { passive: false });
+  document.addEventListener('pointerup', onPointerUp);
+  document.addEventListener('pointercancel', onPointerCancel);
+  return {
+    destroy() {
+      finish(false);
+      root.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerCancel);
+    }
+  };
+}
+/* END PINNED REORDER MODEL */
+const pinnedReorderRoot = document.getElementById('clipboard-items');
+const pinnedReorderController = createPinnedReorderController(
+  pinnedReorderRoot, bridge,
+  () => document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true'
+);
+const refreshPinnedReorderState = () => {
+  const enabled = document.querySelector('.date-filter[data-date-key="pinned"]')?.getAttribute('aria-pressed') === 'true';
+  pinnedReorderRoot.classList.toggle('pinned-reorder-enabled', enabled);
+};
+const pinnedReorderObserver = new MutationObserver(refreshPinnedReorderState);
+pinnedReorderObserver.observe(pinnedReorderRoot, { childList: true });
+refreshPinnedReorderState();
+document.querySelectorAll('.date-filter').forEach(button => {
+  button.addEventListener('click', () => window.setTimeout(refreshPinnedReorderState, 0), true);
+});
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
 // Keep hover feedback on the actual persistent menu buttons. Delegation also
