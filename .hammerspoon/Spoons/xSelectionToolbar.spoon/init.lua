@@ -2024,6 +2024,7 @@ local function buildToolbar(text)
     local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     local frame = screen:fullFrame()
     local point = hs.mouse.absolutePosition()
+    local x = math.max(frame.x + 6.4, math.min(point.x - 24, frame.x + frame.w - 48 - 6.4))
     local height = 49.6
     local y = point.y - height - 11.2
     if y < frame.y + 6.4 then y = point.y + 14.4 end
