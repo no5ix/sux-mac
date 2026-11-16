@@ -236,9 +236,49 @@ test("pinned reorder pointer controller only commits complete pinned card order"
   root.querySelectorAll = selector => selector.includes("data-pinned")
     ? root.children.filter(el => el.attrs.get("data-pinned") === "true")
     : [];
+  root.classList.toggle = (name, force) => force ? root.classList.add(name) : root.classList.remove(name);
   root.addEventListener = (type, fn) => root.handlers.set(type, fn);
   root.removeEventListener = type => root.handlers.delete(type);
   root.handlers = new Map();
+  root.querySelectorAll = selector => selector.includes("data-pinned")
+    ? root.children.filter(el => el.attrs.get("data-pinned") === "true")
+    : [];
+  a.before = node => {
+    const from = root.children.indexOf(node), to = root.children.indexOf(a);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(a), 0, node);
+    node.parentNode = root;
+  };
+  a.after = node => {
+    const from = root.children.indexOf(node);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(a) + 1, 0, node);
+    node.parentNode = root;
+  };
+  b.before = node => {
+    const from = root.children.indexOf(node);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(b), 0, node);
+    node.parentNode = root;
+  };
+  b.after = node => {
+    const from = root.children.indexOf(node);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(b) + 1, 0, node);
+    node.parentNode = root;
+  };
+  c.before = node => {
+    const from = root.children.indexOf(node);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(c), 0, node);
+    node.parentNode = root;
+  };
+  c.after = node => {
+    const from = root.children.indexOf(node);
+    if (from >= 0) root.children.splice(from, 1);
+    root.children.splice(root.children.indexOf(c) + 1, 0, node);
+    node.parentNode = root;
+  };
   const calls = [];
   const controller = new Function("document", `${reorderModel}
     return createPinnedReorderController;
@@ -253,11 +293,11 @@ test("pinned reorder pointer controller only commits complete pinned card order"
 
   enabled = true;
   root.handlers.get("pointerdown")({ button: 0, pointerId: 2, clientX: 10, clientY: 10, target });
-  listeners.get("pointermove")({ pointerId: 2, clientX: 130, clientY: 10, preventDefault() {} });
+  listeners.get("pointermove")({ pointerId: 2, clientX: 270, clientY: 10, preventDefault() {} });
   listeners.get("pointerup")({ pointerId: 2 });
   assert.equal(calls.length, 1, "one reorder is sent");
   assert.equal(calls[0][0], "reorderPinned");
-  assert.deepEqual(JSON.parse(calls[0][2]), ["a", "b", "c"]);
+  assert.deepEqual(JSON.parse(calls[0][2]), ["b", "c", "a"]);
   api.destroy();
   assert.equal(listeners.has("pointermove"), false, "destroy releases document listeners");
 });
