@@ -27,6 +27,7 @@ local replacementSessionSequence = 0
 local replacementKeyTap = nil
 local replacementToolbar = nil
 local replacementToolbarUsercontent = nil
+local replacementAppearancePoll = nil
 -- Forward declaration: applyReplacementResult is defined before this function.
 local findOriginalReplacementElement
 -- App that owned the text selection before the floating toolbar was shown.
@@ -1195,6 +1196,10 @@ local function stopReplacementTasks(session)
 end
 
 local function destroyReplacementToolbar()
+    if replacementAppearancePoll then
+        replacementAppearancePoll:stop()
+        replacementAppearancePoll = nil
+    end
     if replacementToolbar then
         local old = replacementToolbar
         replacementToolbar = nil
@@ -1266,7 +1271,7 @@ local function replacementToolbarHTML(session)
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
-.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(226,229,234,.98);box-shadow:none!important}
+.panel{display:flex;flex-direction:column;gap:12px;width:100%;height:100%;padding:16px;border:0!important;outline:0!important;border-radius:20px;background:rgba(213,217,224,.99);box-shadow:none!important}
 .panel-header{display:flex;align-items:center;justify-content:space-between;min-height:28px;font-size:12px;font-weight:700;color:#4b5563}
  .panel-title{display:flex;align-items:center;min-width:0}
  .panel-close{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:104px;height:30px;margin:-2px -2px -2px 8px;padding:0 10px;border:0;border-radius:9px;background:rgba(45,55,72,.08);color:#596273;font-family:inherit;font-size:11px;font-weight:650;line-height:1;white-space:nowrap;cursor:pointer;transition:background-color .12s,color .12s,transform .12s}
@@ -1276,7 +1281,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 
 
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:10px;overflow:visible;min-height:0;flex:1;padding-top:2px;padding-bottom:2px}
-.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;position:relative;top:0;transition:filter .12s,background-color .12s,top .12s}
+.result-card{appearance:none;display:flex;flex-direction:column;gap:9px;min-width:0;min-height:0;padding:12px;border:0;border-radius:14px;background:rgba(255,255,255,.055);color:#202124;text-align:left;font:inherit;cursor:pointer;outline:none;box-shadow:none!important;position:relative;top:0;transition:filter .12s,background-color .12s}
 .result-card[data-tone="blue"]{background:#dce8ff}
 .result-card[data-tone="purple"]{background:#e9defa}
 .result-card[data-tone="green"]{background:#dcefe2}
@@ -1285,13 +1290,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
 .result-card[data-tone="purple"].is-selected,.result-card[data-tone="purple"]:hover{background:#d9c5f2}
 .result-card[data-tone="green"].is-selected,.result-card[data-tone="green"]:hover{background:#c4e3d0}
 .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#ecd8b9}
- .result-card:hover{top:-1px}
 
 .card-heading{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
 .card-icon{font-size:12px;line-height:1}
 .card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;flex:1}
 
- .card-preview{font-size:13px;line-height:1.48;color:#CFCDC6;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
+ .card-preview{font-size:13px;line-height:1.48;color:#505968;white-space:pre-wrap;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;overflow-wrap:anywhere;padding:8px;display:block}
 
 
 .panel-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#788191;white-space:nowrap}
@@ -1314,6 +1318,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#202124}
  .result-card[data-tone="amber"].is-selected,.result-card[data-tone="amber"]:hover{background:#62523f}
  .card-preview{color:#CFCDC6;scrollbar-width:thin}
 }
+:root[data-appearance="light"] .panel{background:rgba(213,217,224,.99)}
+:root[data-appearance="light"] .card-preview{color:#505968}
+:root[data-appearance="dark"] .panel{background:rgba(38,40,45,.98)}
+:root[data-appearance="dark"] .card-preview{color:#CFCDC6}
 </style></head><body>
 <div class="panel">
  <div class="panel-header"><span class="panel-title">AI Text Replacement</span><button type="button" class="panel-close" aria-label="Cancel AI Text Replacement" title="Esc to Cancel" onclick="bridge('cancel')"><kbd>Esc</kbd> to Cancel</button></div>
@@ -1668,6 +1676,21 @@ local function showReplacementToolbar(session)
     -- Place the chooser slightly below vertical center, while keeping it on-screen.
     local y = math.min(frame.y + frame.h - height, frame.y + (frame.h - height) / 2 + frame.h * 0.04)
     replacementToolbar:frame({x=x,y=y,w=width,h=height})
+    local lastReplacementAppearance = nil
+    local function syncReplacementAppearance()
+        if not replacementToolbar then return end
+        local style = hs.host.interfaceStyle and hs.host.interfaceStyle()
+        local appearance = style == "Dark" and "dark" or "light"
+        if appearance == lastReplacementAppearance then return end
+        lastReplacementAppearance = appearance
+        replacementToolbar:evaluateJavaScript(
+            "document.documentElement.setAttribute('data-appearance'," .. string.format("%q", appearance) .. ");" ..
+            "document.documentElement.style.colorScheme=" .. string.format("%q", appearance) .. ";"
+        )
+    end
+    syncReplacementAppearance()
+    if replacementAppearancePoll then replacementAppearancePoll:stop(); replacementAppearancePoll = nil end
+    replacementAppearancePoll = timer.doEvery(1, syncReplacementAppearance)
     replacementToolbar:show()
     replacementToolbar:bringToFront()
     local hsApp = hs.application.get("org.hammerspoon.Hammerspoon")
