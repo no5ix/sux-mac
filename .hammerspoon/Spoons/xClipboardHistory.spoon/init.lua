@@ -971,6 +971,14 @@ local function migratePinnedHistory()
                 migratedRecord.pinnedAt = tonumber(migratedRecord.ts) or os.time()
                 changes = changes + 1
             end
+            -- Backfill custom positions in the exact order already presented by
+            -- the legacy Pin scope. No existing pins move during migration.
+            if tonumber(migratedRecord.sortOrder) == nil then
+                migratedRecord.sortOrder = index
+                changes = changes + 1
+            else
+                migratedRecord.sortOrder = tonumber(migratedRecord.sortOrder)
+            end
             -- A pin created from a live in-memory entry recorded no source
             -- identity, so it could never be matched back to its ordinary
             -- record. Link it now, by payload identity, to the source id.
