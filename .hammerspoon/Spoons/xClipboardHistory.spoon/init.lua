@@ -739,6 +739,10 @@ end
 local function reorderPinnedEntries(orderedIds)
     if type(orderedIds) ~= "table" then return false end
     local records = readPinnedHistory()
+    if not records then
+        logger.e("Refusing to reorder a pinned index that could not be decoded")
+        return false
+    end
     local byId, ordered = {}, {}
     for _, record in ipairs(records) do
         if type(record) ~= "table" or type(record.id) ~= "string" or record.id == "" or byId[record.id] then
@@ -827,7 +831,12 @@ end
 local function pinClipboardEntry(entry)
     if not entry or (entry.type ~= "text" and entry.type ~= "image") or entry.isPinned then return false end
     if not ensurePinnedStorage() then return false end
-    local records = normalizePinnedSortOrder(readPinnedHistory())
+    local existingRecords = readPinnedHistory()
+    if not existingRecords then
+        logger.e("Refusing to pin while the existing pinned index is unreadable")
+        return false
+    end
+    local records = normalizePinnedSortOrder(existingRecords)
     for _, record in ipairs(records) do
         if pinnedRecordMatchesEntry(record, entry) then invalidatePinnedIndex(); return true end
     end
