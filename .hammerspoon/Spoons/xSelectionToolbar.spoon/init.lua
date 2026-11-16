@@ -28,6 +28,7 @@ local replacementKeyTap = nil
 local replacementToolbar = nil
 local replacementToolbarUsercontent = nil
 local replacementAppearancePoll = nil
+local replacementWindowAnimationTimer = nil
 -- Forward declaration: applyReplacementResult is defined before this function.
 local findOriginalReplacementElement
 -- App that owned the text selection before the floating toolbar was shown.
@@ -1196,6 +1197,10 @@ local function stopReplacementTasks(session)
 end
 
 local function destroyReplacementToolbar()
+    if replacementWindowAnimationTimer then
+        replacementWindowAnimationTimer:stop()
+        replacementWindowAnimationTimer = nil
+    end
     if replacementAppearancePoll then
         replacementAppearancePoll:stop()
         replacementAppearancePoll = nil
@@ -1206,6 +1211,43 @@ local function destroyReplacementToolbar()
         pcall(function() old:delete() end)
     end
     replacementToolbarUsercontent = nil
+end
+
+local function animateReplacementToolbarOut(onComplete)
+    if not replacementToolbar then
+        if onComplete then onComplete() end
+        return
+    end
+    if replacementWindowAnimationTimer then
+        replacementWindowAnimationTimer:stop()
+        replacementWindowAnimationTimer = nil
+    end
+    local start = replacementToolbar:frame()
+    local target = {
+        x = start.x + start.w * 0.02,
+        y = start.y + 8,
+        w = start.w * 0.96,
+        h = start.h * 0.96
+    }
+    local elapsed, duration = 0, 0.16
+    replacementWindowAnimationTimer = timer.doEvery(1 / 60, function()
+        elapsed = elapsed + 1 / 60
+        local t = math.min(1, elapsed / duration)
+        local eased = 1 - (1 - t) * (1 - t) * (1 - t)
+        if replacementToolbar then
+            replacementToolbar:frame({
+                x = start.x + (target.x - start.x) * eased,
+                y = start.y + (target.y - start.y) * eased,
+                w = start.w + (target.w - start.w) * eased,
+                h = start.h + (target.h - start.h) * eased
+            })
+        end
+        if t >= 1 then
+            replacementWindowAnimationTimer:stop()
+            replacementWindowAnimationTimer = nil
+            if onComplete then onComplete() end
+        end
+    end)
 end
 
 local function closeReplacementSession(reason)
@@ -1224,7 +1266,7 @@ local function closeReplacementSession(reason)
         _G.xSelectionToolbarSyntheticCopyUntil = nil
     end
     replacementSession = nil
-    destroyReplacementToolbar()
+    animateReplacementToolbarOut(destroyReplacementToolbar)
     print("[Replacement] Session " .. tostring(session.id) .. " closed: " .. tostring(reason))
 end
 
@@ -1675,7 +1717,14 @@ local function showReplacementToolbar(session)
     local x = frame.x + (frame.w - width) / 2
     -- Place the chooser slightly below vertical center, while keeping it on-screen.
     local y = math.min(frame.y + frame.h - height, frame.y + (frame.h - height) / 2 + frame.h * 0.04)
-    replacementToolbar:frame({x=x,y=y,w=width,h=height})
+    local targetFrame = {x=x,y=y,w=width,h=height}
+    local initialScale = 0.96
+    replacementToolbar:frame({
+        x = x + width * (1 - initialScale) / 2,
+        y = y + height * (1 - initialScale) / 2 + 8,
+        w = width * initialScale,
+        h = height * initialScale
+    })
     local lastReplacementAppearance = nil
     local function syncReplacementAppearance()
         if not replacementToolbar then return end
@@ -1693,6 +1742,29 @@ local function showReplacementToolbar(session)
     replacementAppearancePoll = timer.doEvery(1, syncReplacementAppearance)
     replacementToolbar:show()
     replacementToolbar:bringToFront()
+    local entranceStart = replacementToolbar:frame()
+    local elapsed, duration = 0, 0.20
+    if replacementWindowAnimationTimer then
+        replacementWindowAnimationTimer:stop()
+        replacementWindowAnimationTimer = nil
+    end
+    replacementWindowAnimationTimer = timer.doEvery(1 / 60, function()
+        elapsed = elapsed + 1 / 60
+        local t = math.min(1, elapsed / duration)
+        local eased = 1 - (1 - t) * (1 - t) * (1 - t)
+        if replacementToolbar then
+            replacementToolbar:frame({
+                x = entranceStart.x + (targetFrame.x - entranceStart.x) * eased,
+                y = entranceStart.y + (targetFrame.y - entranceStart.y) * eased,
+                w = entranceStart.w + (targetFrame.w - entranceStart.w) * eased,
+                h = entranceStart.h + (targetFrame.h - entranceStart.h) * eased
+            })
+        end
+        if t >= 1 then
+            replacementWindowAnimationTimer:stop()
+            replacementWindowAnimationTimer = nil
+        end
+    end)
     local hsApp = hs.application.get("org.hammerspoon.Hammerspoon")
     if hsApp then hsApp:activate(true) end
 end
