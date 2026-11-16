@@ -2986,6 +2986,7 @@ function createPinnedReorderController(root, bridge, isEnabled) {
     if (commit && target && target !== state.item) {
       const originalParent = state.item.parentNode;
       const originalNextSibling = state.item.nextSibling;
+      const originalPreviousSibling = state.item.previousSibling;
       if (state.after) target.after(state.item);
       else target.before(state.item);
       const orderedIds = ids();
@@ -2994,6 +2995,8 @@ function createPinnedReorderController(root, bridge, isEnabled) {
       } else if (originalParent) {
         if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
           originalParent.insertBefore(state.item, originalNextSibling);
+        } else if (originalPreviousSibling && originalPreviousSibling.parentNode === originalParent) {
+          originalParent.insertBefore(state.item, originalPreviousSibling.nextSibling);
         } else {
           originalParent.appendChild(state.item);
         }
