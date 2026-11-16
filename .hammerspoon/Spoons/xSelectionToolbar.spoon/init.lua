@@ -2064,10 +2064,10 @@ local function buildToolbar(text)
         + separatorCount * groupSeparatorWidth
     for _, width in ipairs(buttonWidths) do toolbarWidth = toolbarWidth + width end
     toolbarWidth = toolbarWidth + 20
-    local expandedToolbarWidth = math.min(toolbarWidth, frame.x + frame.w - x - 8)
     local compactToolbarWidth = 60
     local actualWidth = compactToolbarWidth
     x = math.max(frame.x + 8, math.min(point.x - actualWidth / 2, frame.x + frame.w - actualWidth - 8))
+    local expandedToolbarWidth = math.min(toolbarWidth, frame.x + frame.w - x - 8)
     toolbar:frame({ x = x, y = y, w = actualWidth, h = height })
 
     -- The same WebView has compact and expanded states. Keep the compact
