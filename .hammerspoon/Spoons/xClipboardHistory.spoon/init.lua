@@ -1743,8 +1743,10 @@ local function historyItemHTML(entry, index)
         '<input class="card-select-checkbox" type="checkbox" aria-label="Select clipboard item" data-select-uid="' .. uid .. '">' ..
         '<span class="selection-order" aria-hidden="true"></span>' ..
         '<span class="stamp">' .. escapeHTML(stamp) .. '</span>' ..
-        (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '<span class="pin-placeholder" aria-hidden="true"></span>') ..
-        (entry.isPinned and entry.topMarked == true and '<span class="top-mark" aria-label="Top priority">⬆️</span>' or '') ..
+        '<span class="card-indicators">' ..
+          '<span class="pin-mark" aria-label="Pinned" style="visibility:' .. (cardIsPinned and 'visible' or 'hidden') .. '">📍</span>' ..
+          (entry.isPinned and entry.topMarked == true and '<span class="top-mark" aria-label="Top priority">⬆️</span>' or '') ..
+        '</span>' ..
         '</div>'
     if entry.type == "image" then
         local imageEntry = entry.historyEntry or entry
