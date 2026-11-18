@@ -654,6 +654,8 @@ local function pinnedRecordFields(record)
         pinnedAt = record.pinnedAt,
         sourceKey = record.sourceKey,
         sourceId = record.sourceId,
+        topMarked = record.topMarked == true,
+        topMarkedAt = tonumber(record.topMarkedAt),
     }
     if record.type == "text" then
         if type(record.content) == "string" then
@@ -679,6 +681,8 @@ local function pinnedMetadata(record)
     if not entry then return nil end
     entry.isPinned = true
     entry.pinnedAt = tonumber(record.pinnedAt) or entry.ts
+    entry.topMarked = record.topMarked == true
+    entry.topMarkedAt = tonumber(record.topMarkedAt)
     -- Keep the original ordinary-history identity for selection across pin
     -- and unpin transitions. The pin record's own ID is storage identity only.
     if type(record.sourceId) == "string" and record.sourceId ~= "" then
@@ -704,8 +708,15 @@ local function loadPinnedEntries()
         if entry then out[#out + 1] = entry end
     end
     table.sort(out, function(a, b)
-        if a.pinnedAt == b.pinnedAt then return a.ts > b.ts end
-        return a.pinnedAt > b.pinnedAt
+        local aTop, bTop = a.topMarked == true, b.topMarked == true
+        if aTop ~= bTop then return aTop end
+        if aTop then
+            local aMarkedAt, bMarkedAt = tonumber(a.topMarkedAt) or 0, tonumber(b.topMarkedAt) or 0
+            if aMarkedAt ~= bMarkedAt then return aMarkedAt > bMarkedAt end
+        end
+        if a.pinnedAt ~= b.pinnedAt then return a.pinnedAt < b.pinnedAt end
+        if a.ts ~= b.ts then return a.ts < b.ts end
+        return tostring(a.id or "") < tostring(b.id or "")
     end)
     return out
 end
@@ -821,6 +832,30 @@ local function pinClipboardEntry(entry)
         removePinnedFile(record.imagePath)
         removePinnedFile(record.thumbnailPath)
         logger.e("Unable to persist the pinned history index")
+        return false
+    end
+    invalidatePinnedIndex()
+    return true
+end
+
+-- Promote an existing pin without changing its identity or source timestamp.
+local function movePinnedEntryToTop(entry)
+    if not entry or entry.isPinned ~= true then return false end
+    local records = readPinnedHistory()
+    local target = nil
+    for _, record in ipairs(records) do
+        if pinnedRecordMatchesEntry(record, entry) then target = record; break end
+    end
+    if not target then return false end
+    local maxMarkedAt = 0
+    for _, record in ipairs(records) do
+        local markedAt = tonumber(record.topMarkedAt) or 0
+        if record.topMarked == true and markedAt > maxMarkedAt then maxMarkedAt = markedAt end
+    end
+    target.topMarked = true
+    target.topMarkedAt = math.max(os.time(), maxMarkedAt + 1)
+    if not writePinnedHistory(records) then
+        logger.e("Unable to persist pinned-item priority")
         return false
     end
     invalidatePinnedIndex()
@@ -1709,6 +1744,7 @@ local function historyItemHTML(entry, index)
         '<span class="selection-order" aria-hidden="true"></span>' ..
         '<span class="stamp">' .. escapeHTML(stamp) .. '</span>' ..
         (cardIsPinned and '<span class="pin-mark" aria-label="Pinned">📍</span>' or '<span class="pin-placeholder" aria-hidden="true"></span>') ..
+        (entry.isPinned and entry.topMarked == true and '<span class="top-mark" aria-label="Top priority">⬆️</span>' or '') ..
         '</div>'
     if entry.type == "image" then
         local imageEntry = entry.historyEntry or entry
@@ -2675,6 +2711,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
+  { slot: 'top', label: '⬆️ Top', pinnedOnly: true },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'divider-before-select', divider: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
@@ -2692,6 +2729,7 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
   const visible = CONTEXT_MENU_ITEMS.map(spec => {
     if (spec.divider === true) return false;
     return (spec.imageOnly !== true || isImage === true) &&
+      (spec.pinnedOnly !== true || isPinned === true) &&
       (spec.selectedOnly !== true || hasSelection === true) &&
       (spec.selectedImageOnly !== true || (hasSelection === true && imageActionsAvailable));
   });
@@ -2829,6 +2867,7 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   else if (action === 'copyPath') bridge('copyPath', rowIndex, '');
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
   else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
+  else if (action === 'top') bridge('top', rowIndex, '');
   else if (action === 'preview' && openManualPreview) openManualPreview(target);
   return true;
 }
@@ -3377,6 +3416,14 @@ function handleClipboardPanelMessage(message)
                 selectedClipboardUids[selectedUid] = true
             end
         --     hs.alert.show(body.action=="pin" and "Pinned clipboard item" or "Unpinned clipboard item")
+        end
+    elseif body.action == "top" then
+        local index = tonumber(body.index)
+        local choice = index and menuData[index]
+        if not choice or choice.isPinned ~= true or not movePinnedEntryToTop(choice) then
+            hs.alert.show("Unable to move this pinned item to the top")
+        else
+            updateClipboardPanel(clipboard_search, clipboard_type_filter, 0, false)
         end
     elseif body.action == "copyHistoryEntry" then
         local index = tonumber(body.index)
@@ -4094,6 +4141,7 @@ pkg.__test = {
     writePinnedHistory = writePinnedHistory,
     migratePinnedHistory = migratePinnedHistory,
     loadPinnedEntries = loadPinnedEntries,
+    movePinnedEntryToTop = movePinnedEntryToTop,
     pinnedMetadata = pinnedMetadata,
     pinClipboardEntry = pinClipboardEntry,
     unpinClipboardEntry = unpinClipboardEntry,
