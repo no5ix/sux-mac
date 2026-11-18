@@ -15,6 +15,7 @@ local eventtap = require("hs.eventtap")
 local logger = hs.logger.new("xSelectionToolbar", "debug")
 local mouseSelectionTap = nil
 local hoverWatcher = nil
+local compactButtonClickTap = nil
 local appearancePoll = nil
 local toolbarFrameAnimationTimer = nil
 
@@ -2105,6 +2106,7 @@ local function buildToolbar(text)
     if toolbar then toolbar:delete(); toolbar = nil end
     toolbarCompactDismissRequested = false
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+    if compactButtonClickTap then compactButtonClickTap:stop(); compactButtonClickTap = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
     toolbar = webview.new({ x = 0, y = 0, w = 360, h = 58 }, {
@@ -2259,6 +2261,23 @@ local function buildToolbar(text)
             toolbar:evaluateJavaScript("setExpanded(false,false)")
         end
     end
+
+    -- Detect clicks at the native event level as well as in the WebView.
+    -- The WebKit message bridge is asynchronous; without this guard the native
+    -- one-second hover timer can win the race and expand just after a click.
+    compactButtonClickTap = eventtap.new({ hs.eventtap.event.types.leftMouseDown }, function(event)
+        if toolbarCompactDismissRequested or toolbarExpanded then return false end
+        local point = hs.mouse.absolutePosition()
+        local bounds = compactFrame
+        if point.x >= bounds.x and point.x <= bounds.x + bounds.w
+            and point.y >= bounds.y and point.y <= bounds.y + bounds.h then
+            toolbarCompactDismissRequested = true
+            suppressExpandUntilMouseLeaves = true
+            if expandHoverTimer then expandHoverTimer:stop(); expandHoverTimer = nil end
+        end
+        return false
+    end)
+    if compactButtonClickTap then compactButtonClickTap:start() end
 
     -- Native Hammerspoon polling only: use the toolbar's known layout and the
     -- native mouse coordinates to determine the target button. No DOM-based
@@ -2836,6 +2855,7 @@ function obj:stop()
     if replacementSession then closeReplacementSession("Spoon stopped") end
     if clipboardFallbackTimer then clipboardFallbackTimer:stop(); clipboardFallbackTimer = nil end
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
+    if compactButtonClickTap then compactButtonClickTap:stop(); compactButtonClickTap = nil end
     if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
     if appearancePoll then appearancePoll:stop(); appearancePoll = nil end
     if selectionWatcher then selectionWatcher:stop(); selectionWatcher = nil end
