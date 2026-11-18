@@ -714,8 +714,11 @@ local function loadPinnedEntries()
             local aMarkedAt, bMarkedAt = tonumber(a.topMarkedAt) or 0, tonumber(b.topMarkedAt) or 0
             if aMarkedAt ~= bMarkedAt then return aMarkedAt > bMarkedAt end
         end
-        if a.pinnedAt ~= b.pinnedAt then return a.pinnedAt < b.pinnedAt end
-        if a.ts ~= b.ts then return a.ts < b.ts end
+        -- Top-marked entries retain their explicit promotion order. All
+        -- remaining pinned entries follow ordinary clipboard chronology:
+        -- newest capture first, independent of when they were pinned.
+        if a.ts ~= b.ts then return a.ts > b.ts end
+        if a.pinnedAt ~= b.pinnedAt then return a.pinnedAt > b.pinnedAt end
         return tostring(a.id or "") < tostring(b.id or "")
     end)
     return out
