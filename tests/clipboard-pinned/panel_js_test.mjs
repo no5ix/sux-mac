@@ -279,19 +279,27 @@ test("context menu layout: selected-paste actions appear only with a nonempty se
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
 });
 
-test("card header uses a lighter flat-bottom background and smaller metadata indicators", () => {
-  assert.ok(source.includes("border-radius:12px 12px 0 0; background:color-mix(in srgb, var(--control-bg) 55%, var(--card-bg));"),
-    "header background is lighter and has square lower corners");
+test("card hover is subtler than focus and highlights the full card", () => {
+  assert.ok(source.includes("#clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {\n  background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));"),
+    "hover uses a lighter blend than the focused/selected state");
+  assert.ok(source.includes("#clipboard-items .item:focus,\n#clipboard-items .item:focus-visible,\n#clipboard-items .item:focus-within { z-index:1; background:var(--selected-bg);"),
+    "focus and focus-within highlight the entire card");
+  assert.ok(source.includes(".card-meta-row { position:relative; display:grid;") && source.includes("border-radius:12px 12px 0 0; background:transparent;"),
+    "card header has no independent background");
+  assert.ok(source.includes(".card-meta-row:hover { background:transparent; }"),
+    "hovering the header does not paint a separate header highlight");
+  assert.ok(source.includes(".card-meta-row:focus-within { outline:0; }"),
+    "focus is represented by the full-card highlight, not a header-only outline");
   assert.ok(source.includes(".stamp { color:var(--muted); font-size:10px; margin:0; }"),
-    "timestamp uses a smaller font");
+    "timestamp keeps its smaller font");
   assert.ok(source.includes(".card-meta-row .pin-mark { font-size:12px; line-height:1.1; }"),
-    "pin mark uses a smaller font");
+    "pin mark keeps its smaller font");
   assert.ok(source.includes(".card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:12px;"),
     "the indicator-specific rule does not override the smaller pin font");
   assert.ok(source.includes("flex:0 0 16px; width:16px; height:16px; align-items:center; justify-content:center; font-size:12px;"),
-    "Top mark uses a smaller footprint and font");
+    "Top mark keeps its smaller footprint and font");
   assert.ok(source.includes(".card-indicators { position:static; grid-column:4; grid-row:1;"),
-    "pin and Top indicators occupy the header's right grid column");
+    "pin and Top indicators remain in the header's right grid column");
 });
 
 test("context menu hover uses delegated mouseover and mouseout highlighting", () => {
