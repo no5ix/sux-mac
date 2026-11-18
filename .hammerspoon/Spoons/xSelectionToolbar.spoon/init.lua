@@ -301,7 +301,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-
   .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .20s ease-out,visibility .20s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
-.bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
+@keyframes toolbarFadeIn{from{opacity:0}to{opacity:1}}
+.bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden;animation:toolbarFadeIn .20s ease-out both}
 .bar.expanded .full-actions{visibility:visible;opacity:1;transform:none;pointer-events:auto}
 .bar.is-visible{opacity:1;transform:translate3d(-50%,-50%,0) scale(1)}
 .bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.20s,.10s;transition-timing-function:cubic-bezier(.4,0,1,1)}
