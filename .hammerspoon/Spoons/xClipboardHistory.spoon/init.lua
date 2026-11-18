@@ -1981,7 +1981,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscro
 .item:hover { background:var(--selected-bg); }
 /* This overlay lives directly under body, outside the scrolling grid and its
    stacking contexts. Its z-index intentionally exceeds the fixed header. */
-body > #clipboard-preview-overlay { display:none; position:fixed; inset:0; z-index:2147483647; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.34); box-sizing:border-box; border-radius:18px; overflow:hidden; isolation:isolate; }
+body > #clipboard-preview-overlay { display:none; position:fixed; inset:auto; z-index:2147483647; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.34); box-sizing:border-box; border-radius:18px; overflow:hidden; clip-path:inset(0 round 18px); isolation:isolate; }
 body > #clipboard-preview-overlay.open { display:flex; }
 body > #clipboard-preview-overlay .manual-preview { display:none; position:relative; inset:auto; transform:none; margin:auto; width:min(720px, calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); padding:16px; color:var(--panel-fg); background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; box-shadow:0 18px 48px rgba(0,0,0,.85); overflow:auto; box-sizing:border-box; flex:none; }
 body > #clipboard-preview-overlay .manual-preview.open { display:block; }
@@ -2214,6 +2214,20 @@ previewOverlay.innerHTML =
 document.body.appendChild(previewOverlay);
 previewOverlay.style.zIndex = '2147483647';
 
+function syncPreviewOverlayBounds() {
+  const shell = document.getElementById('clipboard-panel-shell');
+  if (!shell) return;
+  const rect = shell.getBoundingClientRect();
+  previewOverlay.style.left = rect.left + 'px';
+  previewOverlay.style.top = rect.top + 'px';
+  previewOverlay.style.width = rect.width + 'px';
+  previewOverlay.style.height = rect.height + 'px';
+  previewOverlay.style.right = 'auto';
+  previewOverlay.style.bottom = 'auto';
+}
+window.addEventListener('resize', () => {
+  if (previewOverlay.classList.contains('open')) syncPreviewOverlayBounds();
+});
 function closeManualPreviews() {
   previewOverlay.classList.remove('open');
   previewOverlay.querySelectorAll('.manual-preview').forEach(node => node.classList.remove('open'));
@@ -2222,6 +2236,7 @@ function openManualPreview(item) {
   if (!item) return;
   closeManualPreviews();
   const index = Number(item.dataset.index || 0);
+  syncPreviewOverlayBounds();
   previewOverlay.classList.add('open');
   if (item.classList.contains('image-item')) {
     const panel = previewOverlay.querySelector('.image-detail');
