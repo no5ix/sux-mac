@@ -290,6 +290,15 @@ test("card timestamp stays fixed when selection order appears", () => {
     "timestamp remains centered in the same third grid column");
 });
 
+test("preview overlay follows the panel's rounded outer corners", () => {
+  assert.ok(source.includes("body > #clipboard-preview-overlay { display:none; position:fixed; inset:0;"),
+    "preview backdrop remains a viewport-sized overlay");
+  assert.ok(source.includes("background:rgba(0,0,0,.34); box-sizing:border-box; border-radius:18px; overflow:hidden; isolation:isolate;"),
+    "preview backdrop is clipped to the same 18px rounded corners as the panel shell");
+  assert.ok(source.includes("border-radius:18px;") && source.includes("clip-path:inset(0 round 18px);"),
+    "overlay corner radius matches the clipboard panel shell");
+});
+
 test("card hover is subtler than focus and highlights the full card", () => {
   assert.ok(source.includes("#clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {\n  background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));"),
     "hover uses a lighter blend than the focused/selected state");
