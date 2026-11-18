@@ -273,9 +273,11 @@ test("context menu layout: selected-paste actions appear only with a nonempty se
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
 });
 
-test("card header indicators are laid out inside a gray header row", () => {
-  assert.ok(source.includes("background:var(--control-bg); cursor:pointer; transition:background-color .12s ease;"),
-    "card header has a gray control background");
+test("card header fills the card's top edge and keeps indicators in a dedicated column", () => {
+  assert.ok(source.includes("box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px;"),
+    "card header expands through the card's 10px inner padding and aligns with its top edge");
+  assert.ok(source.includes("border-radius:12px 12px 6px 6px; background:var(--control-bg);"),
+    "gray header background follows the card's rounded top corners");
   assert.ok(source.includes(".card-indicators { position:static; grid-column:4; grid-row:1;"),
     "pin and Top indicators occupy the header's right grid column");
   assert.ok(source.includes(".card-meta-row .stamp { position:static; grid-column:3;"),
