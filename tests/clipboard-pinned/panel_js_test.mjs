@@ -217,7 +217,7 @@ test("context menu layout: divider separates ordinary actions from paste actions
   const m = menu.buildContextMenu(new El("div"));
   const slots = m.children.map(node => node.getAttribute("data-context-slot"));
   assert.deepEqual(slots, [
-    "preview", "copy", "pin", "top", "divider", "pasteAll",
+    "preview", "copy", "pin", "top", "removeTop", "divider", "pasteAll",
     "select", "pasteSelected", "pasteSelectedOrder", "pastePath",
   ]);
   const divider = m.querySelector('[data-context-slot="divider"]');
@@ -286,6 +286,8 @@ test("card header uses a lighter flat-bottom background and smaller metadata ind
     "timestamp uses a smaller font");
   assert.ok(source.includes(".card-meta-row .pin-mark { font-size:12px; line-height:1.1; }"),
     "pin mark uses a smaller font");
+  assert.ok(source.includes(".card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:12px;"),
+    "the indicator-specific rule does not override the smaller pin font");
   assert.ok(source.includes("flex:0 0 16px; width:16px; height:16px; align-items:center; justify-content:center; font-size:12px;"),
     "Top mark uses a smaller footprint and font");
   assert.ok(source.includes(".card-indicators { position:static; grid-column:4; grid-row:1;"),
