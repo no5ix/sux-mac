@@ -332,7 +332,24 @@ function revealToolbar(){
 function dismissToolbar(){const bar=document.getElementById('selection-toolbar-bar');if(!bar||bar.classList.contains('is-closing'))return;bar.classList.remove('is-visible');bar.classList.add('is-closing');setTimeout(()=>{try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'dismissed'});}catch(e){}},210);}
 function setAnchorRight(value){const bar=document.getElementById('selection-toolbar-bar');if(bar)bar.classList.toggle('anchor-right',!!value);}
 const compactTrigger=document.querySelector('.compact-trigger');
-if(compactTrigger)compactTrigger.addEventListener('click',()=>setExpanded(true));
+let compactHoverTimer=null;
+function cancelCompactHover(){if(compactHoverTimer!==null){clearTimeout(compactHoverTimer);compactHoverTimer=null;}}
+if(compactTrigger){
+  compactTrigger.addEventListener('mouseenter',()=>{
+    cancelCompactHover();
+    const bar=document.getElementById('selection-toolbar-bar');
+    if(!bar||bar.classList.contains('expanded')||bar.classList.contains('dismissed'))return;
+    compactHoverTimer=setTimeout(()=>{
+      compactHoverTimer=null;
+      if(compactTrigger.matches(':hover'))setExpanded(true);
+    },1000);
+  });
+  compactTrigger.addEventListener('mouseleave',cancelCompactHover);
+  compactTrigger.addEventListener('click',()=>{
+    cancelCompactHover();
+    setExpanded(true);
+  });
+}
 // Hammerspoon shows the native window before the WebView has necessarily
 // finished loading. Reveal the compact button after the page is ready so an
 // early evaluateJavaScript call cannot leave the initial opacity at zero.
