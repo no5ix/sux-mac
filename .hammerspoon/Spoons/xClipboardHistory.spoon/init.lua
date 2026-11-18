@@ -1991,11 +1991,16 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item { position:relative; margin:0; border:0; outline:0; }
 #clipboard-items .item:focus,
 #clipboard-items .item:focus-visible { outline:0; }
-#clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
-.item:hover { background:var(--selected-bg); }
-.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) auto; column-gap:5px; align-items:center; box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px; padding:6px 10px; border-radius:12px 12px 0 0; background:color-mix(in srgb, var(--control-bg) 55%, var(--card-bg)); cursor:pointer; transition:background-color .12s ease; }
-.card-meta-row:hover { background:var(--selected-bg); }
-.card-meta-row:focus-within { outline:1px solid var(--selected-border); outline-offset:1px; }
+#clipboard-items .item.selected,
+#clipboard-items .item:focus,
+#clipboard-items .item:focus-visible,
+#clipboard-items .item:focus-within { z-index:1; background:var(--selected-bg); box-shadow:none; }
+#clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {
+  background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));
+}
+.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) auto; column-gap:5px; align-items:center; box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px; padding:6px 10px; border-radius:12px 12px 0 0; background:transparent; cursor:pointer; transition:background-color .12s ease; }
+.card-meta-row:hover { background:transparent; }
+.card-meta-row:focus-within { outline:0; }
 .card-meta-row .stamp { position:static; grid-column:3; grid-row:1; justify-self:center; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; transform:none; margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
 .card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
 .card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
