@@ -2023,7 +2023,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .card-indicators > .multi-select-mark { display:inline-flex; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:13px; font-weight:700; line-height:1; box-shadow:0 1px 4px rgba(0,0,0,.35); }
 .card-indicators > .multi-select-mark[style*="display: none"] { display:inline-flex !important; visibility:hidden; }
 .card-indicators > .multi-select-mark[style*="display: inline-flex"] { visibility:visible; }
-.card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
+.card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:12px; line-height:1.1; }
 .card-indicators > .top-mark { display:inline-flex; flex:0 0 16px; width:16px; height:16px; align-items:center; justify-content:center; font-size:12px; line-height:1.1; }
 .item .meta { padding-right:52px; }
 .item.multi-selected { background:var(--selected-bg); }
