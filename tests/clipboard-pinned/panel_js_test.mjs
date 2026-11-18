@@ -242,6 +242,24 @@ test("context menu: Top is visible only on pinned cards and dispatches for the r
   assert.deepEqual(calls, [["top", 1, ""]]);
 });
 
+test("context menu: promoted pins offer Remove from Top and dispatch the matching action", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const promoted = card(2, "top-promoted", true, "text");
+  promoted.dataset.topMarked = "true";
+  menu.applyContextMenuTarget(m, promoted, false);
+  const button = m.querySelector('[data-context-slot="top"]');
+  assert.equal(button.style.display, "block");
+  assert.equal(button.textContent, "⬇️ Remove from Top");
+  const calls = [];
+  const state = { rowIndex: 2, uid: promoted.dataset.uid };
+  menu.handleContextMenuClick(m, state, { target: { closest: () => button } },
+    (...args) => calls.push(args), null, [promoted], []);
+  assert.deepEqual(calls, [["removeTop", 2, ""]]);
+  promoted.dataset.topMarked = "false";
+  menu.applyContextMenuTarget(m, promoted, false);
+  assert.equal(button.textContent, "⬆️ Top");
+});
+
 test("context menu layout: selected-paste actions appear only with a nonempty selection", () => {
   const m = menu.buildContextMenu(new El("div"));
   const target = card(0, "context-layout-uid", false, "text");
@@ -253,6 +271,15 @@ test("context menu layout: selected-paste actions appear only with a nonempty se
   menu.applyContextMenuTarget(m, target, true);
   assert.equal(m.querySelector('[data-context-slot="pasteSelected"]').style.display, "block");
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
+});
+
+test("card header indicators are laid out inside a gray header row", () => {
+  assert.ok(source.includes("background:var(--control-bg); cursor:pointer; transition:background-color .12s ease;"),
+    "card header has a gray control background");
+  assert.ok(source.includes(".card-indicators { position:static; grid-column:4; grid-row:1;"),
+    "pin and Top indicators occupy the header's right grid column");
+  assert.ok(source.includes(".card-meta-row .stamp { position:static; grid-column:3;"),
+    "timestamp stays in its own header column");
 });
 
 test("context menu hover uses delegated mouseover and mouseout highlighting", () => {
