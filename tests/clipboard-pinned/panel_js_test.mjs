@@ -290,13 +290,23 @@ test("card timestamp stays fixed when selection order appears", () => {
     "timestamp remains centered in the same third grid column");
 });
 
-test("preview overlay follows the panel's rounded outer corners", () => {
-  assert.ok(source.includes("body > #clipboard-preview-overlay { display:none; position:fixed; inset:0;"),
-    "preview backdrop remains a viewport-sized overlay");
-  assert.ok(source.includes("background:rgba(0,0,0,.34); box-sizing:border-box; border-radius:18px; overflow:hidden; isolation:isolate;"),
-    "preview backdrop is clipped to the same 18px rounded corners as the panel shell");
-  assert.ok(source.includes("border-radius:18px;") && source.includes("clip-path:inset(0 round 18px);"),
-    "overlay corner radius matches the clipboard panel shell");
+test("preview backdrop is aligned to and clipped by the panel shell", () => {
+  assert.ok(source.includes("body > #clipboard-preview-overlay { display:none; position:fixed; inset:auto;"),
+    "preview backdrop uses explicit panel-relative viewport bounds rather than covering the entire WebView");
+  assert.ok(source.includes("border-radius:18px; overflow:hidden; clip-path:inset(0 round 18px);"),
+    "preview backdrop clips to the panel shell's rounded 18px corners");
+  assert.ok(source.includes("function syncPreviewOverlayBounds()") &&
+    source.includes("const shell = document.getElementById('clipboard-panel-shell');") &&
+    source.includes("const rect = shell.getBoundingClientRect();"),
+    "overlay bounds are measured from the actual clipboard panel shell");
+  assert.ok(source.includes("previewOverlay.style.left = rect.left + 'px';") &&
+    source.includes("previewOverlay.style.top = rect.top + 'px';") &&
+    source.includes("previewOverlay.style.width = rect.width + 'px';") &&
+    source.includes("previewOverlay.style.height = rect.height + 'px';"),
+    "overlay position and dimensions follow the shell's real bounds");
+  assert.ok(source.includes("syncPreviewOverlayBounds();") &&
+    source.includes("if (previewOverlay.classList.contains('open')) syncPreviewOverlayBounds();"),
+    "bounds are synchronized when opening the preview and when the WebView resizes");
 });
 
 test("card hover is subtler than focus and highlights the full card", () => {
