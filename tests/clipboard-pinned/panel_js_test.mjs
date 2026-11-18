@@ -217,12 +217,29 @@ test("context menu layout: divider separates ordinary actions from paste actions
   const m = menu.buildContextMenu(new El("div"));
   const slots = m.children.map(node => node.getAttribute("data-context-slot"));
   assert.deepEqual(slots, [
-    "preview", "copy", "pin", "divider", "pasteAll",
+    "preview", "copy", "pin", "top", "divider", "pasteAll",
     "select", "pasteSelected", "pasteSelectedOrder", "pastePath",
   ]);
   const divider = m.querySelector('[data-context-slot="divider"]');
   assert.equal(divider.getAttribute("role"), "separator");
   assert.ok(divider.style.cssText.includes("height:1px"));
+});
+
+test("context menu: Top is visible only on pinned cards and dispatches for the right-clicked card", () => {
+  const m = menu.buildContextMenu(new El("div"));
+  const ordinary = card(0, "top-ordinary", false, "text");
+  const pinned = card(1, "top-pinned", true, "text");
+  menu.applyContextMenuTarget(m, ordinary, false);
+  assert.equal(m.querySelector('[data-context-slot="top"]').style.display, "none");
+  menu.applyContextMenuTarget(m, pinned, false);
+  const button = m.querySelector('[data-context-slot="top"]');
+  assert.equal(button.style.display, "block");
+  assert.equal(button.textContent, "⬆️ Top");
+  const calls = [];
+  const state = { rowIndex: 1, uid: pinned.dataset.uid };
+  menu.handleContextMenuClick(m, state, { target: { closest: () => button } },
+    (...args) => calls.push(args), null, [ordinary, pinned], []);
+  assert.deepEqual(calls, [["top", 1, ""]]);
 });
 
 test("context menu layout: selected-paste actions appear only with a nonempty selection", () => {
