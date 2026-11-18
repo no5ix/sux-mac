@@ -2001,6 +2001,13 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {
   background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));
 }
+/* Explicit pointer-hover state keeps hover feedback reliable in the native WebView. */
+#clipboard-items .item.pointer-hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {
+  background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));
+}
+.actions .filter-button.pointer-hover:not([aria-pressed="true"]) {
+  background:var(--selected-bg);
+}
 .card-meta-row { position:relative; display:grid; grid-template-columns:16px 22px minmax(0,1fr) auto; column-gap:5px; align-items:center; box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px; padding:6px 10px; border-radius:12px 12px 0 0; background:transparent; cursor:pointer; transition:background-color .12s ease; }
 .card-meta-row:hover { background:transparent; }
 .card-meta-row:focus-within { outline:0; }
@@ -2547,6 +2554,7 @@ function focusSearch() {
     try { search.setSelectionRange(search.value.length, search.value.length); } catch (error) {}
   }
 }
+window.focusClipboardSearch = focusSearch;
 function focusHistory(index) {
   const items = rows();
   if (!items.length) {
@@ -2747,6 +2755,20 @@ document.querySelector('.actions').addEventListener('focusin', event => {
     navState.filterIndex = index;
     navState.lastFilterIndex = index;
   }
+});
+/* Track pointer hover explicitly instead of relying only on CSS :hover,
+   which can be unreliable when the native WebView is re-shown. */
+document.addEventListener('mouseover', event => {
+  const card = event.target.closest && event.target.closest('#clipboard-items .item');
+  if (card) card.classList.add('pointer-hover');
+  const filter = event.target.closest && event.target.closest('.actions .filter-button');
+  if (filter) filter.classList.add('pointer-hover');
+});
+document.addEventListener('mouseout', event => {
+  const card = event.target.closest && event.target.closest('#clipboard-items .item');
+  if (card && (!event.relatedTarget || !card.contains(event.relatedTarget))) card.classList.remove('pointer-hover');
+  const filter = event.target.closest && event.target.closest('.actions .filter-button');
+  if (filter && (!event.relatedTarget || !filter.contains(event.relatedTarget))) filter.classList.remove('pointer-hover');
 });
 search.addEventListener('focus', () => {
   navState.area = 'search';
@@ -4099,6 +4121,18 @@ function showClipboardHistory()
                 nativeWindow:raise()
                 nativeWindow:focus()
                 view:bringToFront(true)
+                -- Reassert DOM focus after the native window has become key.
+                -- The WebView can lose its input focus during Ctrl+V activation.
+                hs.timer.doAfter(0.08, function()
+                    if clipboard_webview == view then
+                        view:evaluateJavaScript("window.focusClipboardSearch && window.focusClipboardSearch();")
+                    end
+                end)
+                hs.timer.doAfter(0.25, function()
+                    if clipboard_webview == view then
+                        view:evaluateJavaScript("window.focusClipboardSearch && window.focusClipboardSearch();")
+                    end
+                end)
             else
                 logger.w("Clipboard History window unavailable after show")
             end
