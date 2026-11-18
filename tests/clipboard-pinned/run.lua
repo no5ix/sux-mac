@@ -271,6 +271,34 @@ test("Top priority persists and new pins append after the regular group", functi
     check_equal(ordinary[1].ts, BASE_TS + 60, "ordinary source timestamp remains unchanged")
 end)
 
+test("removing Top clears only priority metadata and restores pin chronology", function()
+    local environment = new_environment("remove-top")
+    environment.seed_text_day(DATE, { "A item", "B item", "C item" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    for _, label in ipairs({ "A", "B", "C" }) do
+        local entry = environment.t.searchPersistentHistory(label .. " item", "text")[1]
+        assert(environment.t.pinClipboardEntry(entry), "pin " .. label)
+    end
+    local function labels()
+        local out = {}
+        for _, entry in ipairs(environment.t.loadPinnedEntries()) do out[#out + 1] = entry.content end
+        return table.concat(out, "|")
+    end
+    local b = environment.t.searchPinnedHistory("B item", "text")[1]
+    local c = environment.t.searchPinnedHistory("C item", "text")[1]
+    assert(environment.t.movePinnedEntryToTop(c), "promote C")
+    assert(environment.t.movePinnedEntryToTop(b), "promote B")
+    check_equal(labels(), "B item|C item|A item", "both promoted items lead")
+    assert(environment.t.removePinnedEntryFromTop(b), "remove B from Top")
+    check_equal(labels(), "C item|A item|B item", "B returns to original pin chronology")
+    local records = environment.t.readPinnedHistory()
+    local bRecord
+    for _, record in ipairs(records) do if record.id == b.id then bRecord = record end end
+    check(bRecord ~= nil, "B remains pinned")
+    check(bRecord.topMarked ~= true and bRecord.topMarkedAt == nil, "B priority metadata is cleared")
+    check_equal(#environment.t.searchPersistentHistory("B item", "text"), 1, "ordinary history remains intact")
+end)
+
 test("pinned text JSON record matches the ordinary record schema", function()
     local environment = new_environment("schema")
     seed_codex_day(environment)
