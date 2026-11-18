@@ -279,6 +279,17 @@ test("context menu layout: selected-paste actions appear only with a nonempty se
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
 });
 
+test("card timestamp stays fixed when selection order appears", () => {
+  assert.ok(source.includes("grid-template-columns:16px 22px minmax(0,1fr) auto;"),
+    "selection-order column has a fixed width so timestamp alignment cannot shift");
+  assert.ok(source.includes(".card-meta-row .selection-order { box-sizing:border-box; width:22px; min-width:22px; }"),
+    "selection order occupies a stable slot when populated");
+  assert.ok(source.includes(".card-meta-row .selection-order:empty { visibility:hidden; }"),
+    "empty selection order stays invisible without collapsing its grid slot");
+  assert.ok(source.includes(".card-meta-row .stamp { position:static; grid-column:3; grid-row:1; justify-self:center;"),
+    "timestamp remains centered in the same third grid column");
+});
+
 test("card hover is subtler than focus and highlights the full card", () => {
   assert.ok(source.includes("#clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {\n  background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));"),
     "hover uses a lighter blend than the focused/selected state");
