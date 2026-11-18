@@ -233,7 +233,7 @@ end
 -------------------------------------------------------------------------------
 -- Issue B: pinned records use the ordinary history record schema
 
-test("Top priority persists and new pins append after the regular group", function()
+test("Top priority persists and unmarked pins stay newest-first", function()
     local environment = new_environment("top-priority")
     environment.seed_text_day(DATE, { "A item", "B item", "C item", "D item", "E item", "F item" }, BASE_TS)
     environment.t.restorePersistentHistory()
@@ -250,28 +250,28 @@ test("Top priority persists and new pins append after the regular group", functi
     local function expect(expected, message)
         check_equal(table.concat(labels(), "|"), table.concat(expected, "|"), message)
     end
-    expect({ "A item", "B item", "C item", "D item", "E item" }, "initial chronological order")
+    expect({ "E item", "D item", "C item", "B item", "A item" }, "unmarked pins start newest-first")
     local c = environment.t.searchPinnedHistory("C item", "text")[1]
     assert(environment.t.movePinnedEntryToTop(c), "promote C")
-    expect({ "C item", "A item", "B item", "D item", "E item" }, "C promoted")
+    expect({ "C item", "E item", "D item", "B item", "A item" }, "C promoted; remaining pins stay newest-first")
     local b = environment.t.searchPinnedHistory("B item", "text")[1]
     assert(environment.t.movePinnedEntryToTop(b), "promote B")
-    expect({ "B item", "C item", "A item", "D item", "E item" }, "latest promotion first")
+    expect({ "B item", "C item", "E item", "D item", "A item" }, "latest promotion first; remaining pins stay newest-first")
     local f = environment.t.searchPersistentHistory("F item", "text")[1]
     assert(environment.t.pinClipboardEntry(f), "pin F")
-    expect({ "B item", "C item", "A item", "D item", "E item", "F item" }, "new pin stays at bottom")
+    expect({ "B item", "C item", "F item", "E item", "D item", "A item" }, "newest unmarked pin is first in the regular group")
     local records = environment.t.readPinnedHistory()
     local topCount = 0
     for _, record in ipairs(records) do if record.topMarked == true then topCount = topCount + 1 end end
     check_equal(topCount, 2, "only B and C are marked Top")
     environment.t.invalidatePinnedIndex()
-    expect({ "B item", "C item", "A item", "D item", "E item", "F item" }, "persisted order reloads")
+    expect({ "B item", "C item", "F item", "E item", "D item", "A item" }, "Top order and newest-first regular order persist after reload")
     local ordinary = environment.t.searchPersistentHistory("B item", "text")
     check_equal(#ordinary, 1, "ordinary source record remains present")
     check_equal(ordinary[1].ts, BASE_TS + 60, "ordinary source timestamp remains unchanged")
 end)
 
-test("removing Top clears only priority metadata and restores pin chronology", function()
+test("removing Top clears only priority metadata and restores newest-first order", function()
     local environment = new_environment("remove-top")
     environment.seed_text_day(DATE, { "A item", "B item", "C item" }, BASE_TS)
     environment.t.restorePersistentHistory()
@@ -290,7 +290,7 @@ test("removing Top clears only priority metadata and restores pin chronology", f
     assert(environment.t.movePinnedEntryToTop(b), "promote B")
     check_equal(labels(), "B item|C item|A item", "both promoted items lead")
     assert(environment.t.removePinnedEntryFromTop(b), "remove B from Top")
-    check_equal(labels(), "C item|A item|B item", "B returns to original pin chronology")
+    check_equal(labels(), "C item|B item|A item", "B returns to newest-first regular ordering")
     local records = environment.t.readPinnedHistory()
     local bRecord
     for _, record in ipairs(records) do if record.id == b.id then bRecord = record end end
