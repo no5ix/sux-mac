@@ -1998,7 +1998,7 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:hover:not(.selected):not(:focus):not(:focus-visible):not(:focus-within) {
   background:color-mix(in srgb, var(--selected-bg) 42%, var(--card-bg));
 }
-.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) auto; column-gap:5px; align-items:center; box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px; padding:6px 10px; border-radius:12px 12px 0 0; background:transparent; cursor:pointer; transition:background-color .12s ease; }
+.card-meta-row { position:relative; display:grid; grid-template-columns:16px 22px minmax(0,1fr) auto; column-gap:5px; align-items:center; box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px; padding:6px 10px; border-radius:12px 12px 0 0; background:transparent; cursor:pointer; transition:background-color .12s ease; }
 .card-meta-row:hover { background:transparent; }
 .card-meta-row:focus-within { outline:0; }
 .card-meta-row .stamp { position:static; grid-column:3; grid-row:1; justify-self:center; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; transform:none; margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
@@ -2007,7 +2007,8 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 .card-select-checkbox:checked::after { content:""; width:7px; height:4px; border:solid #fff; border-width:0 0 2px 2px; transform:rotate(-45deg) translate(1px,-1px); }
 .card-select-checkbox:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .card-meta-row .selection-order { grid-column:2; grid-row:1; justify-self:start; min-width:0; color:var(--text); font-size:11px; line-height:1; white-space:nowrap; }
-.card-meta-row .selection-order:empty { display:none; }
+.card-meta-row .selection-order { box-sizing:border-box; width:22px; min-width:22px; }
+.card-meta-row .selection-order:empty { visibility:hidden; }
 .card-meta-row .pin-mark { font-size:12px; line-height:1.1; }
 .image-item .meta { padding-top:0; padding-bottom:9px; }
 .image-item .preview { width:100%; height:160px; max-width:100%; object-fit:contain; object-position:center center; display:block; background:var(--control-bg); border-radius:7px; }
