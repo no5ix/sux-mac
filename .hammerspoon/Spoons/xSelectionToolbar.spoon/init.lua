@@ -345,9 +345,13 @@ if(compactTrigger){
     },1000);
   });
   compactTrigger.addEventListener('mouseleave',cancelCompactHover);
-  compactTrigger.addEventListener('click',()=>{
+  compactTrigger.addEventListener('click',event=>{
+    event.preventDefault();
+    event.stopPropagation();
     cancelCompactHover();
-    setExpanded(true);
+    // Clicking dismisses the compact affordance; only a sustained hover expands.
+    try{window.webkit.messageHandlers.selectionToolbar.postMessage({action:'compactDismiss'});}catch(e){}
+    dismissToolbar();
   });
 }
 // Hammerspoon shows the native window before the WebView has necessarily
@@ -1128,6 +1132,8 @@ local function runChatGPTWorkflow(text, promptTemplate)
         .. tostring(workflow.pasteTimer:nextTrigger()))
 end
 
+local toolbarCompactDismissRequested = false
+
 local function onToolbarMessage(message)
     -- logger.i("Toolbar message received: " .. tostring(type(message)))
     message = normalizeMessage(message)
@@ -1136,6 +1142,10 @@ local function onToolbarMessage(message)
         return
     end
     local action = message.action
+    if action == "compactDismiss" then
+        toolbarCompactDismissRequested = true
+        return
+    end
     local textValue = action == "open-link" and selectedText or (message.text or selectedText)
     if type(textValue) == "table" then
         textValue = textValue[1] or textValue.text or ""
@@ -2093,6 +2103,7 @@ end
 
 local function buildToolbar(text)
     if toolbar then toolbar:delete(); toolbar = nil end
+    toolbarCompactDismissRequested = false
     if hoverWatcher then hoverWatcher:stop(); hoverWatcher = nil end
     local usercontent = hs.webview.usercontent.new("selectionToolbar")
     usercontent:setCallback(function(message) onToolbarMessage(message) end)
@@ -2272,14 +2283,14 @@ local function buildToolbar(text)
                 suppressExpandUntilMouseLeaves = false
             end
         elseif inside then
-            if not toolbarExpanded and not expandHoverTimer then
+            if not toolbarExpanded and not toolbarCompactDismissRequested and not expandHoverTimer then
                 -- The native window receives mouse movement before the WebView's
                 -- DOM hover handler can be relied on. Delay expansion here too,
                 -- otherwise this polling loop expands the toolbar immediately.
                 expandHoverTimer = timer.doAfter(EXPAND_HOVER_DELAY, function()
                     expandHoverTimer = nil
                     local activeToolbar = toolbar
-                    if not activeToolbar or not activeToolbar:isVisible() or toolbarExpanded then return end
+                    if not activeToolbar or not activeToolbar:isVisible() or toolbarExpanded or toolbarCompactDismissRequested then return end
                     local currentMouse = hs.mouse.absolutePosition()
                     local currentBounds = activeToolbar:frame()
                     local stillInside = currentMouse.x >= currentBounds.x
