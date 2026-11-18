@@ -862,6 +862,26 @@ local function movePinnedEntryToTop(entry)
     return true
 end
 
+-- Remove only the manual priority marker. The item remains pinned and returns
+-- to its original position in the regular pinned chronology.
+local function removePinnedEntryFromTop(entry)
+    if not entry or entry.isPinned ~= true then return false end
+    local records = readPinnedHistory()
+    local target = nil
+    for _, record in ipairs(records) do
+        if pinnedRecordMatchesEntry(record, entry) then target = record; break end
+    end
+    if not target or target.topMarked ~= true then return false end
+    target.topMarked = nil
+    target.topMarkedAt = nil
+    if not writePinnedHistory(records) then
+        logger.e("Unable to persist removal of pinned-item priority")
+        return false
+    end
+    invalidatePinnedIndex()
+    return true
+end
+
 local function unpinClipboardEntry(entry)
     if not entry then return false end
     local kept, removedRecords = {}, {}
@@ -1738,6 +1758,7 @@ local function historyItemHTML(entry, index)
     local pinnedId = effectivePinnedId(entry)
     local cardIsPinned = pinnedId ~= nil
     local uid = escapeHTML(cardUid(entry))
+    local topMarked = entry.isPinned == true and entry.topMarked == true
     local stamp = os.date("%Y-%m-%d %H:%M:%S", entry.rowTs or os.time())
     local metaRow = '<div class="card-meta-row">' ..
         '<input class="card-select-checkbox" type="checkbox" aria-label="Select clipboard item" data-select-uid="' .. uid .. '">' ..
@@ -1755,7 +1776,8 @@ local function historyItemHTML(entry, index)
             ('<img class="preview" src="' .. escapeHTML(thumbnail) .. '" alt="Clipboard image preview" loading="lazy" decoding="async">') or
             '<div class="preview placeholder">Image preview unavailable</div>'
         return '<div class="item image-item" role="button" tabindex="0" data-kind="image" data-action="paste" data-index="' ..
-            index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+            index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) ..
+            '" data-top-marked="' .. tostring(topMarked) .. '" data-search="' ..
             escapeHTML(string.lower("[image] " .. stamp)) .. '">' .. metaRow ..
             preview .. '</div>'
     end
@@ -1777,7 +1799,8 @@ local function historyItemHTML(entry, index)
     -- Search is performed in Lua. Do not copy the entire clipboard payload into
     -- a DOM attribute; large copied documents otherwise multiply the WebView DOM.
     return '<button class="item text-item" data-kind="text" data-action="paste" data-index="' ..
-        index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) .. '" data-search="' ..
+        index .. '" data-uid="' .. uid .. '" data-pinned="' .. tostring(cardIsPinned) ..
+        '" data-top-marked="' .. tostring(topMarked) .. '" data-search="' ..
         escapeHTML(string.lower("[text] " .. stamp)) .. '">' .. metaRow ..
         '<div class="text-preview">' ..
         escapeHTML(previewText) .. '</div></button>'
@@ -1970,15 +1993,14 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
 #clipboard-items .item:focus-visible { outline:0; }
 #clipboard-items .item.selected { z-index:1; background:var(--selected-bg); box-shadow:none; }
 .item:hover { background:var(--selected-bg); }
-.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) 20px; column-gap:5px; align-items:center; width:100%; min-height:22px; margin:0 0 9px; padding:2px 4px; border-radius:6px; cursor:pointer; transition:background-color .12s ease; }
+.card-meta-row { position:relative; display:grid; grid-template-columns:16px auto minmax(0,1fr) auto; column-gap:5px; align-items:center; width:100%; min-height:26px; margin:0 0 9px; padding:3px 6px; border-radius:6px; background:var(--control-bg); cursor:pointer; transition:background-color .12s ease; }
 .card-meta-row:hover { background:var(--selected-bg); }
 .card-meta-row:focus-within { outline:1px solid var(--selected-border); outline-offset:1px; }
-.card-meta-row .stamp { position:absolute; left:calc(50% + 12px); transform:translateX(-50%); margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
+.card-meta-row .stamp { position:static; grid-column:3; grid-row:1; justify-self:center; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; transform:none; margin:0; text-align:center; white-space:nowrap; pointer-events:none; }
 .card-select-checkbox { -webkit-appearance:none; appearance:none; box-sizing:border-box; display:inline-grid; place-content:center; grid-column:1; grid-row:1; justify-self:start; width:15px; height:15px; margin:0; padding:0; border:0; border-radius:4px; background:var(--control-bg); color:#fff; cursor:pointer; z-index:2; }
 .card-select-checkbox:checked { border:0; border-radius:4px; background:#3478e5; }
 .card-select-checkbox:checked::after { content:""; width:7px; height:4px; border:solid #fff; border-width:0 0 2px 2px; transform:rotate(-45deg) translate(1px,-1px); }
 .card-select-checkbox:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.card-meta-row .pin-mark,.card-meta-row .pin-placeholder { grid-column:4; grid-row:1; justify-self:end; width:20px; text-align:center; }
 .card-meta-row .selection-order { grid-column:2; grid-row:1; justify-self:start; min-width:0; color:var(--text); font-size:11px; line-height:1; white-space:nowrap; }
 .card-meta-row .selection-order:empty { display:none; }
 .card-meta-row .pin-mark { font-size:14px; line-height:1.1; }
@@ -1995,13 +2017,14 @@ body > #clipboard-preview-overlay .manual-preview.image-detail img { display:blo
    context menu keep working exactly as on ordinary cards. */
 /* Reserve a fixed slot for each indicator. Selection only changes the
    checkmark visibility; the pin never shifts when a pinned card is selected. */
-.card-indicators { position:absolute; top:9px; right:10px; z-index:2; display:flex; align-items:center; gap:5px; pointer-events:none; user-select:none; }
+.card-indicators { position:static; grid-column:4; grid-row:1; justify-self:end; display:flex; align-items:center; justify-content:flex-end; gap:3px; min-width:0; pointer-events:none; user-select:none; }
 .card-indicators > .multi-select-mark,
 .card-indicators > .pin-mark { flex:0 0 20px; width:20px; height:20px; box-sizing:border-box; }
 .card-indicators > .multi-select-mark { display:inline-flex; visibility:hidden; align-items:center; justify-content:center; border-radius:50%; background:#2878e8; color:#fff; font-size:13px; font-weight:700; line-height:1; box-shadow:0 1px 4px rgba(0,0,0,.35); }
 .card-indicators > .multi-select-mark[style*="display: none"] { display:inline-flex !important; visibility:hidden; }
 .card-indicators > .multi-select-mark[style*="display: inline-flex"] { visibility:visible; }
 .card-indicators > .pin-mark { display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
+.card-indicators > .top-mark { display:inline-flex; flex:0 0 20px; width:20px; height:20px; align-items:center; justify-content:center; font-size:15px; line-height:1.1; }
 .item .meta { padding-right:52px; }
 .item.multi-selected { background:var(--selected-bg); }
 .stamp { color:var(--muted); font-size:11px; margin:0; }
@@ -2713,7 +2736,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'preview', label: '👁️ Preview' },
   { slot: 'pasteAll', label: '🧴 Paste from Current to First' },
   { slot: 'pin', label: '📍 Pin', pinnedLabel: '📌 Unpin' },
-  { slot: 'top', label: '⬆️ Top', pinnedOnly: true },
+  { slot: 'top', label: '⬆️ Top', removeTopLabel: '⬇️ Remove from Top', pinnedOnly: true },
   { slot: 'copy', label: '📋 Copy' },
   { slot: 'divider-before-select', divider: true },
   { slot: 'select', label: '✅ Select', deselectLabel: '❌ Deselect' },
@@ -2726,7 +2749,7 @@ const CONTEXT_MENU_ITEMS = [
   { slot: 'pasteSelectedPaths', label: '📥🖼️ Paste All Selected', selectedImageOnly: true },
   { slot: 'pasteSelectedOrderPaths', label: '🔢🖼️ Paste All Selected in Selection Order', selectedImageOnly: true },
 ];
-function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage) {
+function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelectedImage, isTopMarked) {
   const imageActionsAvailable = isImage === true || hasSelectedImage === true;
   const visible = CONTEXT_MENU_ITEMS.map(spec => {
     if (spec.divider === true) return false;
@@ -2761,8 +2784,10 @@ function contextMenuSpec(isPinned, isImage, isSelected, hasSelection, hasSelecte
 
   return CONTEXT_MENU_ITEMS.map((spec, index) => ({
     slot: spec.slot,
-    action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') : spec.slot,
+    action: spec.slot === 'pin' ? (isPinned ? 'unpin' : 'pin') :
+      spec.slot === 'top' ? (isTopMarked === true ? 'removeTop' : 'top') : spec.slot,
     label: spec.slot === 'pin' ? (isPinned ? spec.pinnedLabel : spec.label) :
+      spec.slot === 'top' ? (isTopMarked === true ? spec.removeTopLabel : spec.label) :
       spec.slot === 'select' ? (isSelected ? (spec.deselectLabel || '❌ Deselect') : spec.label) : spec.label,
     visible: visible[index],
     divider: spec.divider === true
@@ -2794,7 +2819,7 @@ function applyContextMenuTarget(menu, item, hasSelection, hasSelectedImage) {
   const spec = contextMenuSpec(item.dataset.pinned === 'true',
     item.dataset.kind === 'image',
     selectedClipboardUids.has(item.dataset.uid || ''),
-    hasSelection, hasSelectedImage);
+    hasSelection, hasSelectedImage, item.dataset.topMarked === 'true');
   spec.forEach(part => {
     const node = menu.querySelector('[data-context-slot="' + part.slot + '"]');
     if (!node) return;
@@ -2870,6 +2895,7 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   else if (action === 'pastePath') bridge('pastePath', rowIndex, '');
   else if (action === 'pin' || action === 'unpin') bridge(action, rowIndex, '');
   else if (action === 'top') bridge('top', rowIndex, '');
+  else if (action === 'removeTop') bridge('removeTop', rowIndex, '');
   else if (action === 'preview' && openManualPreview) openManualPreview(target);
   return true;
 }
@@ -3424,6 +3450,14 @@ function handleClipboardPanelMessage(message)
         local choice = index and menuData[index]
         if not choice or choice.isPinned ~= true or not movePinnedEntryToTop(choice) then
             hs.alert.show("Unable to move this pinned item to the top")
+        else
+            updateClipboardPanel(clipboard_search, clipboard_type_filter, 0, false)
+        end
+    elseif body.action == "removeTop" then
+        local index = tonumber(body.index)
+        local choice = index and menuData[index]
+        if not choice or choice.isPinned ~= true or not removePinnedEntryFromTop(choice) then
+            hs.alert.show("Unable to remove this pinned item from Top")
         else
             updateClipboardPanel(clipboard_search, clipboard_type_filter, 0, false)
         end
@@ -4144,6 +4178,7 @@ pkg.__test = {
     migratePinnedHistory = migratePinnedHistory,
     loadPinnedEntries = loadPinnedEntries,
     movePinnedEntryToTop = movePinnedEntryToTop,
+    removePinnedEntryFromTop = removePinnedEntryFromTop,
     pinnedMetadata = pinnedMetadata,
     pinClipboardEntry = pinClipboardEntry,
     unpinClipboardEntry = unpinClipboardEntry,
