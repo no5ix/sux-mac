@@ -2219,7 +2219,8 @@ local function buildToolbar(text)
     -- trigger anchored at the selection point; expand around that center on hover.
     local toolbarExpanded = false
     local collapseTimer = nil
-    local COLLAPSE_DELAY = 0
+    local expandHoverTimer = nil
+    local EXPAND_HOVER_DELAY = 1
     -- Expand and collapse around the compact trigger's center, clamped to screen bounds.
     -- While the native window is collapsing, its shrinking bounds can move
     -- back underneath the pointer. Do not interpret that as a fresh hover;
@@ -2232,6 +2233,7 @@ local function buildToolbar(text)
             suppressExpandUntilMouseLeaves = true
         end
         if collapseTimer then collapseTimer:stop(); collapseTimer = nil end
+        if expandHoverTimer then expandHoverTimer:stop(); expandHoverTimer = nil end
         if toolbarFrameAnimationTimer then toolbarFrameAnimationTimer:stop(); toolbarFrameAnimationTimer = nil end
 
         if expanded then
@@ -2270,7 +2272,28 @@ local function buildToolbar(text)
                 suppressExpandUntilMouseLeaves = false
             end
         elseif inside then
-            if not toolbarExpanded then setToolbarExpanded(true) end
+            if not toolbarExpanded and not expandHoverTimer then
+                -- The native window receives mouse movement before the WebView's
+                -- DOM hover handler can be relied on. Delay expansion here too,
+                -- otherwise this polling loop expands the toolbar immediately.
+                expandHoverTimer = timer.doAfter(EXPAND_HOVER_DELAY, function()
+                    expandHoverTimer = nil
+                    local activeToolbar = toolbar
+                    if not activeToolbar or not activeToolbar:isVisible() or toolbarExpanded then return end
+                    local currentMouse = hs.mouse.absolutePosition()
+                    local currentBounds = activeToolbar:frame()
+                    local stillInside = currentMouse.x >= currentBounds.x
+                        and currentMouse.x <= currentBounds.x + currentBounds.w
+                        and currentMouse.y >= currentBounds.y
+                        and currentMouse.y <= currentBounds.y + currentBounds.h
+                    if stillInside and not suppressExpandUntilMouseLeaves then
+                        setToolbarExpanded(true)
+                    end
+                end)
+            end
+        elseif expandHoverTimer then
+            expandHoverTimer:stop()
+            expandHoverTimer = nil
         elseif toolbarExpanded then
             -- Leaving the expanded toolbar dismisses the native window immediately.
             -- Do not animate back to the compact trigger or reveal it at any point.
