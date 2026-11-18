@@ -320,7 +320,7 @@ button:active{background-color:var(--toolbar-active)!important}
 @media(prefers-color-scheme:dark){:root:not([data-appearance="light"]){--toolbar-bg:rgba(39,41,46,.98);--toolbar-fg:#f5f6f8;--toolbar-border:rgba(255,255,255,.16);--toolbar-hover:#454951;--toolbar-hover-border:rgba(255,255,255,.18);--toolbar-active:#555b66;--toolbar-separator:#555a64}}
 </style>
 </head><body><div class="bar collapsed" id="selection-toolbar-bar">
-  <button class="compact-trigger" type="button" aria-label="Show selection actions" title="Show selection actions"><span class="icon">🛠️</span></button>
+  <button class="compact-trigger" type="button" aria-label="Show selection actions" title="Show selection actions"><span class="icon">🧩</span></button>
   <div class="full-actions" id="selection-toolbar-actions">__GROUPED_BUTTONS__</div>
 </div><script>
 const selection = __SELECTION_JSON__;
