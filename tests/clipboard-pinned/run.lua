@@ -233,6 +233,44 @@ end
 -------------------------------------------------------------------------------
 -- Issue B: pinned records use the ordinary history record schema
 
+test("Top priority persists and new pins append after the regular group", function()
+    local environment = new_environment("top-priority")
+    environment.seed_text_day(DATE, { "A item", "B item", "C item", "D item", "E item", "F item" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+    for _, label in ipairs({ "A", "B", "C", "D", "E" }) do
+        local matches = environment.t.searchPersistentHistory(label .. " item", "text")
+        assert(#matches == 1, "one source record for " .. label)
+        assert(environment.t.pinClipboardEntry(matches[1]), "pin " .. label)
+    end
+    local function labels()
+        local out = {}
+        for _, entry in ipairs(environment.t.loadPinnedEntries()) do out[#out + 1] = entry.content end
+        return out
+    end
+    local function expect(expected, message)
+        check_equal(table.concat(labels(), "|"), table.concat(expected, "|"), message)
+    end
+    expect({ "A item", "B item", "C item", "D item", "E item" }, "initial chronological order")
+    local c = environment.t.searchPinnedHistory("C item", "text")[1]
+    assert(environment.t.movePinnedEntryToTop(c), "promote C")
+    expect({ "C item", "A item", "B item", "D item", "E item" }, "C promoted")
+    local b = environment.t.searchPinnedHistory("B item", "text")[1]
+    assert(environment.t.movePinnedEntryToTop(b), "promote B")
+    expect({ "B item", "C item", "A item", "D item", "E item" }, "latest promotion first")
+    local f = environment.t.searchPersistentHistory("F item", "text")[1]
+    assert(environment.t.pinClipboardEntry(f), "pin F")
+    expect({ "B item", "C item", "A item", "D item", "E item", "F item" }, "new pin stays at bottom")
+    local records = environment.t.readPinnedHistory()
+    local topCount = 0
+    for _, record in ipairs(records) do if record.topMarked == true then topCount = topCount + 1 end end
+    check_equal(topCount, 2, "only B and C are marked Top")
+    environment.t.invalidatePinnedIndex()
+    expect({ "B item", "C item", "A item", "D item", "E item", "F item" }, "persisted order reloads")
+    local ordinary = environment.t.searchPersistentHistory("B item", "text")
+    check_equal(#ordinary, 1, "ordinary source record remains present")
+    check_equal(ordinary[1].ts, BASE_TS + 60, "ordinary source timestamp remains unchanged")
+end)
+
 test("pinned text JSON record matches the ordinary record schema", function()
     local environment = new_environment("schema")
     seed_codex_day(environment)
