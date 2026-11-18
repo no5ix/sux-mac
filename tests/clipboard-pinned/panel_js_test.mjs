@@ -242,22 +242,28 @@ test("context menu: Top is visible only on pinned cards and dispatches for the r
   assert.deepEqual(calls, [["top", 1, ""]]);
 });
 
-test("context menu: promoted pins offer Remove from Top and dispatch the matching action", () => {
+test("context menu: promoted pins show both Top and Remove from Top actions", () => {
   const m = menu.buildContextMenu(new El("div"));
   const promoted = card(2, "top-promoted", true, "text");
   promoted.dataset.topMarked = "true";
   menu.applyContextMenuTarget(m, promoted, false);
-  const button = m.querySelector('[data-context-slot="top"]');
-  assert.equal(button.style.display, "block");
-  assert.equal(button.textContent, "⬇️ Remove from Top");
+  const topButton = m.querySelector('[data-context-slot="top"]');
+  const removeButton = m.querySelector('[data-context-slot="removeTop"]');
+  assert.equal(topButton.style.display, "block");
+  assert.equal(topButton.textContent, "⬆️ Top");
+  assert.equal(removeButton.style.display, "block");
+  assert.equal(removeButton.textContent, "⬇️ Remove from Top");
   const calls = [];
   const state = { rowIndex: 2, uid: promoted.dataset.uid };
-  menu.handleContextMenuClick(m, state, { target: { closest: () => button } },
+  menu.handleContextMenuClick(m, state, { target: { closest: () => topButton } },
     (...args) => calls.push(args), null, [promoted], []);
-  assert.deepEqual(calls, [["removeTop", 2, ""]]);
+  menu.handleContextMenuClick(m, state, { target: { closest: () => removeButton } },
+    (...args) => calls.push(args), null, [promoted], []);
+  assert.deepEqual(calls, [["top", 2, ""], ["removeTop", 2, ""]]);
   promoted.dataset.topMarked = "false";
   menu.applyContextMenuTarget(m, promoted, false);
-  assert.equal(button.textContent, "⬆️ Top");
+  assert.equal(topButton.style.display, "block");
+  assert.equal(removeButton.style.display, "none");
 });
 
 test("context menu layout: selected-paste actions appear only with a nonempty selection", () => {
@@ -273,15 +279,17 @@ test("context menu layout: selected-paste actions appear only with a nonempty se
   assert.equal(m.querySelector('[data-context-slot="pasteSelectedOrder"]').style.display, "block");
 });
 
-test("card header fills the card's top edge and keeps indicators in a dedicated column", () => {
-  assert.ok(source.includes("box-sizing:border-box; width:calc(100% + 20px); min-height:26px; margin:-10px -10px 9px;"),
-    "card header expands through the card's 10px inner padding and aligns with its top edge");
-  assert.ok(source.includes("border-radius:12px 12px 6px 6px; background:var(--control-bg);"),
-    "gray header background follows the card's rounded top corners");
+test("card header uses a lighter flat-bottom background and smaller metadata indicators", () => {
+  assert.ok(source.includes("border-radius:12px 12px 0 0; background:color-mix(in srgb, var(--control-bg) 55%, var(--card-bg));"),
+    "header background is lighter and has square lower corners");
+  assert.ok(source.includes(".stamp { color:var(--muted); font-size:10px; margin:0; }"),
+    "timestamp uses a smaller font");
+  assert.ok(source.includes(".card-meta-row .pin-mark { font-size:12px; line-height:1.1; }"),
+    "pin mark uses a smaller font");
+  assert.ok(source.includes("flex:0 0 16px; width:16px; height:16px; align-items:center; justify-content:center; font-size:12px;"),
+    "Top mark uses a smaller footprint and font");
   assert.ok(source.includes(".card-indicators { position:static; grid-column:4; grid-row:1;"),
     "pin and Top indicators occupy the header's right grid column");
-  assert.ok(source.includes(".card-meta-row .stamp { position:static; grid-column:3;"),
-    "timestamp stays in its own header column");
 });
 
 test("context menu hover uses delegated mouseover and mouseout highlighting", () => {
