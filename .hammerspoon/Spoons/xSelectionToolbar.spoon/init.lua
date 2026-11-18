@@ -298,11 +298,11 @@ local function getToolbarHTML(text)
 html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden;background:rgba(0,0,0,0)!important}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:flex-start;justify-content:center}
  .bar{position:absolute;left:50%;top:50%;display:inline-flex;align-items:center;gap:3.2px;width:max-content;max-width:none;margin:0;padding:4.8px;border:1px solid var(--toolbar-border);border-radius:9.6px;background:var(--toolbar-bg);box-shadow:none!important;-webkit-box-shadow:none!important;opacity:0;transform:translate3d(-50%,-50%,0) scale(.96);transform-origin:center center;backface-visibility:hidden;will-change:transform,opacity;transition:transform .26s cubic-bezier(.2,.75,.25,1),opacity .20s ease-out}
-  .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .18s ease,transform .22s cubic-bezier(.22,.8,.24,1),visibility .22s}
+  .full-actions{display:inline-flex;align-items:center;gap:3.2px;overflow:hidden;white-space:nowrap;visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .20s ease-out,visibility .20s}
 .bar.collapsed{width:41.6px;min-width:41.6px;max-width:41.6px;height:41.6px;min-height:41.6px;max-height:41.6px;overflow:hidden;flex:0 0 41.6px}
 .bar.collapsed .full-actions{visibility:hidden;opacity:0;transform:translateX(-4px);pointer-events:none}
 .bar.expanded{width:max-content;height:41.6px;min-height:41.6px;overflow:hidden}
-.bar.expanded .full-actions{visibility:visible;opacity:1;transform:translateX(0);pointer-events:auto}
+.bar.expanded .full-actions{visibility:visible;opacity:1;transform:none;pointer-events:auto}
 .bar.is-visible{opacity:1;transform:translate3d(-50%,-50%,0) scale(1)}
 .bar.is-closing{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);transition-duration:.20s,.10s;transition-timing-function:cubic-bezier(.4,0,1,1)}
 .bar.dismissed{opacity:0;transform:translate3d(-50%,-50%,0) scale(.985);pointer-events:none}
@@ -343,7 +343,7 @@ if(compactTrigger){
     compactHoverTimer=setTimeout(()=>{
       compactHoverTimer=null;
       if(compactTrigger.matches(':hover'))setExpanded(true);
-    },1000);
+    },600);
   });
   compactTrigger.addEventListener('mouseleave',cancelCompactHover);
   compactTrigger.addEventListener('click',event=>{
@@ -2233,7 +2233,7 @@ local function buildToolbar(text)
     local toolbarExpanded = false
     local collapseTimer = nil
     local expandHoverTimer = nil
-    local EXPAND_HOVER_DELAY = 1
+    local EXPAND_HOVER_DELAY = 0.6
     -- Expand and collapse around the compact trigger's center, clamped to screen bounds.
     -- While the native window is collapsing, its shrinking bounds can move
     -- back underneath the pointer. Do not interpret that as a fresh hover;
