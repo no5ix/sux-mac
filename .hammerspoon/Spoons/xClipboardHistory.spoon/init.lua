@@ -2159,17 +2159,21 @@ document.addEventListener('click', event => {
       if (query !== '') {
         // While a search is active, date chips filter its matches; do not
         // permanently replace the pre-search scope used when search is cleared.
-        if (action === 'dateScope' || wasSelected) {
+        if (action === 'dateScope') {
           document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
           allDatesFilterSelected = true;
           button.setAttribute('aria-pressed','true');
           bridge('showLatest',0,query,selectedKind);
+        } else if (wasSelected) {
+          // Clicking the already-selected date chip is a no-op. It must not
+          // fall back to All or discard the current date-scoped result set.
+          return;
         } else {
           document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
           button.setAttribute('aria-pressed','true');
           bridge('dateFilter',0,query,selectedKind,button.dataset.dateKey);
         }
-      } else if (action === 'dateScope' || wasSelected) {
+      } else if (action === 'dateScope') {
         lastNonSearchDateKey = null;
         lastNonSearchWasAllDates = true;
         document.querySelectorAll('.date-filter').forEach(b=>b.setAttribute('aria-pressed','false'));
