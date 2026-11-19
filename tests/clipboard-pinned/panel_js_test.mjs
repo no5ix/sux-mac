@@ -179,6 +179,20 @@ function loadMenuModel() {
 }
 
 
+test("date filter: clicking the already-selected date is a no-op, not All", () => {
+  const handlerStart = panelScript.indexOf("if (action === 'dateScope' || action === 'dateFilter') {");
+  const handlerEnd = panelScript.indexOf("if (action === 'loadMore')", handlerStart);
+  assert.ok(handlerStart > 0 && handlerEnd > handlerStart, "date-filter click handler is present");
+  const handler = panelScript.slice(handlerStart, handlerEnd);
+  assert.ok(handler.includes("} else if (wasSelected) {"), "selected date chip has its own no-op branch");
+  assert.ok(handler.includes("} else if (action === 'dateScope') {") === false,
+    "selected date state is not used as the All-filter condition");
+  assert.ok(handler.includes("if (action === 'dateScope') {") && handler.includes("bridge('showLatest'"),
+    "only the All dateScope action returns to the full history");
+  assert.ok(handler.includes("return;") && handler.includes("bridge('dateFilter',0,'',selectedKind,button.dataset.dateKey)"),
+    "switching to another date filters exactly that date, while re-clicking the selected date returns early");
+});
+
 test("keyboard navigation restores the grid focus stop and global key routing", () => {
   const sourceHasGridTabStop = panelScript.includes("resultsPanel.tabIndex = 0");
   assert.ok(sourceHasGridTabStop, "the results grid is again reachable by Tab");
