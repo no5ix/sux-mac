@@ -4048,7 +4048,7 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     end
     hs.alert.show("Please wait for the Paste task to finish.")
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        -- Keep the current focus chain; do not activate the saved app.
         hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
     end)
     return true
