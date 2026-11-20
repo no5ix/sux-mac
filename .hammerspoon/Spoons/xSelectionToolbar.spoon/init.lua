@@ -1728,8 +1728,8 @@ local function showReplacementToolbar(session)
     bind({}, "space", chooseActive)
     bind({}, "return", chooseActive)
     bind({}, "escape", function()
+        -- Escape only dismisses the panel; leave app activation unchanged.
         closeReplacementSession("cancelled by Escape")
-        if session.app and session.app:isRunning() then session.app:activate(true) end
     end)
 
     replacementToolbarUsercontent = webview.usercontent.new("replacementToolbar")
@@ -1750,7 +1750,6 @@ local function showReplacementToolbar(session)
             chooseReplacementAction(session, tostring(message.id or ""))
         elseif action == "cancel" then
             closeReplacementSession("cancelled by user")
-            if session.app and session.app:isRunning() then session.app:activate(true) end
         end
     end)
     local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)
