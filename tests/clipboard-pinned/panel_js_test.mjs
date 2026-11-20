@@ -179,6 +179,42 @@ function loadMenuModel() {
 }
 
 
+test("clipboard panel close and paste activation responsibilities are explicit", () => {
+  const closeStart = source.indexOf("closeClipboardPanel = function()");
+  const closeEnd = source.indexOf("local function configureClipboardWebview", closeStart);
+  assert.ok(closeStart > 0 && closeEnd > closeStart);
+  const closeBlock = source.slice(closeStart, closeEnd);
+  assert.equal(closeBlock.includes("activatePreviousApplication()"), false,
+    "close-only dismissal never restores the saved app");
+  const pasteStart = source.indexOf("local function pasteHistoryEntry(index)");
+  const pasteEnd = source.indexOf("-- The file that backs a clipboard image", pasteStart);
+  const pasteBlock = source.slice(pasteStart, pasteEnd);
+  assert.equal(pasteBlock.includes("previousApplication:activate(true)"), false,
+    "single-item paste does not force app activation");
+  assert.ok(pasteBlock.includes('hs.eventtap.keyStroke({"cmd"}, "v", 0)'),
+    "single-item paste still sends Cmd+V");
+});
+
+test("AI replacement close actions do not activate source app; applying results still does", () => {
+  const aiSource = readFileSync(join(here, "..", "..", ".hammerspoon", "Spoons",
+    "xSelectionToolbar.spoon", "init.lua"), "utf8");
+  const escapeStart = aiSource.indexOf('bind({}, "escape", function()');
+  const escapeEnd = aiSource.indexOf("end)", escapeStart);
+  assert.ok(escapeStart > 0 && escapeEnd > escapeStart);
+  const escapeBlock = aiSource.slice(escapeStart, escapeEnd);
+  assert.ok(escapeBlock.includes('closeReplacementSession("cancelled by Escape")'));
+  assert.equal(escapeBlock.includes(":activate(true)"), false);
+  const cancelStart = aiSource.indexOf('elseif action == "cancel" then');
+  const cancelEnd = aiSource.indexOf("\n        end", cancelStart);
+  const cancelBlock = aiSource.slice(cancelStart, cancelEnd);
+  assert.ok(cancelBlock.includes('closeReplacementSession("cancelled by user")'));
+  assert.equal(cancelBlock.includes(":activate(true)"), false);
+  const applyStart = aiSource.indexOf("local function applyReplacementResult");
+  const chooseStart = aiSource.indexOf("local function chooseReplacementAction", applyStart);
+  assert.ok(aiSource.slice(applyStart, chooseStart).includes("session.app:activate(true)"),
+    "chosen replacement is still pasted into the source editor");
+});
+
 test("date filter: clicking the already-selected date is a no-op, not All", () => {
   const handlerStart = panelScript.indexOf("if (action === 'dateScope' || action === 'dateFilter') {");
   const handlerEnd = panelScript.indexOf("if (action === 'loadMore')", handlerStart);

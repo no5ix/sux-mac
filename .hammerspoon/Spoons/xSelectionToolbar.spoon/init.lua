@@ -643,8 +643,8 @@ local function startTranslationEscapeTap()
     stopTranslationEscapeTap()
     translationEscapeTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         if event:getKeyCode() == hs.keycodes.map.escape and translationWindow then
-            -- Use the forward-declared local so the callback resolves the
-            -- function assigned below, not a nonexistent global.
+            -- Escape dismisses the floating AI text panel only. It must not
+            -- activate the app that was active before the panel appeared.
             if destroyTranslationWindow then destroyTranslationWindow() end
             return true
         end
@@ -1728,8 +1728,8 @@ local function showReplacementToolbar(session)
     bind({}, "space", chooseActive)
     bind({}, "return", chooseActive)
     bind({}, "escape", function()
+        -- Escape only dismisses the panel; leave app activation unchanged.
         closeReplacementSession("cancelled by Escape")
-        if session.app and session.app:isRunning() then session.app:activate(true) end
     end)
 
     replacementToolbarUsercontent = webview.usercontent.new("replacementToolbar")
@@ -1750,7 +1750,6 @@ local function showReplacementToolbar(session)
             chooseReplacementAction(session, tostring(message.id or ""))
         elseif action == "cancel" then
             closeReplacementSession("cancelled by user")
-            if session.app and session.app:isRunning() then session.app:activate(true) end
         end
     end)
     local count = math.min(#(CUSTOM_AI_BUTTONS or {}), 8)

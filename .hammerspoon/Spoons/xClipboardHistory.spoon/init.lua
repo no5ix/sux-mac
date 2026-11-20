@@ -3065,11 +3065,9 @@ local function pasteHistoryEntry(index)
         pasteboard.writeObjects(image)
     end
     if clipboard_webview then clipboard_webview:hide() end
+    -- Dismiss without activating the app. It remains behind the panel and
+    -- receives the paste keystroke through the existing focus chain.
     hs.timer.doAfter(0.15, function()
-        -- Restore focus to the app that was active before the history panel opened.
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
         hs.timer.doAfter(0.35, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
@@ -3077,6 +3075,7 @@ local function pasteHistoryEntry(index)
                 pasteboard_watcher:start()
                 menuData = {}
                 previousApplication = nil
+                previousApplicationPid = nil
             end)
         end)
     end)
@@ -3137,11 +3136,9 @@ local function pasteHistoryEntryPath(index)
         return
     end
     if clipboard_webview then clipboard_webview:hide() end
+    -- Dismiss without activating the app. It remains behind the panel and
+    -- receives the paste keystroke through the existing focus chain.
     hs.timer.doAfter(0.15, function()
-        -- Restore focus to the app that was active before the history panel opened.
-        if previousApplication and previousApplication:isRunning() then
-            previousApplication:activate(true)
-        end
         hs.timer.doAfter(0.35, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
@@ -3149,6 +3146,7 @@ local function pasteHistoryEntryPath(index)
                 pasteboard_watcher:start()
                 menuData = {}
                 previousApplication = nil
+                previousApplicationPid = nil
             end)
         end)
     end)
@@ -3203,7 +3201,6 @@ local function copyOrPasteImagePathEntry(index, shouldPaste)
     end
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
         hs.timer.doAfter(0.35, function()
             hs.eventtap.keyStroke({"cmd"}, "v", 0)
             hs.timer.doAfter(0.6, function()
@@ -3702,6 +3699,15 @@ closeClipboardPanel = function()
         end
     end
     trimHistoryCache(CLIPBOARD_CACHE_SIZE)
+    -- Escape, outside click, and native close are dismiss-only actions.
+    -- Cancel any pending focus-restoration retry and discard its target.
+    if previousApplicationRestoreTimer then
+        previousApplicationRestoreTimer:stop()
+        previousApplicationRestoreTimer = nil
+    end
+    previousApplicationRestoreGeneration = previousApplicationRestoreGeneration + 1
+    previousApplication = nil
+    previousApplicationPid = nil
     if view then
         pcall(function()
             view:evaluateJavaScript([[
@@ -3717,7 +3723,6 @@ closeClipboardPanel = function()
     end
     collectgarbage("collect")
     panelClosePending = false
-    activatePreviousApplication()
 end
 
 local function configureClipboardWebview(view)
@@ -3755,7 +3760,8 @@ local function configureClipboardWebview(view)
                     panelClosePending = true
                     hs.timer.doAfter(0.12, function()
                         panelClosePending = false
-                        activatePreviousApplication()
+                        previousApplication = nil
+                        previousApplicationPid = nil
                     end)
                 end
             end
@@ -3980,7 +3986,7 @@ function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
     pasteboard_watcher:stop()
     if clipboard_webview then clipboard_webview:hide() end
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        -- Keep the current focus chain; do not activate the saved app.
         hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
     end)
 end
@@ -4042,7 +4048,7 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     end
     hs.alert.show("Please wait for the Paste task to finish.")
     hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        -- Keep the current focus chain; do not activate the saved app.
         hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
     end)
     return true

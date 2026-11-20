@@ -299,6 +299,29 @@ test("removing Top clears only priority metadata and restores newest-first order
     check_equal(#environment.t.searchPersistentHistory("B item", "text"), 1, "ordinary history remains intact")
 end)
 
+test("panel close and clipboard paste do not explicitly activate the saved app", function()
+    local sourcePath = spoonPath .. "/.hammerspoon/Spoons/xClipboardHistory.spoon/init.lua"
+    local file = assert(io.open(sourcePath, "rb"))
+    local source = file:read("*a")
+    file:close()
+
+    local closeStart = assert(source:find("closeClipboardPanel = function()"))
+    local configureStart = assert(source:find("local function configureClipboardWebview", closeStart))
+    local closeBlock = source:sub(closeStart, configureStart - 1)
+    check(not closeBlock:find("activatePreviousApplication()", 1, true),
+        "Escape and outside-click close cleanup never activates the previous app")
+    check(closeBlock:find("previousApplicationRestoreGeneration = previousApplicationRestoreGeneration + 1", 1, true) ~= nil,
+        "closing invalidates pending focus-restoration retries")
+
+    local pasteStart = assert(source:find("local function pasteHistoryEntry(index)"))
+    local pasteEnd = assert(source:find("%-%- The file that backs a clipboard image", pasteStart))
+    local pasteBlock = source:sub(pasteStart, pasteEnd - 1)
+    check(not pasteBlock:find("previousApplication:activate(true)", 1, true),
+        "pasting a clipboard record sends Cmd+V without reactivating the saved app")
+    check(pasteBlock:find('hs.eventtap.keyStroke({"cmd"}, "v", 0)', 1, true) ~= nil,
+        "pasting a clipboard record still sends Cmd+V")
+end)
+
 test("pinned text JSON record matches the ordinary record schema", function()
     local environment = new_environment("schema")
     seed_codex_day(environment)
