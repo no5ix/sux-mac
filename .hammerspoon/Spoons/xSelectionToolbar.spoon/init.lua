@@ -643,8 +643,8 @@ local function startTranslationEscapeTap()
     stopTranslationEscapeTap()
     translationEscapeTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         if event:getKeyCode() == hs.keycodes.map.escape and translationWindow then
-            -- Use the forward-declared local so the callback resolves the
-            -- function assigned below, not a nonexistent global.
+            -- Escape dismisses the floating AI text panel only. It must not
+            -- activate the app that was active before the panel appeared.
             if destroyTranslationWindow then destroyTranslationWindow() end
             return true
         end
