@@ -34,6 +34,9 @@ local replacementWindowAnimationTimer = nil
 local findOriginalReplacementElement
 -- App that owned the text selection before the floating toolbar was shown.
 local selectionOriginApp = nil
+-- The toolbar is a Hammerspoon WebView, so Hammerspoon itself is frequently the
+-- frontmost application when a toolbar button is clicked.
+local HAMMERSPOON_BUNDLE_ID = "org.hammerspoon.Hammerspoon"
 
 local DOUbao_SHORTCUT = { "ctrl", "shift", "alt", "cmd" }
 local DOUbao_KEY = "o"
@@ -1136,30 +1139,19 @@ end
 
 local toolbarCompactDismissRequested = false
 
-local function onToolbarMessage(message)
-    -- logger.i("Toolbar message received: " .. tostring(type(message)))
-    message = normalizeMessage(message)
-    if type(message) ~= "table" then
-        hs.alert.show("Toolbar message was not decoded")
-        return
-    end
-    local action = message.action
-    if action == "compactDismiss" then
-        toolbarCompactDismissRequested = true
-        return
-    end
-    local textValue = action == "open-link" and selectedText or (message.text or selectedText)
-    if type(textValue) == "table" then
-        textValue = textValue[1] or textValue.text or ""
-    end
-    local text = trim(textValue)
-    -- logger.i("Toolbar action=" .. tostring(action) .. ", text length=" .. tostring(#text))
-    if action == "dismissed" then
-        hideToolbarImmediately()
-        return
-    end
-    if text == "" then hs.alert.show("No selected text"); return end
+-- A selection drag no longer touches the pasteboard. Every action that consumes
+-- text performs its own synthetic Cmd+C when its button is clicked, restores the
+-- user's clipboard, and only then runs. Cut is included because the copy is what
+-- proves a text selection really exists, and only translation-provider setup
+-- needs no captured text at all.
+local function actionNeedsSelectedText(action)
+    if type(action) ~= "string" then return false end
+    if action == "copy" or action == "cut" then return true end
+    if action == "open-link" or action == "doubao" then return true end
+    return action:sub(1, 7) == "custom-" or action:sub(1, 4) == "web-"
+end
 
+local function dispatchToolbarAction(action, text)
     if action == "copy" then
         pasteboard.setContents(text)
         hideToolbar()
@@ -1250,6 +1242,169 @@ local function onToolbarMessage(message)
         end
 
     end
+end
+
+-- The synthetic copy runs on a button click, so focus has to travel back to the
+-- application that owns the selection first. The activation settle mirrors the
+-- cut action, which has the same requirement.
+local CAPTURE_KESTROKE_DELAY = 0.25
+local CAPTURE_FIRST_READ_DELAY = 0.18
+local CAPTURE_RETRY_DELAY = 0.12
+local CAPTURE_MAX_ATTEMPTS = 3
+local CAPTURE_SUPPRESS_WINDOW = 0.7
+local CAPTURE_RESTORE_SUPPRESS_WINDOW = 0.35
+local toolbarActionCapturePending = false
+
+local function isPlainTextCapture(value)
+    return value ~= "" and not looksLikeImagePayload(value)
+        and not value:match("^file://")
+        and not value:match("^/[^%s]+$")
+end
+
+-- Synthesize Cmd+C in the application that owns the selection, read the result,
+-- put the user's clipboard back, then run the clicked action with the captured
+-- text. If the copy produced nothing, the action is dropped silently.
+local function runToolbarActionWithCapture(action)
+    if toolbarActionCapturePending then
+        print("Toolbar selection capture already in progress, ignoring action " .. tostring(action))
+        return
+    end
+    -- Hide the WebView before focus moves, so the keystroke cannot be captured
+    -- by the toolbar window and the button cannot be clicked twice mid-capture.
+    hideToolbar()
+    toolbarActionCapturePending = true
+
+    local oldClipboard
+    local oldCount
+
+    local function finish(captured)
+        toolbarActionCapturePending = false
+        if captured == "" then
+            print("Toolbar capture copied no text; action " .. tostring(action) .. " skipped")
+            return
+        end
+        selectedText = captured
+        dispatchToolbarAction(action, captured)
+    end
+
+    -- Restore only while the pasteboard still holds this capture's result, so a
+    -- later clipboard owner is never overwritten. The programmatic restore write
+    -- is marked so clipboard history does not record it as a user copy. The copy
+    -- action deliberately leaves the selection on the pasteboard, so it skips
+    -- the restore write entirely.
+    local function restoreClipboard(readCount)
+        if oldClipboard == nil then return end
+        local ok, err = pcall(function()
+            if pasteboard.changeCount() == readCount then
+                _G.xSelectionToolbarSyntheticCopyUntil =
+                    hs.timer.secondsSinceEpoch() + CAPTURE_RESTORE_SUPPRESS_WINDOW
+                pasteboard.setContents(oldClipboard)
+            end
+        end)
+        if not ok then logger.e("Clipboard restoration failed: " .. tostring(err)) end
+    end
+
+    -- Apps publish the Cmd+C result asynchronously, so poll the change count
+    -- for a bounded number of attempts before giving up.
+    local function scheduleRead(attempt)
+        local delay = attempt == 1 and CAPTURE_FIRST_READ_DELAY or CAPTURE_RETRY_DELAY
+        clipboardFallbackTimer = timer.doAfter(delay, function()
+            clipboardFallbackTimer = nil
+            local ok, err = pcall(function()
+                local newCount = pasteboard.changeCount()
+                local copied = trim(pasteboard.getContents())
+                if newCount ~= oldCount then
+                    print("Toolbar capture copied " .. tostring(#copied) .. " characters")
+                    if action ~= "copy" then restoreClipboard(newCount) end
+                    finish(isPlainTextCapture(copied) and copied or "")
+                    return
+                end
+                if attempt < CAPTURE_MAX_ATTEMPTS then
+                    scheduleRead(attempt + 1)
+                    return
+                end
+                logger.d("Toolbar capture left the pasteboard unchanged; nothing was copied")
+                finish("")
+            end)
+            if not ok then
+                toolbarActionCapturePending = false
+                logger.e("Toolbar selection capture read failed: " .. tostring(err))
+            end
+        end)
+    end
+
+    local function sendCopyKeystroke()
+        local ok, err = pcall(function()
+            oldClipboard = pasteboard.getContents()
+            oldCount = pasteboard.changeCount()
+            _G.xSelectionToolbarSyntheticCopyUntil =
+                hs.timer.secondsSinceEpoch() + CAPTURE_SUPPRESS_WINDOW
+            eventtap.keyStroke({ "cmd" }, "c", 0.02)
+        end)
+        if not ok then
+            toolbarActionCapturePending = false
+            logger.e("Toolbar selection capture setup failed: " .. tostring(err))
+            return
+        end
+        scheduleRead(1)
+    end
+
+    local function beginCapture()
+        local front = hs.application.frontmostApplication()
+        local origin = selectionOriginApp
+        if front and front:bundleID() == HAMMERSPOON_BUNDLE_ID and origin then
+            local originApp = hs.application.get(origin:pid())
+            if not originApp then
+                toolbarActionCapturePending = false
+                logger.d("Toolbar capture skipped: source application is no longer running")
+                return
+            end
+            originApp:activate(true)
+            timer.doAfter(CAPTURE_KESTROKE_DELAY, function()
+                local ok, err = pcall(sendCopyKeystroke)
+                if not ok then
+                    toolbarActionCapturePending = false
+                    logger.e("Toolbar selection capture keystroke failed: " .. tostring(err))
+                end
+            end)
+            return
+        end
+        local ok, err = pcall(sendCopyKeystroke)
+        if not ok then
+            toolbarActionCapturePending = false
+            logger.e("Toolbar selection capture keystroke failed: " .. tostring(err))
+        end
+    end
+
+    beginCapture()
+end
+
+local function onToolbarMessage(message)
+    -- logger.i("Toolbar message received: " .. tostring(type(message)))
+    message = normalizeMessage(message)
+    if type(message) ~= "table" then
+        hs.alert.show("Toolbar message was not decoded")
+        return
+    end
+    local action = message.action
+    if action == "compactDismiss" then
+        toolbarCompactDismissRequested = true
+        return
+    end
+    if action == "dismissed" then
+        hideToolbarImmediately()
+        return
+    end
+    local textValue = action == "open-link" and selectedText or (message.text or selectedText)
+    if type(textValue) == "table" then
+        textValue = textValue[1] or textValue.text or ""
+    end
+    local text = trim(textValue)
+    if not actionNeedsSelectedText(action) then
+        dispatchToolbarAction(action, text)
+        return
+    end
+    runToolbarActionWithCapture(action)
 end
 
 -- Replacement mode: prefetch every CUSTOM_AI_BUTTONS result concurrently,
@@ -2464,8 +2619,6 @@ function obj:start()
             setToolbarHovering(inside)
         end)
     end
-    local captureSelectionFromClipboardFallback
-
     local function reportEventTapState(reason)
         local enabled = false
         if mouseSelectionTap then
@@ -2571,6 +2724,37 @@ function obj:start()
         return true
     end
 
+    -- A drag alone only proves intent: show the compact trigger without reading
+    -- the selection, without a synthetic copy, and without any pasteboard write.
+    -- The text is captured later, when a full-toolbar button is clicked, so a
+    -- drag over nothing is a valid state and the toolbar carries no text yet.
+    local function showToolbarForDrag()
+        if toolbar and toolbar:isVisible() and selectedText == "" then
+            -- Duplicate detection from the same gesture: keep the toolbar and its
+            -- countdown, and do not re-anchor it under the pointer.
+            print("Skipping duplicate toolbar show from the same gesture")
+            return true
+        end
+        local now = hs.timer.secondsSinceEpoch()
+        selectedText = ""
+        lastText = ""
+        -- Capture the source app before buildToolbar() creates/activates the
+        -- Hammerspoon webview; the click-time copy needs it to reclaim focus.
+        local candidateApp = mouseSelectionOriginApp or hs.application.frontmostApplication()
+        if candidateApp and candidateApp:bundleID() ~= HAMMERSPOON_BUNDLE_ID then
+            selectionOriginApp = candidateApp
+        end
+        lastShownAt = now
+        toolbarVisibleElapsedBeforeHover = 0
+        toolbarShownAt = now
+        toolbarHovering = false
+        buildToolbar("")
+        startToolbarHoverPolling()
+        scheduleToolbarExpiry()
+        print("Toolbar shown for selection drag; text will be captured on click")
+        return true
+    end
+
     local function captureAfterMouseSelection()
         if pendingCapture then return end
         if toolbar and toolbar:isVisible() then
@@ -2594,116 +2778,9 @@ function obj:start()
         local value = selectionFromAccessibility()
         if showIfSelection(value) then return end
 
-        -- Fallback only on a mouse-up following a real drag. Ordinary clicks and menu
-        -- clicks should never synthesize Cmd+C or open the toolbar.
-        -- eventtap's mouse-up callback below records whether the pointer moved while down.
-    end
-
-    local function captureSelectionFromClipboardFallback()
-        if pendingCapture then 
-            print("Pending capture in progress, skipping clipboard fallback")
-            return end
-        local fallbackApp = hs.application.frontmostApplication()
-        if not fallbackApp or fallbackApp:bundleID() == "org.hammerspoon.Hammerspoon" then
-            print("Skipping clipboard fallback for Hammerspoon")
-            return end
-        local appName = string.lower(fallbackApp:name() or "")
-        local bundleID = string.lower(fallbackApp:bundleID() or "")
-        if bundleID == "com.apple.finder" or appName == "finder" then
-            print("Skipping clipboard fallback for Finder")
-            return end
-
-        -- Mark the fallback pending before touching the pasteboard so a second
-        -- gesture cannot start another synthetic copy while this one owns the
-        -- clipboard. Every failure path below releases the flag.
-        pendingCapture = true
-
-        local oldClipboard
-        local oldCount
-        local setupOk, setupErr = pcall(function()
-            oldClipboard = pasteboard.getContents()
-            oldCount = pasteboard.changeCount()
-            _G.xSelectionToolbarSyntheticCopyUntil = hs.timer.secondsSinceEpoch() + 0.7
-            hs.eventtap.keyStroke({"cmd"}, "c", 0.02)
-        end)
-
-        if not setupOk then
-            pendingCapture = false
-            logger.e("Clipboard fallback setup failed: " .. tostring(setupErr))
-            return
-        end
-
-        print("Clipboard fallback copy initiated (changeCount=" .. tostring(oldCount) .. ")")
-
-        local callbackOk, callbackErr = pcall(function()
-            clipboardFallbackTimer = timer.doAfter(0.22, function()
-                -- The one-shot timer has completed; release its retained handle.
-                clipboardFallbackTimer = nil
-
-                -- Keep the capture pending while the callback owns the clipboard.
-                -- Protected execution ensures any Hammerspoon API error still
-                -- reaches the unconditional cleanup below.
-                local ok, err = pcall(function()
-                    local newCount = pasteboard.changeCount()
-                    local copied = trim(pasteboard.getContents())
-
-                    print("Clipboard fallback copy completed (changeCount="
-                        .. tostring(newCount) .. ", copied length=" .. tostring(#copied) .. ")")
-
-                    local isPlainText = copied ~= "" and not looksLikeImagePayload(copied)
-                        and not copied:match("^file://")
-                        and not copied:match("^/[^%s]+$")
-
-                    if newCount ~= oldCount and isPlainText then
-                        local axValue = selectionFromAccessibility()
-                        local selection = trim(axValue ~= "" and axValue or copied)
-                        if selection ~= "" and not looksLikeImagePayload(selection) then
-                            print("Clipboard fallback copy yielded valid text selection (length="
-                                .. tostring(#selection) .. ")")
-                            showIfSelection(selection)
-                        else
-                            logger.d("Clipboard fallback copy yielded no valid text selection (copied length="
-                                .. tostring(#copied) .. ")")
-                        end
-                    else
-                        logger.d("Clipboard fallback copy did not yield a valid text selection (changeCount="
-                            .. tostring(newCount) .. ", copied length=" .. tostring(#copied)
-                            .. ", plainText=" .. tostring(isPlainText) .. ")")
-                    end
-
-                    -- Restore only if the clipboard still contains this capture's
-                    -- result. Do not overwrite a newer clipboard change.
-                    if oldClipboard ~= nil and newCount ~= oldCount then
-                        -- Only restore if no later clipboard owner has changed
-                        -- the pasteboard since we read this capture's result.
-                        local restoreOk, restoreErr = pcall(function()
-                            if pasteboard.changeCount() == newCount then
-                                pasteboard.setContents(oldClipboard)
-                            end
-                        end)
-                        if not restoreOk then
-                            logger.e("Clipboard restoration failed: " .. tostring(restoreErr))
-                        end
-                    end
-                end)
-
-                pendingCapture = false
-                print("pendingCapture = FALSE")
-
-                if not ok then
-                    logger.e("Clipboard fallback callback failed: " .. tostring(err))
-                end
-            end)
-        end)
-
-        if not callbackOk then
-            if clipboardFallbackTimer then
-                clipboardFallbackTimer:stop()
-                clipboardFallbackTimer = nil
-            end
-            pendingCapture = false
-            logger.e("Failed to schedule clipboard fallback timer: " .. tostring(callbackErr))
-        end
+        -- First use native Accessibility selection, which does not touch the
+        -- clipboard. Ordinary clicks and menu clicks must never open the toolbar;
+        -- only a mouse-up after a real drag does (see the eventtap callback below).
     end
 
 
@@ -2837,17 +2914,14 @@ function obj:start()
                     --     return  
                     -- end
 
-                    -- Accessibility selection updates asynchronously in some apps.
-                    -- Allow a longer settling window before falling back to a
-                    -- synthetic copy for a confirmed drag.
-                    -- if attempts < 3 then
-                        -- timer.doAfter(0.08, retrySelectionRead)
-                    -- else
+                    -- Accessibility selection updates asynchronously in some apps,
+                    -- and the selected text is no longer needed here at all: a
+                    -- confirmed drag is enough to show the toolbar.
                     if didDrag then
-                        logger.d("abandon Accessibility selection; using clipboard fallback")
-                        captureSelectionFromClipboardFallback()
+                        logger.d("Selection drag detected; showing the toolbar without touching the pasteboard")
+                        showToolbarForDrag()
                     else
-                        logger.d("No selection detected after mouse-up; no drag fallback was needed")
+                        logger.d("No selection detected after mouse-up; no toolbar shown")
                     end
                 end
                 retrySelectionRead()
