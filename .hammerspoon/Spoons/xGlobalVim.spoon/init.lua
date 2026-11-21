@@ -42,6 +42,10 @@ end
 -- screenshot
 -- hs.hotkey.bind({"ctrl"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift", "ctrl"))
 
+local function startSadoyoScreenshot()
+    hs.eventtap.keyStroke({"ctrl", "cmd", "alt"}, "4", 0)
+end
+
 -- faster version of the above
 local function startMacScreenshot()
     hs.eventtap.keyStroke({"ctrl", "cmd", "shift"}, "4", 0)
@@ -81,7 +85,7 @@ local function startPreferredScreenshot()
     startMacScreenshot()
 end
 
-hs.hotkey.bind({"ctrl"}, "q", startPreferredScreenshot)
+hs.hotkey.bind({"ctrl"}, "q", startSadoyoScreenshot)
 
 hs.hotkey.bind({"ctrl", "shift"}, "q", hs.fnutils.partial(fn_cb_task, "4", "cmd", "shift"))
 

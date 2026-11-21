@@ -2708,6 +2708,29 @@ function obj:start()
 
 
     local WECHAT_BUNDLE_ID = "com.tencent.xinWeChat"
+    local SADOYO_DEV_BUNDLE_ID = "com.sadoyo.app.dev"
+    local SADOYO_BUNDLE_ID = "com.sadoyo.app"
+
+    local function getSadoyoScreenshotState()
+        local screens = hs.screen.allScreens()
+        -- print("Number of displays:", #screens)
+        -- print("Cccccccccc cccc c cc cc   cc checking Sadoyo screenshot state...")
+        local app = hs.application.get(SADOYO_BUNDLE_ID)
+        if not app then
+            -- print("Cccccccccc cccc c cc cc   cc Sadoyo app not found, checking production bundle ID...")
+            return "unknown", 0
+        end
+
+        local windows = app:allWindows()
+        local count = #windows
+        -- print("Cccccccccc cccc c cc cc   cc c Sadoyo window count: " .. tostring(count))
+        if (count >= 8 and #screens == 3) or (count >= 6 and #screens == 2) then -- it is running and in screenshot mode
+            return "active", count
+        else -- it is running or not,  but not in screenshot mode
+            return "inactive", count
+        end
+    end
+
     local function getWeChatScreenshotState()
         local app = hs.application.get(WECHAT_BUNDLE_ID)
         if not app then
@@ -2767,17 +2790,18 @@ function obj:start()
             mouseDownPoint = nil
             mouseDragDistance = 0
 
-            local state, wxCount = getWeChatScreenshotState()
-            if state == "active" then
-                -- Avoid text-selection detection while WeChat is
-                -- potentially entering, using, or leaving screenshot mode.
-                print(string.format(
-                    "WeChat screenshot state: %s (window count: %d)",
-                    state,
-                    wxCount
-                ))
-                return false
-            end
+            -- -- local state, wxCount = getWeChatScreenshotState()
+            -- local state, wxCount = getSadoyoScreenshotState()
+            -- if state == "active" then
+            --     -- Avoid text-selection detection while WeChat is
+            --     -- potentially entering, using, or leaving screenshot mode.
+            --     print(string.format(
+            --         "WeChat screenshot state: %s (window count: %d)",
+            --         state,
+            --         wxCount
+            --     ))
+            --     return false
+            -- end
 
             timer.doAfter(0.12, function()
                 if toolbar and toolbar:isVisible() then
