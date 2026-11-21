@@ -8,7 +8,7 @@ db.json
 node_modules/*
 .history/
 .vscode/
-
+.pi/
 tempCodeRunnerFile*.*
 .idea
 clipboard-history
