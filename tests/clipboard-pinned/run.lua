@@ -26,8 +26,13 @@ local function shquote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+-- Return a command's stdout. os.execute yields only the exit status, so the
+-- source-text checks that read the production Spoon file need a real capture.
 local function shell(command)
-    return os.execute(command)
+    local handle = io.popen(command .. " 2>/dev/null", "r")
+    local output = handle and handle:read("*a") or ""
+    if handle then handle:close() end
+    return output
 end
 
 local function sandbox_directory(label)
@@ -182,7 +187,11 @@ end
 local function panel_count_text()
     for index = #STUB.state.scripts, 1, -1 do
         local script = STUB.state.scripts[index]
-        local text = script:match("document%.querySelector%('%.count'%).textContent=\"([^\"]*)\"")
+        -- The panel writes the count through querySelectorAll('.count').forEach
+        -- on a filter refresh and querySelector('.count').textContent on the
+        -- panel-open path; both are the same visible count.
+        local text = script:match("%.count'%)%.textContent=\"([^\"]*)\"")
+            or script:match("node%.textContent=\"([^\"]*)\"")
         if text then return text end
     end
     return nil
@@ -931,9 +940,9 @@ test("pasteSelected message resolves through the local forward declaration", fun
     -- Call the same message action as the WebView bridge. The environment's
     -- Hammerspoon stubs record the delayed paste rather than sending keystrokes.
     callback({ body = { action = "pasteSelected", query = hs.json.encode({ uid }) } })
-    check_equal(#environment.t.activePasteEntries, 1,
+    check_equal(#environment.t.activePasteEntries(), 1,
         "the callback dispatches to the selected-paste implementation")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[1]), uid,
         "the selected record is passed to the shared paste executor")
 end)
 
@@ -987,19 +996,19 @@ test("selected paste supports chronological and explicit selection order", funct
     local requested = hs.json.encode({ uid_b, uid_a, uid_c })
 
     environment.t.pasteSelectedClipboardItems(requested, "selection")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid_b,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[1]), uid_b,
         "selection mode begins with B")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[2]), uid_a,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[2]), uid_a,
         "selection mode keeps A second")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[3]), uid_c,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[3]), uid_c,
         "selection mode keeps C third")
 
     environment.t.pasteSelectedClipboardItems(requested, "chronological")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[1]), uid_a,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[1]), uid_a,
         "chronological mode starts with oldest A")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[2]), uid_b,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[2]), uid_b,
         "chronological mode puts B second")
-    check_equal(environment.t.cardUid(environment.t.activePasteEntries[3]), uid_c,
+    check_equal(environment.t.cardUid(environment.t.activePasteEntries()[3]), uid_c,
         "chronological mode ends with newest C")
 end)
 
@@ -1048,6 +1057,182 @@ test("multi-selection uses stable UIDs and survives filter changes", function()
     environment.t.handleMessage({ body = { action = "deselectItem", uid = selectedUids[1] } })
     check(environment.t.selectedClipboardUids[selectedUids[1]] == nil, "Deselect clears only its own UID")
     check(environment.t.selectedClipboardUids[selectedUids[2]] == true, "other selections remain");
+end)
+
+test("a selection that spans two date filters stays pasteable", function()
+    local environment = new_environment("cross-filter-selection")
+    local PREVIOUS_DATE = "2026-11-06"
+    -- The All cache holds only the newest CLIPBOARD_CACHE_SIZE (32) mixed
+    -- records, so fill today with more records than that window. A card the
+    -- user can click on the today scope is then provably outside the cache, and
+    -- switching to the previous day replaces menuData with that day's page.
+    local today = {}
+    for index = 1, 40 do today[#today + 1] = "today note " .. index end
+    environment.seed_text_day(DATE, today, BASE_TS)
+    environment.seed_text_day(PREVIOUS_DATE, { "older day note" }, BASE_TS - 86400)
+    environment.t.restorePersistentHistory()
+    environment.t.setPanelState({ allDates = true, pinned = false, query = "", kind = "all" })
+
+    environment.t.handleMessage({ body = { action = "dateFilter", dateKey = DATE, kind = "all", query = "" } })
+    local today_page = environment.t.panelState().menuData
+    check_equal(#today_page, 40, "the date scope loads the whole day, not the 32-item window")
+    local oldest_today = today_page[#today_page]
+    check((oldest_today.ts or 0) < BASE_TS + 8, "the picked today card is the oldest of the day")
+    local uid_today = environment.t.cardUid(oldest_today)
+    environment.t.handleMessage({ body = { action = "selectItem", uid = uid_today } })
+
+    environment.t.handleMessage({ body = { action = "dateFilter", dateKey = PREVIOUS_DATE, kind = "all", query = "" } })
+    check_equal(environment.t.panelState().dateFilter, PREVIOUS_DATE, "the previous-day scope is active")
+    local uid_older = environment.t.cardUid(environment.t.panelState().menuData[1])
+    environment.t.handleMessage({ body = { action = "selectItem", uid = uid_older } })
+    check(environment.t.selectedClipboardUids[uid_today] == true, "the first scope's selection is kept")
+    check(environment.t.selectedClipboardUids[uid_older] == true, "the second scope's selection is kept")
+
+    local resolved = environment.t.resolveSelectedClipboardEntries(hs.json.encode({ uid_today, uid_older }))
+    check(resolved ~= nil, "both selected cards resolve after the scope change")
+    check_equal(#resolved, 2, "the cross-filter selection resolves to two entries")
+
+    -- Negative control: the pre-fix candidate set (All cache + pinned index +
+    -- current page) cannot see the today card, so without the rendered-card
+    -- registry the same selection is rejected as "no longer available".
+    environment.t.resetRenderedCardRegistry()
+    check(environment.t.resolveSelectedClipboardEntries(hs.json.encode({ uid_today, uid_older })) == nil,
+        "the bounded caches alone cannot resolve a cross-filter selection")
+
+    -- Paste through the WebView bridge action. Re-render both scopes so every
+    -- selected card is registered again, as a real session would have done.
+    environment.t.handleMessage({ body = { action = "dateFilter", dateKey = DATE, kind = "all", query = "" } })
+    environment.t.handleMessage({ body = { action = "dateFilter", dateKey = PREVIOUS_DATE, kind = "all", query = "" } })
+    environment.t.handleMessage({
+        body = { action = "pasteSelected", query = hs.json.encode({ uid_today, uid_older }) }
+    })
+    check_equal(#environment.t.activePasteEntries(), 2, "the paste queue holds both selected cards")
+    local uids = {}
+    for _, entry in ipairs(environment.t.activePasteEntries()) do
+        uids[environment.t.cardUid(entry)] = true
+    end
+    check(uids[uid_today] and uids[uid_older], "the queued entries are exactly the selected cards")
+
+    -- The registry is bounded, so a long browsing session cannot grow it with
+    -- every card the panel ever painted, and the oldest card is dropped first.
+    local limit = environment.t.RENDERED_CARD_REGISTRY_LIMIT
+    local probe = { type = "text", ts = BASE_TS - 200000, id = "probe-card", content = "probe" }
+    environment.t.registerRenderedCard(probe)
+    local probe_uid = environment.t.cardUid(probe)
+    check(environment.t.resolveSelectedClipboardEntries(hs.json.encode({ probe_uid })) ~= nil,
+        "a registered card resolves even when no collection lists it")
+    for index = 1, limit do
+        environment.t.registerRenderedCard({
+            type = "text", ts = BASE_TS + index, id = "synthetic-" .. index, content = "synthetic",
+        })
+    end
+    check_equal(environment.t.renderedCardRegistrySize(), limit, "the rendered-card registry stays bounded")
+    check(environment.t.resolveSelectedClipboardEntries(hs.json.encode({ probe_uid })) == nil,
+        "the oldest registered card is evicted first")
+end)
+
+test("the panel animates open and is destroyed only after the leave transition", function()
+    local environment = new_environment("panel-animation")
+    environment.seed_text_day(DATE, { "animated note one", "animated note two" }, BASE_TS)
+    environment.t.restorePersistentHistory()
+
+    local function timers_since(mark)
+        local added = {}
+        for index = mark + 1, #STUB.state.timer_callbacks do
+            added[#added + 1] = STUB.state.timer_callbacks[index]
+        end
+        return added
+    end
+    local function run_timer(mark, delay)
+        for _, timer in ipairs(timers_since(mark)) do
+            if timer.delay == delay then
+                timer.callback()
+                return true
+            end
+        end
+        return false
+    end
+    local function script_sent(fragment)
+        return count_matching(STUB.state.scripts, function(script)
+            return script:find(fragment, 1, true) ~= nil
+        end) > 0
+    end
+
+    local function open_panel()
+        local mark = #STUB.state.timer_callbacks
+        environment.t.showClipboardHistory()
+        -- After a teardown the panel is cold: the document loads and a delayed
+        -- step shows the window. A warm panel shows synchronously, so the timer
+        -- lookup is optional here.
+        run_timer(mark, 0.15)
+        local view = environment.t.panelWebView()
+        run_timer(mark, environment.t.PANEL_ENTER_SETTLE_MS)
+        return view
+    end
+
+    -- Open: the window is shown while the shell is in its pre-transition state,
+    -- then Lua arms the transition on the next tick.
+    local mark = #STUB.state.timer_callbacks
+    environment.t.showClipboardHistory()
+    local view = environment.t.panelWebView()
+    check(view ~= nil and not view:isVisible(), "the document loads before the window appears")
+    check(run_timer(mark, 0.15), "the first paint schedules the show step")
+    check(script_sent("beginPanelEnter"), "the open path sets the shell's pre-transition state")
+    check(view:isVisible(), "the panel window is shown")
+    check(not view.deleted, "the panel window is live")
+    local settle_mark = #STUB.state.timer_callbacks
+    check(run_timer(mark, environment.t.PANEL_ENTER_SETTLE_MS),
+        "the open path schedules the transition arm")
+    check(script_sent("settlePanelEnter"), "the transition is armed after the window is visible")
+    check_equal(settle_mark, #STUB.state.timer_callbacks, "arming the transition starts no new timer")
+
+    -- Dismissal: the leave transition plays first, the panel reference is
+    -- released at once, and the window survives just long enough to animate out.
+    mark = #STUB.state.timer_callbacks
+    environment.t.closeClipboardPanel()
+    check(environment.t.panelClosePending(), "the dismissal request is one-shot")
+    check(script_sent("playPanelLeave"), "the close path plays the leave transition")
+    check(environment.t.panelCloseAnimationPending(), "the teardown waits for the leave transition")
+    check(not view.deleted, "the window is not destroyed before the animation")
+    check_equal(environment.t.panelWebView(), nil,
+        "the panel reference is released at once, so late WebView callbacks are no-ops")
+
+    local teardown = nil
+    for _, timer in ipairs(timers_since(mark)) do
+        if timer.delay == environment.t.PANEL_LEAVE_ANIMATION_MS / 1000 then teardown = timer end
+    end
+    check(teardown ~= nil, "the close path schedules the deferred teardown")
+    teardown.callback()
+    check(view.deleted, "the window is destroyed after the leave transition")
+    check(not environment.t.panelClosePending(), "the panel is fully closed")
+    check(not environment.t.panelCloseAnimationPending(), "no teardown remains pending")
+    check_equal(environment.t.panelState().menuCount, 0, "the browse session clears with the teardown")
+
+    -- A hidden panel (a paste flow already hid the window) closes at once, so
+    -- dismissal can never wait on a timer that has nothing to animate.
+    local reopened = open_panel()
+    check(reopened ~= nil and reopened:isVisible(), "the panel reopens on a fresh visible window")
+    reopened:hide()
+    environment.t.closeClipboardPanel()
+    check(not environment.t.panelCloseAnimationPending(),
+        "a hidden panel is torn down without an animation timer")
+    check(reopened.deleted, "the hidden panel window is destroyed immediately")
+    check(not environment.t.panelClosePending(), "the hidden-panel close completed")
+    check_equal(environment.t.panelState().menuCount, 0, "the immediate close clears the session")
+
+    -- A reopen that lands during the leave animation must keep its own session:
+    -- only the stale window is destroyed, never the state the new panel built.
+    local fresh = open_panel()
+    check(fresh ~= nil and fresh:isVisible(), "the panel is open and visible")
+    environment.t.closeClipboardPanel()
+    local stale = environment.t.panelCloseAnimationView()
+    check(stale ~= nil, "the leave animation is running")
+    local live = open_panel()
+    check(not environment.t.panelCloseAnimationPending(), "the reopen cancels the pending teardown")
+    check(stale.deleted, "the reopen destroys the stale window")
+    check_equal(environment.t.panelState().menuCount, 2, "the reopened panel keeps its own records")
+    check(live ~= nil and live:isVisible() and live ~= stale,
+        "the reopened panel is its own live window, not the animating one")
 end)
 
 test("the All view shows one pinned card per event; date scopes keep the marker", function()
@@ -1864,8 +2049,11 @@ end)
 
 test("pin and unpin refresh reapplies the WebView selection Set to rebuilt cards", function()
     local source = shell("cat " .. shquote(SPOON_PATH))
-    local refreshStart = source:find("function updateClipboardPanel(query,kind,offset,append)", 1, true)
-    local refreshEnd = source:find("\\nlocal closeClipboardPanel", refreshStart, true)
+    -- The refresh function is a local function, and the end marker is a real
+    -- newline: a literal "\\n" pattern never matched, so this whole scenario
+    -- (selection sync after a rebuild) reported only "panel refresh function exists".
+    local refreshStart = source:find("local function updateClipboardPanel(query,kind,offset,append)", 1, true)
+    local refreshEnd = source:find("\nlocal closeClipboardPanel", refreshStart, true)
     check(refreshStart ~= nil and refreshEnd ~= nil, "panel refresh function exists")
     local refresh = source:sub(refreshStart, refreshEnd)
     check(refresh:find("window.syncClipboardMultiSelection", 1, true) ~= nil,

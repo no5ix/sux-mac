@@ -74,12 +74,15 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 | context actions | Copy, Pin, and Unpin act on the requested index: Copy copies the requested card's text, Unpin removes exactly that pinned record and leaves the others, Pin pins exactly the requested ordinary record, and an Unpin request for an ordinary card changes nothing after the list is rebuilt |
 | empty | empty collection, empty pinned view, and refused pin/unpin edge cases |
 | privacy | no clipboard payload text appears in the log output |
+| cross-filter paste | a selection that spans two date filters - the first card picked outside the newest-32 All cache, the second after `menuData` was replaced by the previous day's page - resolves through `resolveSelectedEntries` and reaches the paste queue; the same selection is rejected once the rendered-card registry is reset (the pre-fix candidate set), the registry stays bounded, and the oldest card is evicted first |
+| panel animation | the open path puts the shell in its pre-transition state, shows the window, then arms the transition on the `PANEL_ENTER_SETTLE_MS` tick; dismissal plays `playPanelLeave`, releases `clipboard_webview` at once, keeps the window alive while the animation is pending, and destroys it in the deferred teardown after `PANEL_LEAVE_ANIMATION_MS`; a hidden panel is destroyed immediately with no timer, and a reopen during the leave animation cancels the teardown, destroys only the stale window, and keeps its own records |
 
 ## Panel JavaScript checks
 
 `node tests/clipboard-pinned/panel_js_test.mjs` extracts the blocks marked
-`BEGIN/END CONTEXT MENU MODEL`, `BEGIN/END KEYBOARD NAVIGATION MODEL`, and
-`BEGIN/END KEYBOARD NAVIGATION BINDING` **verbatim** from the Spoon file, so it
+`BEGIN/END CONTEXT MENU MODEL`, `BEGIN/END KEYBOARD NAVIGATION MODEL`,
+`BEGIN/END KEYBOARD NAVIGATION BINDING`, and `BEGIN/END PANEL ANIMATION`
+**verbatim** from the Spoon file, so it
 exercises the shipped code rather than a copy. It also reads the whole panel
 `<script>` for structural assertions. Covered:
 
@@ -99,6 +102,13 @@ exercises the shipped code rather than a copy. It also reads the whole panel
 - Wiring: exactly one Tab branch that delegates to `navMove`, no tab stop on the
   results container, a post-rebuild `<body>` Tab fallback, and the Escape,
   Enter-to-paste, arrow-key, Enter-to-search, and typing handlers still present.
+- Panel animation: `beginPanelEnter` puts the shell in `.panel-enter` only, the
+  window is shown, `settlePanelEnter` arms `.panel-enter-active` (the enter state
+  still held), `playPanelLeave` drops both enter states and applies `.panel-leave`,
+  a reopen clears `.panel-leave`, and a missing shell reports duration `0` so Lua
+  tears the panel down at once. The CSS transition durations are checked against
+  the JS constants, `PANEL_LEAVE_ANIMATION_MS` is checked equal to `PANEL_LEAVE_MS`,
+  and the `prefers-reduced-motion: reduce` rule must be present.
 
 To syntax-check the whole panel script: extract the text between `<script>` and
 `</script>` from the Spoon file into `/tmp/panel_script.js` and run

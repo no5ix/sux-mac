@@ -56,8 +56,31 @@ local visibleIndices = {}
 -- trusting a list index: the merged All list re-sorts when a new page arrives,
 -- and an index-only guard skips boundary cards and leaves stale cards in place.
 local renderedCardUids = {}
+-- Every card the panel has rendered during the open session, keyed by its
+-- selection uid. Multi-selection lives in the WebView and survives scope
+-- changes (All, individual dates, Pin, Text/Images), so a card picked on one
+-- date filter is pasted together with a card picked on another. The paste path
+-- must resolve every selected uid, and the bounded All cache, the pinned
+-- index, and the current page alone do not cover a card that has scrolled out
+-- of the active collection: switching from 11.20 to 11.19 replaces menuData and
+-- a 11.20 card outside the newest-32 window is then unresolvable. Entries are
+-- the same lightweight metadata/path records the caches hold, bounded below.
+local renderedCardRegistry = {}
+local renderedCardRegistryOrder = {}
+local RENDERED_CARD_REGISTRY_LIMIT = 512
+-- Implemented after cardUid() is declared; called from render, close, and
+-- Clear All paths, all of which run after the Spoon file is evaluated.
+local registerRenderedCard
+local resetRenderedCardRegistry
 local panelScreenUUID = nil
 local CLIPBOARD_RENDER_BATCH_SIZE = 32
+-- Panel open/close animation. The panel JavaScript owns the visible timing
+-- (PANEL_ENTER_MS / PANEL_LEAVE_MS below in the HTML); Lua arms the enter
+-- transition one tick after the window appears, and destroys the window
+-- PANEL_LEAVE_ANIMATION_MS after playing the leave transition. A panel that is
+-- not visible, and reduced-motion clients, skip the animation.
+local PANEL_ENTER_SETTLE_MS = 0.03
+local PANEL_LEAVE_ANIMATION_MS = 140
 local CLIPBOARD_CACHE_SIZE = 32
 local clipboardDateFilter = nil
 local clipboardPinnedFilter = false
@@ -1184,8 +1207,9 @@ local function clearClipboardHistory()
     end
     clipboardPinnedFilter=false
     -- Clear All emptied both collections, so no session result may survive it:
-    -- drop the ordinary page, the date pages, the ordinary search cache, and the
-    -- unified All cache together.
+    -- drop the ordinary page, the date pages, the ordinary search cache, the
+    -- unified All cache, and the rendered-card registry together.
+    if resetRenderedCardRegistry then resetRenderedCardRegistry() end
     dateHistoryCache = {}
     allHistoryCache = {}
     allHistoryCacheLoaded = 0
@@ -1757,6 +1781,29 @@ local function cardUid(entry)
     return tostring(unifiedIdentity(entry))
 end
 
+-- Register a rendered card so its uid stays resolvable for the rest of the
+-- session, whichever collection it was rendered in. Insertion order bounds the
+-- registry; the oldest card is dropped first, and the selection cap (99) is far
+-- below the limit, so a card that is still selectable is never evicted.
+registerRenderedCard = function(entry)
+    if type(entry) ~= "table" then return end
+    local uid = cardUid(entry)
+    if type(uid) ~= "string" or uid == "" or uid == "nil" then return end
+    if renderedCardRegistry[uid] == nil then
+        renderedCardRegistryOrder[#renderedCardRegistryOrder + 1] = uid
+        while #renderedCardRegistryOrder > RENDERED_CARD_REGISTRY_LIMIT do
+            local oldest = table.remove(renderedCardRegistryOrder, 1)
+            renderedCardRegistry[oldest] = nil
+        end
+    end
+    renderedCardRegistry[uid] = entry
+end
+
+resetRenderedCardRegistry = function()
+    renderedCardRegistry = {}
+    renderedCardRegistryOrder = {}
+end
+
 local function historyItemHTML(entry, index)
     local pinnedId = effectivePinnedId(entry)
     local cardIsPinned = pinnedId ~= nil
@@ -1844,6 +1891,7 @@ local function renderClipboardBatch(query, kind, offset)
     for position = offset + 1, last do
         local index = matches[position]
         renderedCardUids[cardUid(menuData[index])] = true
+        registerRenderedCard(menuData[index])
         cards[#cards + 1] = historyItemHTML(menuData[index], index)
     end
     visibleIndices = matches
@@ -1935,6 +1983,18 @@ body {
 #clipboard-panel-shell > header,
 #clipboard-panel-shell > main,
 #clipboard-panel-shell > footer { min-width:0; }
+/* Panel open/close animation. The native window is borderless and transparent,
+   so the shell - the only painted surface - fades and settles in place. Lua
+   drives these classes: the window is shown on the enter state, the transition
+   is armed on the next tick, and the close teardown waits for the leave. */
+#clipboard-panel-shell.panel-enter { opacity:0; transform:scale(.965) translateY(10px); }
+#clipboard-panel-shell.panel-enter-active { transition:opacity 150ms ease-out, transform 220ms cubic-bezier(.22,.72,.24,1); opacity:1; transform:none; }
+#clipboard-panel-shell.panel-leave { transition:opacity 120ms ease-in, transform 140ms ease-in; opacity:0; transform:scale(.985) translateY(6px); }
+@media (prefers-reduced-motion: reduce) {
+  #clipboard-panel-shell.panel-enter,
+  #clipboard-panel-shell.panel-enter-active,
+  #clipboard-panel-shell.panel-leave { transition:none; opacity:1; transform:none; }
+}
 header { flex:0 0 auto; position:relative; z-index:5; padding:14px 16px 12px; background:var(--header-bg); }
 .top { display:flex; align-items:center; justify-content:space-between; gap:14px; }
 h1 { margin:0; font-size:14px; font-weight:650; cursor:move; user-select:none; }
@@ -3006,6 +3066,63 @@ function syncClipboardMultiSelection() {
 }
 window.syncClipboardMultiSelection = syncClipboardMultiSelection;
 window.resetMultiSelection = syncClipboardMultiSelection;
+/* BEGIN PANEL ANIMATION */
+// Lua drives the panel's open/close animation. The native window is shown while
+// the shell sits in the pre-transition state (beginPanelEnter), Lua arms the
+// transition on the next tick (settlePanelEnter), and the close path plays
+// panel-leave and destroys the window after the leave transition. The durations
+// must match PANEL_ENTER_ANIMATION_MS / PANEL_LEAVE_ANIMATION_MS in this file.
+const PANEL_ENTER_MS = 240;
+const PANEL_LEAVE_MS = 140;
+let panelEnterTimer = null;
+function clearPanelEnterTimer() {
+  if (panelEnterTimer) { clearTimeout(panelEnterTimer); panelEnterTimer = null; }
+}
+function panelShellNode() {
+  const shell = document.getElementById('clipboard-panel-shell');
+  return shell && shell.classList ? shell : null;
+}
+function beginPanelEnter() {
+  const shell = panelShellNode();
+  if (!shell) return 0;
+  clearPanelEnterTimer();
+  shell.classList.remove('panel-leave');
+  shell.classList.remove('panel-enter-active');
+  shell.classList.add('panel-enter');
+  return PANEL_ENTER_MS;
+}
+function settlePanelEnter() {
+  const shell = panelShellNode();
+  if (!shell) return 0;
+  // Reading the layout forces the enter state to be computed before the
+  // transition is armed; without it WebKit can coalesce both states and paint
+  // the panel with no animation at all.
+  void shell.offsetWidth;
+  shell.classList.add('panel-enter-active');
+  clearPanelEnterTimer();
+  panelEnterTimer = setTimeout(function() {
+    panelEnterTimer = null;
+    const node = panelShellNode();
+    if (!node) return;
+    node.classList.remove('panel-enter');
+    node.classList.remove('panel-enter-active');
+  }, PANEL_ENTER_MS);
+  return PANEL_ENTER_MS;
+}
+function playPanelLeave() {
+  const shell = panelShellNode();
+  if (!shell) return 0;
+  clearPanelEnterTimer();
+  shell.classList.remove('panel-enter');
+  shell.classList.remove('panel-enter-active');
+  void shell.offsetWidth;
+  shell.classList.add('panel-leave');
+  return PANEL_LEAVE_MS;
+}
+window.beginPanelEnter = beginPanelEnter;
+window.settlePanelEnter = settlePanelEnter;
+window.playPanelLeave = playPanelLeave;
+/* END PANEL ANIMATION */
 const contextMenu = document.createElement('div');
 contextMenu.id = 'clipboard-context-menu'; buildContextMenu(contextMenu);
 // Keep hover feedback on the actual persistent menu buttons. Delegation also
@@ -3296,6 +3413,7 @@ local function updateClipboardPanel(query,kind,offset,append)
         -- re-sorted page moved its index.
         if not renderedCardUids[uid] then
             renderedCardUids[uid]=true
+            registerRenderedCard(entry)
             cards[#cards+1]=historyItemHTML(entry,matchedIndex)
         end
     end
@@ -3652,17 +3770,17 @@ local function activatePreviousApplication()
     return true
 end
 
-closeClipboardPanel = function()
-    if panelClosePending then return end
-    panelClosePending = true
+-- Pending leave animation. The dismissal request stops the click monitors and
+-- releases the panel reference at once, while the native window and the Lua
+-- session state are released once the leave transition has been painted, so the
+-- panel visibly closes and no late WebView callback can act on it.
+local panelCloseAnimationTimer = nil
+local panelCloseAnimationView = nil
 
-    -- Capture the target before destroying the panel and stop dismissal events.
-    stopOutsideClickMonitor()
-    -- Invalidate the view first so any delayed callbacks become no-ops.
-    local view=clipboard_webview
-    clipboard_webview=nil
-    clipboardPanelHTMLReady=false
-    clipboard_usercontent=nil
+-- The real teardown. `view` is the panel captured at dismissal time.
+local function finishClipboardPanelClose(view)
+    panelCloseAnimationTimer = nil
+    panelCloseAnimationView = nil
 
     -- Clear every Lua-owned reference to the expanded browse session.
     clipboard_search=""
@@ -3676,6 +3794,7 @@ closeClipboardPanel = function()
     menuData={}
     selectedClipboardUids={}
     selectedClipboardOrder={}
+    resetRenderedCardRegistry()
     dateHistoryCache={}
     allHistoryCache={}
     allHistoryCacheLoaded=0
@@ -3720,6 +3839,55 @@ closeClipboardPanel = function()
     activatePreviousApplication()
 end
 
+closeClipboardPanel = function()
+    if panelClosePending then return end
+    panelClosePending = true
+
+    -- Capture the target before destroying the panel and stop dismissal events.
+    stopOutsideClickMonitor()
+    -- Invalidate the view first so any delayed callbacks become no-ops.
+    local view = clipboard_webview
+    clipboard_webview = nil
+    clipboardPanelHTMLReady = false
+    clipboard_usercontent = nil
+
+    -- Play the leave transition, then destroy the window. A panel that is not
+    -- visible (a paste flow already hid it) and a panel whose script call fails
+    -- are torn down immediately, so dismissal can never hang on a timer.
+    local animate = view ~= nil and view:isVisible()
+    if animate then
+        local ok, err = pcall(function()
+            view:evaluateJavaScript("if(window.playPanelLeave)window.playPanelLeave();")
+        end)
+        if not ok then
+            animate = false
+            logger.w("Clipboard panel leave animation failed; closing without animation: " .. tostring(err))
+        end
+    end
+    if not animate then
+        finishClipboardPanelClose(view)
+        return
+    end
+    panelCloseAnimationView = view
+    panelCloseAnimationTimer = hs.timer.doAfter(PANEL_LEAVE_ANIMATION_MS / 1000, function()
+        finishClipboardPanelClose(view)
+    end)
+end
+
+-- A panel reopened while its predecessor was animating closed must not have its
+-- fresh session cleared by the deferred teardown: the opening panel owns the
+-- session state now, so only the stale window is destroyed.
+local function cancelPendingPanelClose()
+    if not panelCloseAnimationTimer then return end
+    panelCloseAnimationTimer:stop()
+    panelCloseAnimationTimer = nil
+    local stale = panelCloseAnimationView
+    panelCloseAnimationView = nil
+    panelClosePending = false
+    if stale then pcall(function() stale:delete() end) end
+    collectgarbage("collect")
+end
+
 local function configureClipboardWebview(view)
     -- Use a transparent, borderless native window so the rounded HTML panel
     -- can reveal transparent corners instead of the WebView's square backing.
@@ -3740,6 +3908,7 @@ local function configureClipboardWebview(view)
                 clipboard_usercontent = nil
                 clipboardPanelHTMLReady = false
                 clipboard_search=""; clipboard_type_filter="all"; clipboardDateFilter=nil; lastSearchRestoreDateKey=nil; browseMode="all"; browseCursor=0; typeBrowseCursor={text=nil,image=nil}; menuData={}
+                resetRenderedCardRegistry()
                 dateHistoryCache={}; allHistoryCache={}; allHistoryCacheLoaded=0; allHistoryTotalCount=nil; searchResultsCache=nil; invalidatePinnedIndex(); clipboardSessionOpen=false
                 panelCacheKey=nil; panelCacheHTML=nil; visibleIndices={}; selectedVisibleIndex=1
                 for _,list in ipairs({text_clipboard_history,img_clipboard_history}) do
@@ -3985,39 +4154,64 @@ function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
     end)
 end
 
+-- Resolve selected card uids to their entries. The WebView keeps the selection
+-- across scope and type filters, so a uid can name a card that is no longer in
+-- the collection being shown: it was rendered on another date filter, on a page
+-- Load-more moved past, in the Pin scope, or in the newest-32 All window. Every
+-- card the panel rendered this session is in the rendered-card registry, so
+-- resolution is not limited to the current page. Candidates are scanned in the
+-- existing order (All cache, pinned index, current page) with the registry last,
+-- so a live cache/pinned copy still wins over an older rendered entry.
+local function resolveSelectedEntries(requested)
+    local wanted, seen, resolvedByUid = {}, {}, {}
+    for _, uid in ipairs(requested) do
+        if type(uid) == "string" and uid ~= "" then wanted[uid] = true end
+    end
+    local expected = 0
+    for _ in pairs(wanted) do expected = expected + 1 end
+    local candidates = {}
+    for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
+    for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
+    for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
+    for _, uid in ipairs(renderedCardRegistryOrder) do
+        local entry = renderedCardRegistry[uid]
+        if entry ~= nil then candidates[#candidates + 1] = entry end
+    end
+    for _, entry in ipairs(candidates) do
+        local uid = cardUid(entry)
+        if wanted[uid] and not seen[uid] then resolvedByUid[uid] = entry; seen[uid] = true end
+    end
+    return resolvedByUid, expected
+end
+
+local function sortEntriesChronologically(entries)
+    table.sort(entries, function(left, right)
+        local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
+        if lt ~= rt then return lt < rt end
+        return cardUid(left) < cardUid(right)
+    end)
+    return entries
+end
+
 pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
         hs.alert.show("No clipboard-history items are selected."); return false
     end
-    local wanted, resolvedByUid, seen = {}, {}, {}
-    for _, uid in ipairs(requested) do if type(uid) == "string" and uid ~= "" then wanted[uid] = true end end
-    local candidates = {}
-    for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
-    for _, entry in ipairs(candidates) do
-        local uid = cardUid(entry)
-        if wanted[uid] and not seen[uid] then resolvedByUid[uid] = entry; seen[uid] = true end
-    end
-    local expected = 0
-    for _ in pairs(wanted) do expected = expected + 1 end
+    local resolvedByUid, expected = resolveSelectedEntries(requested)
     local entries = {}
     if orderMode == "selection" then
+        local picked = {}
         for _, uid in ipairs(requested) do
             local entry = resolvedByUid[uid]
-            if entry then entries[#entries + 1] = entry end
+            if entry and not picked[uid] then entries[#entries + 1] = entry; picked[uid] = true end
         end
     else
-        for uid in pairs(wanted) do
+        for uid in pairs(resolvedByUid) do
             local entry = resolvedByUid[uid]
             if entry then entries[#entries + 1] = entry end
         end
-        table.sort(entries, function(left, right)
-            local lt, rt = tonumber(left.rowTs or left.ts) or 0, tonumber(right.rowTs or right.ts) or 0
-            if lt ~= rt then return lt < rt end
-            return cardUid(left) < cardUid(right)
-        end)
+        sortEntriesChronologically(entries)
     end
     if expected == 0 or #entries ~= expected then
         hs.alert.show("Some selected clipboard items are no longer available in this session.")
@@ -4050,6 +4244,10 @@ end
 
 -- Function to show clipboard history
 function showClipboardHistory()
+    -- Finish (and neutralize) a close animation that is still running, so the
+    -- stale window is destroyed and the deferred teardown cannot clear the
+    -- session that is opening now.
+    cancelPendingPanelClose()
     if imageProcessingCount > 0 then
         hs.timer.doAfter(0.1, function()
             if imageProcessingCount == 0 then
@@ -4091,6 +4289,9 @@ function showClipboardHistory()
         dateHistoryCache = {}
         selectedClipboardUids = {}
         selectedClipboardOrder = {}
+        -- The registry only has to outlive a filter change inside one open
+        -- panel, not a closed-and-reopened panel with a cleared selection.
+        resetRenderedCardRegistry()
     end
     clipboardSessionOpen = true
     clipboard_search = ""
@@ -4114,8 +4315,20 @@ function showClipboardHistory()
     local function showAfterHTMLLoaded()
         if clipboard_webview ~= view then return end
         positionPanelOnCurrentScreen()
+        -- Put the shell in its pre-transition state before the window appears,
+        -- then arm the transition on the next tick: the first painted frame is
+        -- the enter state, so the panel fades and settles in.
+        pcall(function()
+            view:evaluateJavaScript("if(window.beginPanelEnter)window.beginPanelEnter();")
+        end)
         view:show()
         view:evaluateJavaScript("document.body.classList.add('keyboard-mode');")
+        hs.timer.doAfter(PANEL_ENTER_SETTLE_MS, function()
+            if clipboard_webview ~= view then return end
+            pcall(function()
+                view:evaluateJavaScript("if(window.settlePanelEnter)window.settlePanelEnter();")
+            end)
+        end)
         hs.timer.doAfter(0.05, function()
             if clipboard_webview ~= view then return end
             local nativeWindow = view:hswindow()
@@ -4252,34 +4465,35 @@ pkg.__test = {
     selectedClipboardUids = selectedClipboardUids,
     selectedClipboardOrder = selectedClipboardOrder,
     pasteSelectedClipboardItems = pasteSelectedClipboardItems,
-    activePasteEntries = activePasteEntries,
+    -- A getter, not a snapshot: the paste executor reassigns the local table on
+    -- every run, so a value captured at module load would stay nil forever.
+    activePasteEntries = function() return activePasteEntries end,
     resolveSelectedClipboardEntries = function(serializedUids)
         local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
         if not ok or type(requested) ~= "table" then return nil end
-        local wanted, entries, seen = {}, {}, {}
-        for _, uid in ipairs(requested) do
-            if type(uid) == "string" and uid ~= "" then wanted[uid] = true end
-        end
-        local candidates = {}
-        for _, entry in ipairs(allHistoryCache or {}) do candidates[#candidates + 1] = entry end
-        for _, entry in ipairs(loadPinnedEntries()) do candidates[#candidates + 1] = entry end
-        for _, entry in ipairs(menuData or {}) do candidates[#candidates + 1] = entry end
-        for _, entry in ipairs(candidates) do
-            local uid = cardUid(entry)
-            if wanted[uid] and not seen[uid] then entries[#entries + 1] = entry; seen[uid] = true end
-        end
-        local expected = 0
-        for _ in pairs(wanted) do expected = expected + 1 end
+        local resolvedByUid, expected = resolveSelectedEntries(requested)
+        local entries = {}
+        for _, entry in pairs(resolvedByUid) do entries[#entries + 1] = entry end
         if expected == 0 or #entries ~= expected then return nil end
-        table.sort(entries, function(left, right)
-            local lt = tonumber(left.rowTs or left.ts) or 0
-            local rt = tonumber(right.rowTs or right.ts) or 0
-            if lt ~= rt then return lt < rt end
-            return cardUid(left) < cardUid(right)
-        end)
-        return entries
+        return sortEntriesChronologically(entries)
     end,
+    registerRenderedCard = registerRenderedCard,
+    resetRenderedCardRegistry = function() resetRenderedCardRegistry() end,
+    renderedCardRegistry = function() return renderedCardRegistry end,
+    renderedCardRegistrySize = function() return #renderedCardRegistryOrder end,
+    RENDERED_CARD_REGISTRY_LIMIT = RENDERED_CARD_REGISTRY_LIMIT,
     openAllPanelPage = openAllPanelPage,
+    -- Panel lifecycle seams for the harness: the timers are recorded (not run)
+    -- by hs_stub, so a test can inspect the dismissal request and then run the
+    -- deferred teardown callback explicitly.
+    showClipboardHistory = function() return showClipboardHistory() end,
+    closeClipboardPanel = function() return closeClipboardPanel() end,
+    panelClosePending = function() return panelClosePending end,
+    panelCloseAnimationPending = function() return panelCloseAnimationTimer ~= nil end,
+    panelWebView = function() return clipboard_webview end,
+    panelCloseAnimationView = function() return panelCloseAnimationView end,
+    PANEL_LEAVE_ANIMATION_MS = PANEL_LEAVE_ANIMATION_MS,
+    PANEL_ENTER_SETTLE_MS = PANEL_ENTER_SETTLE_MS,
     extendAllStream = extendAllStream,
     resetAllStreamState = resetAllStreamState,
     pasteHistoryEntryPath = pasteHistoryEntryPath,

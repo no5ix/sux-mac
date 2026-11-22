@@ -469,6 +469,7 @@ local webview = {}
 function webview.new(frame, options, usercontent)
     local view = { createdFrame = frame, options = options, usercontent = usercontent }
     function view:windowStyle(style) self.windowStyleValue = style; return self end
+    function view:transparent(transparent) self.transparentValue = transparent; return self end
     function view:shadow(shadow) self.shadowValue = shadow; return self end
     function view:allowTextEntry(allow) self.textEntry = allow; return self end
     function view:closeOnEscape(close) self.closeOnEscapeValue = close; return self end

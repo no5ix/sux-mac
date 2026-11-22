@@ -34,6 +34,7 @@ const menuModel = block("/* BEGIN CONTEXT MENU MODEL", "/* END CONTEXT MENU MODE
 const multiSelectionBinding = source.slice(source.indexOf('function syncClipboardMultiSelection()'), source.indexOf("const contextMenu = document.createElement('div');"));
 const navModel = block("/* BEGIN KEYBOARD NAVIGATION MODEL", "/* END KEYBOARD NAVIGATION MODEL */");
 const navBinding = block("/* BEGIN KEYBOARD NAVIGATION BINDING", "/* END KEYBOARD NAVIGATION BINDING */");
+const panelAnimation = block("/* BEGIN PANEL ANIMATION", "/* END PANEL ANIMATION */");
 
 // The panel script as the browser sees it, for the structural checks.
 const scriptStart = source.indexOf("<script>");
@@ -176,6 +177,19 @@ function loadMenuModel() {
   api.selectedClipboardUids = selectedClipboardUids;
   api.setRows = (cards) => { state.cards = cards; };
   return api;
+}
+
+// The tiny runner must be declared before the first scenario: `results` is a
+// const, so a framework section placed after the scenarios is in its temporal
+// dead zone when they run, and every scenario dies with a ReferenceError.
+const results = [];
+function test(name, body) {
+  try {
+    body();
+    results.push(["PASS", name]);
+  } catch (error) {
+    results.push(["FAIL", `${name} :: ${error && error.message ? error.message : error}`]);
+  }
 }
 
 
@@ -561,16 +575,6 @@ test("context menu separators have unique slots and independent visibility", () 
 });
 
 // ------------------------------------------------------------------- tests --
-
-const results = [];
-function test(name, body) {
-  try {
-    body();
-    results.push(["PASS", name]);
-  } catch (error) {
-    results.push(["FAIL", `${name} :: ${error && error.message ? error.message : error}`]);
-  }
-}
 
 const menu = loadMenuModel();
 const actions = (m) => m.querySelectorAll("button").map((b) => b.dataset.contextAction);
@@ -1106,6 +1110,70 @@ test("navigation: nav model uses DOM order only, never grid geometry", () => {
   assert.ok(!/clientWidth|gridTemplate|columns/.test(navModel),
     "the navigation model must not derive order from grid geometry");
   assert.ok(/uids\[next\]/.test(navModel) && /uids\[remembered\]/.test(navModel));
+});
+
+test("animation: the shell classes follow the Lua-driven open/close sequence", () => {
+  const shell = new El("div");
+  const document = { getElementById: (id) => (id === "clipboard-panel-shell" ? shell : null) };
+  // The exported helpers are attached to `window` in the panel, exactly as the
+  // Lua open/close path calls them.
+  const api = new Function("document", "window", `${panelAnimation}
+    return { beginPanelEnter, settlePanelEnter, playPanelLeave, PANEL_ENTER_MS, PANEL_LEAVE_MS };`)(document, {});
+
+  // Open: the window is shown on the pre-transition state, then Lua arms it.
+  assert.equal(api.beginPanelEnter(), api.PANEL_ENTER_MS);
+  assert.ok(shell.classList.contains("panel-enter"), "the shell enters in the pre-transition state");
+  assert.ok(!shell.classList.contains("panel-enter-active"), "the transition is not armed yet");
+
+  assert.ok(api.settlePanelEnter() > 0, "arming the transition reports its duration");
+  assert.ok(shell.classList.contains("panel-enter-active"), "the transition is armed while the enter state holds");
+
+  // Close: the enter state is dropped and the leave state is applied, so Lua
+  // can destroy the window when the reported duration elapses.
+  assert.equal(api.playPanelLeave(), api.PANEL_LEAVE_MS);
+  assert.ok(shell.classList.contains("panel-leave"), "the leave transition is applied");
+  assert.ok(!shell.classList.contains("panel-enter"), "the leave state replaces the enter state");
+  assert.ok(!shell.classList.contains("panel-enter-active"), "the armed enter state is cleared");
+
+  // Re-opening during the leave animation resets the shell.
+  api.beginPanelEnter();
+  assert.ok(!shell.classList.contains("panel-leave"), "the leave state is cleared on reopen");
+  assert.ok(shell.classList.contains("panel-enter"), "the reopened shell starts in the enter state");
+
+  // A missing shell reports duration 0, so Lua tears the panel down at once.
+  const empty = new Function("document", "window", `${panelAnimation}
+    return { beginPanelEnter, settlePanelEnter, playPanelLeave };`)({ getElementById: () => null }, {});
+  assert.equal(empty.beginPanelEnter(), 0, "no shell: no enter animation");
+  assert.equal(empty.settlePanelEnter(), 0, "no shell: no transition to arm");
+  assert.equal(empty.playPanelLeave(), 0, "no shell: no leave animation");
+});
+
+test("animation: the CSS states and the Lua/JS durations agree", () => {
+  const lua = (name) => Number(source.match(new RegExp(`local ${name} = (\\d+)`))[1]);
+  const js = (name) => Number(source.match(new RegExp(`const ${name} = (\\d+);`))[1]);
+  assert.ok(js("PANEL_ENTER_MS") > 0, "the enter animation has a duration");
+  assert.ok(js("PANEL_LEAVE_MS") > 0, "the leave animation has a duration");
+  assert.equal(lua("PANEL_LEAVE_ANIMATION_MS"), js("PANEL_LEAVE_MS"),
+    "Lua tears the window down exactly when the leave transition ends");
+
+  // The leave transition must finish inside the window Lua allows; the enter
+  // transition must be cleaned up no earlier than its longest property.
+  const leave = source.match(/#clipboard-panel-shell\.panel-leave \{ transition:([^;]+);/);
+  assert.ok(leave, "the leave transition is styled on the panel shell");
+  const leaveTimes = [...leave[1].matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+  assert.ok(leaveTimes.length >= 2, "the leave transition animates opacity and transform");
+  assert.ok(Math.max(...leaveTimes) <= js("PANEL_LEAVE_MS"),
+    "the leave transition finishes before Lua destroys the window");
+
+  const enter = source.match(/#clipboard-panel-shell\.panel-enter-active \{ transition:([^;]+);/);
+  assert.ok(enter, "the armed enter transition is styled on the panel shell");
+  const enterTimes = [...enter[1].matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+  assert.ok(enterTimes.length >= 2, "the enter transition animates opacity and transform");
+  assert.ok(Math.max(...enterTimes) <= js("PANEL_ENTER_MS"),
+    "the enter state is removed only after the transition has finished");
+
+  assert.ok(source.includes("@media (prefers-reduced-motion: reduce)"),
+    "reduced-motion clients get no panel animation");
 });
 
 // ------------------------------------------------------------------ report --
