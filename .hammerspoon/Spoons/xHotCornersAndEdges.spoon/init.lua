@@ -585,7 +585,7 @@ function handleGestureAndMouseClickOnEdge(event, gestureOrMouseClick)
 					local app = hs.application.frontmostApplication()
 						-- print("app:name()=" .. app:name())
 				    -- if EDITOR_BROWSER_APPS[app:name()] then
-						hs.eventtap.keyStroke({"cmd"}, "w")
+						hs.eventtap.keyStroke({"cmd", "shift"}, "w")
 					-- else
 					-- 	local win = hs.window.focusedWindow()
 					-- 	if win then
