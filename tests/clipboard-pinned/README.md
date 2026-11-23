@@ -75,6 +75,7 @@ assertion, and do not add a fixture that writes outside `environment.root` /
 | empty | empty collection, empty pinned view, and refused pin/unpin edge cases |
 | privacy | no clipboard payload text appears in the log output |
 | cross-filter paste | a selection that spans two date filters - the first card picked outside the newest-32 All cache, the second after `menuData` was replaced by the previous day's page - resolves through `resolveSelectedEntries` and reaches the paste queue; the same selection is rejected once the rendered-card registry is reset (the pre-fix candidate set), the registry stays bounded, and the oldest card is evicted first |
+| range paste | `Paste from Current to First` (text and image-path) covers the cards the panel is showing: the clicked card is queued first, then every visible card above it, resolved by uid from the visible-list payload; on a date scope with the Images filter the clicked image's `data-index` is a row in the whole day and the pre-fix `menuData[startRow..1]` slice is asserted to sweep in a hidden text record; a clicked card outside the visible list is refused with an empty queue, path mode never picks up a text record, and with no type filter the range keeps its newest-first meaning over the whole collection |
 | panel animation | the open path puts the shell in its pre-transition state, shows the window, then arms the transition on the `PANEL_ENTER_SETTLE_MS` tick; dismissal plays `playPanelLeave`, releases `clipboard_webview` at once, keeps the window alive while the animation is pending, and destroys it in the deferred teardown after `PANEL_LEAVE_ANIMATION_MS`; a hidden panel is destroyed immediately with no timer, and a reopen during the leave animation cancels the teardown, destroys only the stale window, and keeps its own records |
 
 ## Panel JavaScript checks
@@ -92,6 +93,13 @@ exercises the shipped code rather than a copy. It also reads the whole panel
   findable after its `data-context-action` is mutated (the shipped leak), the
   click uses the card that opened the menu, a rebuilt list is resolved by
   `data-uid` and never by a stale index, and a vanished target is ignored.
+- Range paste: `Paste from Current to First` and its image-path variant send the
+  visible card uids in DOM order (`visibleRangeUids`) plus the clicked
+  `data-uid`, the sparse collection indexes of those cards are shown to be
+  larger than their visible positions, and neither action may fall back to a
+  bare `rowIndex` payload. The Lua source is checked to resolve the range by
+  uid, to start at the clicked card and walk upward, and to share one launch
+  sequence (with `pathMode`) with the multi-selection paste.
 - Navigation: the full Tab / Shift+Tab sequence, Tab from search returning to
   the remembered card, 12 cards walked in DOM order for grid widths of 1 to 5
   columns, only the search field and cards receiving focus, stable-identity

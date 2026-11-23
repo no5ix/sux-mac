@@ -1131,6 +1131,107 @@ test("a selection that spans two date filters stays pasteable", function()
         "the oldest registered card is evicted first")
 end)
 
+test("Paste from Current to First covers the visible cards, not the collection", function()
+    local environment = new_environment("range-paste-visible-list")
+    -- One day, types interleaved on purpose: the Images filter shows three image
+    -- cards, while menuData - the collection a card's data-index addresses -
+    -- also holds every text record of that day, so a row index counts cards the
+    -- user cannot see.
+    local texts = {}
+    for index = 1, 6 do texts[index] = "range note " .. index end
+    environment.seed_text_day(DATE, texts, BASE_TS)          -- ts = BASE_TS + (i-1)*60
+    environment.seed_image_day(DATE, "range-newest", BASE_TS + 390)
+    environment.seed_image_day(DATE, "range-middle", BASE_TS + 270)
+    environment.seed_image_day(DATE, "range-second-visible", BASE_TS + 150)
+    environment.t.restorePersistentHistory()
+
+    -- The reported scenario: a date scope with the Images filter.
+    environment.t.handleMessage({
+        body = { action = "dateFilter", dateKey = DATE, kind = "image", query = "" },
+    })
+    local state = environment.t.panelState()
+    check_equal(state.dateFilter, DATE, "the date scope is active")
+    check_equal(state.kind, "image", "the Images filter is active")
+
+    -- The list the user sees, newest first: the day's image records. Their
+    -- data-index values are positions in the whole day, which is the mismatch.
+    local visibleUids, indexByUid = {}, {}
+    for menuIndex, entry in ipairs(state.menuData) do
+        if entry.type == "image" then
+            local uid = environment.t.cardUid(entry)
+            visibleUids[#visibleUids + 1] = uid
+            indexByUid[uid] = menuIndex
+        end
+    end
+    check_equal(#visibleUids, 3, "three image cards are visible on the Images filter")
+    local clickedUid = visibleUids[2]
+    local clickedMenuIndex = indexByUid[clickedUid]
+    check_equal(clickedMenuIndex, 3,
+        "the second visible card is the third collection row, because a hidden text record sits above it")
+    -- Documents the original bug: the action pasted menuData[startRow..1], so
+    -- this same click swept an unrelated text record into an image-only range.
+    local rowSlice = {}
+    for index = clickedMenuIndex, 1, -1 do
+        rowSlice[#rowSlice + 1] = environment.t.panelState().menuData[index].type
+    end
+    check(table.concat(rowSlice, ",") == "image,text,image",
+        "the row-index slice is wider than the visible range")
+
+    local function queuedUids()
+        local uids = {}
+        for _, entry in ipairs(environment.t.activePasteEntries() or {}) do
+            uids[#uids + 1] = environment.t.cardUid(entry)
+        end
+        return uids
+    end
+
+    -- The clicked card must be part of the range it names.
+    check_equal(environment.t.pasteRangeFromCardToFirst(
+        "not-a-visible-card", hs.json.encode(visibleUids), false), false,
+        "a clicked card outside the visible list is refused")
+    check(environment.t.activePasteEntries() == nil, "a refused range paste queues nothing")
+
+    environment.t.handleMessage({
+        body = { action = "pasteAllFrom", index = clickedMenuIndex, uid = clickedUid,
+                 query = hs.json.encode(visibleUids) },
+    })
+    local queued = queuedUids()
+    check_equal(#queued, 2, "the range is the clicked card plus the visible cards above it")
+    check_equal(queued[1], clickedUid, "the clicked card is pasted first")
+    check_equal(queued[2], visibleUids[1], "then the newest visible card")
+
+    -- Image-path mode walks the same range and never picks up a hidden text card.
+    environment.t.handleMessage({
+        body = { action = "pasteAllFromPaths", index = clickedMenuIndex, uid = clickedUid,
+                 query = hs.json.encode(visibleUids) },
+    })
+    local pathQueued = {}
+    for _, entry in ipairs(environment.t.activePasteEntries() or {}) do
+        check_equal(entry.type, "image", "the image-path range holds image cards only")
+        pathQueued[#pathQueued + 1] = environment.t.cardUid(entry)
+    end
+    check_equal(#pathQueued, 2, "the image-path range is the same visible range")
+    check_equal(pathQueued[1], clickedUid, "path mode also starts at the clicked card")
+
+    -- With no type filter the visible list is the collection, so the unfiltered
+    -- menu item keeps its newest-first meaning over the whole day.
+    environment.t.handleMessage({
+        body = { action = "dateFilter", dateKey = DATE, kind = "all", query = "" },
+    })
+    local allUids = {}
+    for _, entry in ipairs(environment.t.panelState().menuData) do
+        allUids[#allUids + 1] = environment.t.cardUid(entry)
+    end
+    check_equal(#allUids, 9, "the unfiltered day is six text and three image records")
+    environment.t.handleMessage({
+        body = { action = "pasteAllFrom", index = 3, uid = allUids[3], query = hs.json.encode(allUids) },
+    })
+    local mixed = queuedUids()
+    check_equal(#mixed, 3, "unfiltered, the range covers the three newest cards")
+    check_equal(mixed[1], allUids[3], "starting with the clicked card")
+    check_equal(mixed[3], allUids[1], "ending with the newest record")
+end)
+
 test("the panel animates open and is destroyed only after the leave transition", function()
     local environment = new_environment("panel-animation")
     environment.seed_text_day(DATE, { "animated note one", "animated note two" }, BASE_TS)

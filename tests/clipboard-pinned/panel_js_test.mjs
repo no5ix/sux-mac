@@ -172,7 +172,7 @@ function loadMenuModel() {
   const selectedClipboardUids = new Set();
   const rows = () => state.cards;
   const api = new Function("document", "window", "rows", "selectedClipboardUids",
-    `${menuModel}\n${multiSelectionBinding}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, handleContextMenuClick, syncClipboardMultiSelection };`)(
+    `${menuModel}\n${multiSelectionBinding}\nreturn { CONTEXT_MENU_ITEMS, contextMenuSpec, buildContextMenu, applyContextMenuTarget, openContextMenu, findContextRow, visibleRangeUids, handleContextMenuClick, syncClipboardMultiSelection };`)(
     document, window, rows, selectedClipboardUids);
   api.selectedClipboardUids = selectedClipboardUids;
   api.setRows = (cards) => { state.cards = cards; };
@@ -462,31 +462,99 @@ test("image-path context actions dispatch Copy Path and preserve path mode in ba
     modelSource.includes("bridge('copyPath', rowIndex, '')"),
     "Copy Path must dispatch its own action to Lua");
   assert.ok(modelSource.includes("action === 'pasteAllPaths'") &&
-    modelSource.includes("bridge('pasteAllFromPaths', rowIndex, '')"),
-    "Paste from Current to First image variant must dispatch its range action");
+    modelSource.includes("pasteAllFromPaths' : 'pasteAllFrom'") &&
+    modelSource.includes("JSON.stringify(visibleRangeUids(items, target))") &&
+    modelSource.includes("target.dataset.uid || ''"),
+    "Paste from Current to First must dispatch the visible range and the clicked uid");
+  assert.ok(!modelSource.includes("bridge('pasteAllFrom', rowIndex, '')") &&
+    !modelSource.includes("bridge('pasteAllFromPaths', rowIndex, '')"),
+    "neither range action may send only a collection row index");
   assert.ok(source.includes('elseif body.action == "copyPath"') &&
     source.includes("copyOrPasteImagePathEntry(tonumber(body.index), false)"),
     "Lua must handle Copy Path and write the resolved path to the pasteboard");
 
   const engineStart = source.indexOf("local function pasteAllRowsStep");
-  const engineEnd = source.indexOf("\\nfunction pasteAllWithDelimiterRecursionVersion", engineStart);
+  const engineEnd = source.indexOf("\nfunction pasteAllWithDelimiterRecursionVersion", engineStart);
   const engine = source.slice(engineStart, engineEnd);
+  assert.ok(engineStart > 0 && engineEnd > engineStart, "the paste engine is one named function");
   assert.ok(engine.includes("local function pasteAllRowsStep(position, direction, pathMode)"));
-  assert.ok(!/pasteAllRowsStep\\(position \\+ direction, direction\\)/.test(engine),
+  assert.ok(!/pasteAllRowsStep\(position \+ direction, direction\)/.test(engine),
     "no recursive batch step may drop pathMode");
   assert.ok(engine.includes("pasteAllRowsStep(position + direction, direction, pathMode)"),
     "every next-item callback keeps pathMode");
-  const recursiveSteps = engine.match(/pasteAllRowsStep\\(position \\+ direction, direction, pathMode\\)/g) || [];
+  const recursiveSteps = engine.match(/pasteAllRowsStep\(position \+ direction, direction, pathMode\)/g) || [];
   assert.ok(recursiveSteps.length >= 4,
     "pathMode must flow through each retry and delayed next-item callback");
 
-  const rangeStart = source.indexOf("function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)");
-  const rangeEnd = source.indexOf("\\npasteSelectedClipboardItems = function", rangeStart);
+  const rangeStart = source.indexOf("pasteRangeFromCardToFirst = function(startUid, serializedUids, pathMode)");
+  const rangeEnd = source.indexOf("\n-- Function to show clipboard history", rangeStart);
   const range = source.slice(rangeStart, rangeEnd);
-  assert.ok(range.includes("pasteAllRowsStep(1, 1, pathMode == true)"),
+  assert.ok(rangeStart > 0 && rangeEnd > rangeStart, "the range paste is one named Lua entry point");
+  assert.ok(range.includes("resolveSelectedEntries(visible)"),
+    "the range is resolved by card uid, not by a position in the collection");
+  assert.ok(range.includes("for index = position, 1, -1 do"),
+    "the clicked card is pasted first, then every visible card above it");
+  assert.ok(range.includes("return startSequentialPaste(entries, pathMode)"),
+    "the range paste runs the shared launch in the requested mode");
+  const launcherStart = source.indexOf("local function startSequentialPaste(entries, pathMode)");
+  const launcherEnd = source.indexOf("\npasteSelectedClipboardItems = function", launcherStart);
+  const launcher = source.slice(launcherStart, launcherEnd);
+  assert.ok(launcherStart > 0 && launcherEnd > launcherStart,
+    "the range and the selection paste share one launch sequence");
+  assert.ok(launcher.includes("pasteAllRowsStep(1, 1, pathMode == true)"),
     "range image-path paste must start the engine in path mode");
+  assert.ok(source.includes("pasteRangeFromCardToFirst(body.uid, body.query, true)"),
+    "the image-path range action is wired to the Lua handler");
+  assert.ok(source.includes("pasteRangeFromCardToFirst(body.uid, body.query, false)"),
+    "the text range action is wired to the Lua handler");
   assert.ok(source.includes('pasteSelectedClipboardItems(body.query, "chronological", true)'));
   assert.ok(source.includes('pasteSelectedClipboardItems(body.query, "selection", true)'));
+});
+
+
+test("range paste: the payload is the visible list newest-first, plus the clicked uid", () => {
+  const model = loadMenuModel();
+  const m = model.buildContextMenu(new El("div"));
+  // The collection indexes are sparse: the Images filter hides every text record
+  // between these three image cards, so a row index says nothing about which
+  // cards the user is looking at.
+  const items = [
+    card(3, "image-newest", false, "image"),
+    card(9, "image-clicked", false, "image"),
+    card(14, "image-oldest", false, "image"),
+  ];
+  const calls = [];
+  const bridge = (...args) => calls.push(args);
+  const state = { rowIndex: -1, uid: null };
+  model.openContextMenu(m, state, items[1], { x: 5, y: 5 });
+  model.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pasteAll"]') }, bridge, () => {}, items);
+  assert.equal(calls.length, 1, "one click sends one action");
+  const [action, rowIndex, payload, kind, dateKey, uid] = calls[0];
+  assert.equal(action, "pasteAllFrom");
+  assert.equal(uid, "image-clicked", "the clicked card is named by its uid");
+  assert.deepEqual(JSON.parse(payload), ["image-newest", "image-clicked", "image-oldest"],
+    "the payload is every visible card in DOM order");
+  assert.ok(Number(rowIndex) > 2,
+    "the row index is a collection position - exactly why it is not the range");
+
+  const pathCalls = [];
+  model.openContextMenu(m, state, items[1], { x: 5, y: 5 });
+  model.handleContextMenuClick(m, state,
+    { target: m.querySelector('[data-context-slot="pasteAllPaths"]') },
+    (...args) => pathCalls.push(args), () => {}, items);
+  assert.equal(pathCalls[0][0], "pasteAllFromPaths", "the image variant keeps its own path-mode action");
+  assert.deepEqual(JSON.parse(pathCalls[0][2]), JSON.parse(payload),
+    "the image variant sends the same visible range");
+  assert.equal(pathCalls[0][5], "image-clicked", "the image variant names the same clicked card");
+
+  // A card that left the list is still the range's start, so Lua gets an
+  // explicit uid to refuse instead of an unrelated row.
+  assert.deepEqual(model.visibleRangeUids([items[1], items[2]], items[0]),
+    ["image-newest", "image-clicked", "image-oldest"], "a target outside the list is prepended");
+  assert.deepEqual(model.visibleRangeUids([], null), [], "no cards, no range");
+  assert.deepEqual(model.visibleRangeUids([items[0], items[0]], items[0]), ["image-newest"],
+    "a card is never listed twice");
 });
 
 

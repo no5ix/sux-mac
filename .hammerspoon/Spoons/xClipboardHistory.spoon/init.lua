@@ -2960,6 +2960,22 @@ function findContextRow(state, items) {
   if (state.uid) return items.find(node => node.dataset.uid === state.uid) || null;
   return items.find(node => Number(node.dataset.index || 0) === state.rowIndex) || null;
 }
+/* The range that "Paste from Current to First" covers: the cards on screen, in
+   DOM order (newest first), i.e. the active scope, type filter, and search
+   applied. A menuData row index is not that list - in a date scope with the
+   Images filter, menuData also holds every hidden text record of the day, so a
+   row index counts cards the user cannot see. */
+function visibleRangeUids(items, target) {
+  const uids = [];
+  const seen = new Set();
+  (Array.isArray(items) ? items : []).forEach(node => {
+    const uid = node && node.dataset ? node.dataset.uid : '';
+    if (uid && !seen.has(uid)) { seen.add(uid); uids.push(uid); }
+  });
+  const targetUid = target && target.dataset ? target.dataset.uid : '';
+  if (targetUid && !seen.has(targetUid)) uids.unshift(targetUid);
+  return uids;
+}
 function handleContextMenuClick(menu, state, event, bridge, openManualPreview, items, selectedUids) {
   const button = event.target.closest ? event.target.closest('button[data-context-slot]') : null;
   if (!button) return false;
@@ -2979,8 +2995,12 @@ function handleContextMenuClick(menu, state, event, bridge, openManualPreview, i
   const target = findContextRow(state, items);
   if (!target) return true;
   const rowIndex = Number(target.dataset.index || 0);
-  if (action === 'pasteAll') bridge('pasteAllFrom', rowIndex, '');
-  else if (action === 'pasteAllPaths') bridge('pasteAllFromPaths', rowIndex, '');
+  if (action === 'pasteAll' || action === 'pasteAllPaths') {
+    /* The range travels over the visible cards and names the clicked one by uid,
+       so the paste is the list the user sees, not its row in the collection. */
+    bridge(action === 'pasteAllPaths' ? 'pasteAllFromPaths' : 'pasteAllFrom',
+      rowIndex, JSON.stringify(visibleRangeUids(items, target)), '', '', target.dataset.uid || '');
+  }
   else if (action === 'select' || action === 'deselect') {
     const uid = target.dataset.uid || '';
     if (uid) {
@@ -3448,6 +3468,7 @@ end
 
 local closeClipboardPanel
 local pasteSelectedClipboardItems
+local pasteRangeFromCardToFirst
 
 function handleClipboardPanelMessage(message)
     local body = message and message.body
@@ -3492,7 +3513,7 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "pasteSelectedOrderPaths" then
         pasteSelectedClipboardItems(body.query, "selection", true)
     elseif body.action == "pasteAllFromPaths" then
-        pasteSomeWithDelimiterFromStartRow(tonumber(body.index), true)
+        pasteRangeFromCardToFirst(body.uid, body.query, true)
     elseif body.action == "copyPath" then
         copyOrPasteImagePathEntry(tonumber(body.index), false)
     elseif body.action == "pinScope" then
@@ -3596,7 +3617,7 @@ function handleClipboardPanelMessage(message)
     elseif body.action == "pastePath" then
         pasteHistoryEntryPath(tonumber(body.index))
     elseif body.action == "pasteAllFrom" then
-        pasteSomeWithDelimiterFromStartRow(tonumber(body.index))
+        pasteRangeFromCardToFirst(body.uid, body.query, false)
     elseif body.action == "pin" or body.action == "unpin" then
         local index=tonumber(body.index); local choice=index and menuData[index]
         local ok=choice and (body.action=="pin" and pinClipboardEntry(choice) or body.action=="unpin" and unpinClipboardEntry(choice))
@@ -4062,7 +4083,11 @@ local function finishPasteAll()
     selectedClipboardOrder = {}
     if clipboard_webview then
         clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
-        clipboard_webview:html(clipboardPanelHTML())
+        -- Return to the list the paste came from. Rebuilding the whole document
+        -- (clipboardPanelHTML) rewrites the header from scratch, so a paste that
+        -- started on Today + Images left the panel on the unfiltered All
+        -- collection, which reads like the paste covered all of history.
+        updateClipboardPanel(clipboard_search, clipboard_type_filter, 0, false)
     end
     pasteboard_watcher:start()
     previousApplication = nil
@@ -4124,36 +4149,6 @@ function pasteAllWithDelimiterRecursionVersion(startRow)
     pasteAllRowsStep(startRow, -1)
 end
 
-function pasteSomeWithDelimiterFromStartRow(startRow, pathMode)
-    if type(startRow) ~= "number" or startRow < 1 or not menuData or #menuData == 0 then
-        hs.alert.show("No clipboard-history rows to paste.")
-        return
-    end
-    -- menuData is newest-first. Collecting startRow down to index 1 puts the
-    -- clicked row first, followed by progressively newer rows. Walk forward.
-    activePasteEntries = {}
-    for index = startRow, 1, -1 do
-        if menuData[index] then activePasteEntries[#activePasteEntries + 1] = menuData[index] end
-    end
-    if pathMode then
-        for _, entry in ipairs(activePasteEntries) do
-            local text, problem = clipboardEntryTextForPathPaste(entry)
-            if not text then
-                activePasteEntries = nil
-                hs.alert.show(problem or "Unable to resolve a clipboard item")
-                return
-            end
-        end
-    end
-    hs.alert.show("Please wait for the Paste task to finish.")
-    pasteboard_watcher:stop()
-    if clipboard_webview then clipboard_webview:hide() end
-    hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
-    end)
-end
-
 -- Resolve selected card uids to their entries. The WebView keeps the selection
 -- across scope and type filters, so a uid can name a card that is no longer in
 -- the collection being shown: it was rendered on another date filter, on a page
@@ -4193,6 +4188,40 @@ local function sortEntriesChronologically(entries)
     return entries
 end
 
+-- Shared launch sequence for every sequential paste (a range from a card to the
+-- top of the visible list, or an explicit multi-selection): validate the queue,
+-- take ownership of the pasteboard, get the panel out of the way, then walk the
+-- entries forward through the engine.
+local function startSequentialPaste(entries, pathMode)
+    if type(entries) ~= "table" or #entries == 0 then
+        hs.alert.show("No clipboard-history items to paste.")
+        return false
+    end
+    if pathMode then
+        for _, entry in ipairs(entries) do
+            local text, problem = clipboardEntryTextForPathPaste(entry)
+            if not text then
+                hs.alert.show(problem or "Unable to resolve a clipboard item")
+                return false
+            end
+        end
+    end
+    activePasteEntries = entries
+    selectedClipboardUids = {}
+    selectedClipboardOrder = {}
+    pasteboard_watcher:stop()
+    if clipboard_webview then
+        clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
+        clipboard_webview:hide()
+    end
+    hs.alert.show("Please wait for the Paste task to finish.")
+    hs.timer.doAfter(0.15, function()
+        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
+        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
+    end)
+    return true
+end
+
 pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
     local ok, requested = pcall(json.decode, tostring(serializedUids or ""))
     if not ok or type(requested) ~= "table" or #requested == 0 then
@@ -4217,29 +4246,46 @@ pasteSelectedClipboardItems = function(serializedUids, orderMode, pathMode)
         hs.alert.show("Some selected clipboard items are no longer available in this session.")
         return false
     end
-    if pathMode then
-        for _, entry in ipairs(entries) do
-            local text, problem = clipboardEntryTextForPathPaste(entry)
-            if not text then
-                hs.alert.show(problem or "Unable to resolve a selected clipboard item")
-                return false
-            end
+    return startSequentialPaste(entries, pathMode)
+end
+
+-- "Paste from Current to First" is a range over the list the user is looking
+-- at, so the WebView sends the visible card uids in DOM order (the active scope,
+-- type filter, and search applied) plus the right-clicked uid. The row index
+-- this action used to send is a position in menuData, and menuData is the whole
+-- collection: on the Images filter of a date scope it also holds every hidden
+-- text record of that day, so the clicked image sat far below its on-screen
+-- position and the "range" swept in every card above it, pasting most of the day
+-- instead of the visible cards. The range is resolved by uid for the same reason
+-- the other context actions are: a row index is not an identity.
+pasteRangeFromCardToFirst = function(startUid, serializedUids, pathMode)
+    local ok, visible = pcall(json.decode, tostring(serializedUids or ""))
+    if not ok or type(visible) ~= "table" or #visible == 0 then
+        hs.alert.show("No clipboard-history cards are visible in this list.")
+        return false
+    end
+    local wanted = tostring(startUid or "")
+    local position
+    for index, uid in ipairs(visible) do
+        if tostring(uid) == wanted then position = index; break end
+    end
+    if not position then
+        hs.alert.show("The clicked clipboard item is no longer in this list.")
+        return false
+    end
+    -- The visible list is newest-first, so walking from the clicked card down to
+    -- index 1 puts it first, followed by progressively newer visible cards.
+    local resolvedByUid = resolveSelectedEntries(visible)
+    local entries = {}
+    for index = position, 1, -1 do
+        local entry = resolvedByUid[tostring(visible[index])]
+        if not entry then
+            hs.alert.show("Some clipboard items in this range are no longer available in this session.")
+            return false
         end
+        entries[#entries + 1] = entry
     end
-    activePasteEntries = entries
-    selectedClipboardUids = {}
-    selectedClipboardOrder = {}
-    pasteboard_watcher:stop()
-    if clipboard_webview then
-        clipboard_webview:evaluateJavaScript("if(window.resetMultiSelection)window.resetMultiSelection();")
-        clipboard_webview:hide()
-    end
-    hs.alert.show("Please wait for the Paste task to finish.")
-    hs.timer.doAfter(0.15, function()
-        if previousApplication and previousApplication:isRunning() then previousApplication:activate(true) end
-        hs.timer.doAfter(0.35, function() pasteAllRowsStep(1, 1, pathMode == true) end)
-    end)
-    return true
+    return startSequentialPaste(entries, pathMode)
 end
 
 -- Function to show clipboard history
@@ -4465,6 +4511,9 @@ pkg.__test = {
     selectedClipboardUids = selectedClipboardUids,
     selectedClipboardOrder = selectedClipboardOrder,
     pasteSelectedClipboardItems = pasteSelectedClipboardItems,
+    pasteRangeFromCardToFirst = function(startUid, serializedUids, pathMode)
+        return pasteRangeFromCardToFirst(startUid, serializedUids, pathMode)
+    end,
     -- A getter, not a snapshot: the paste executor reassigns the local table on
     -- every run, so a value captured at module load would stay nil forever.
     activePasteEntries = function() return activePasteEntries end,
